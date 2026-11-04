@@ -11,6 +11,16 @@ aplikację pod szybkość, małe zużycie RAM i CPU oraz płynne UI. Zachowanie 
 - `src/app.rs` ma ~9500 linii. Prawie wszystko to jeden `impl MailApp` (linie ~797–8377)
   plus `impl eframe::App` (~8566–9030) i wolne funkcje pomocnicze.
 
+## Stan (2026-11-04)
+
+- Etap 1 zrobiony (commity „Etap 1: …”): `src/app/` = `mod.rs` (rdzeń, 1487 linii) + `compose`,
+  `reading`, `list`, `sidebar`, `sync`, `actions`, `contacts_ui`, `settings`, `window`; tryby CLI
+  z `main()` w `src/cli.rs`; `net.rs` bez zmian (części splecione). Build release i clippy bez
+  nowych ostrzeżeń (bazowo 18 ostrzeżeń rustc). Ręczny test aplikacji i etapy 2–4: do zrobienia.
+- Aplikacja jest tylko pod Windows. Na Linuksie (NUC) sprawdzisz ją tylko przez
+  `cargo check|clippy --release --target x86_64-pc-windows-gnu`; uruchomienie, zrzuty
+  (`--screenshot` + `POCZTA_START=…`) i pomiary do `PERF.md` wymagają Windows.
+
 ## Etap 1: podział app.rs (najpierw, przed optymalizacją)
 
 Technika: zamień `app.rs` na `app/mod.rs` (albo `app.rs` + folder `app/`). Tematyczne części
