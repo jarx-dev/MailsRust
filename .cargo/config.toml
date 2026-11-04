@@ -1,0 +1,2 @@
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "dlltool=C:/Users/user/Documents/Craft Anything/mailclient/app/.setup/binutils/dlltool.exe"]

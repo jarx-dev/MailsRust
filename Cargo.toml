@@ -1,0 +1,65 @@
+[package]
+name = "mailclient"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mailclient"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "persistence", "clipboard", "links"] }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+egui_extras = { version = "0.37", default-features = false, features = ["image", "gif", "webp"] }
+scraper = "0.29"
+ego-tree = "0.11"
+redb = "4"
+ron = "0.12"
+unicode-normalization = "0.1"
+memmap2 = "0.9"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+# formatted emails drawn by the app itself: Blitz (Stylo styles, Taffy layout, Parley text) and
+# Vello on the processor; no browser window for reading mail
+blitz-dom = { version = "0.2.4", default-features = false, features = ["system_fonts", "svg", "woff-rust"] }
+blitz-html = { version = "0.2", default-features = false }
+blitz-paint = { version = "0.2", default-features = false }
+blitz-traits = { version = "0.2", default-features = false }
+anyrender = "0.6"
+anyrender_vello_cpu = "0.7"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Memory", "Win32_System_Com", "Win32_Media_Audio", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse"] }
+raw-window-handle = "0.6"
+wry = { version = "0.57", default-features = false }
+# (the same versions wry uses) a picture of the email view, shown under menus
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_UI_Shell", "Win32_System_Com"] }
+tray-icon = "0.21"
+imap = "2.4"
+native-tls = "0.2"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "native-tls", "hostname"] }
+mail-parser = "1"
+ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+
+[profile.release]
+opt-level = 2
+# a smaller program file starts faster (less for Windows to load and check)
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# the HTML engine's DOM, kept here only to let it use the same picture library as the window
+# (it asks for exactly image 0.25.6; any 0.25 works)
+[patch.crates-io]
+blitz-dom = { path = "vendor/blitz-dom" }

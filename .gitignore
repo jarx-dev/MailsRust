@@ -1,0 +1,5 @@
+/target/
+/shots/
+shots_err.txt
+/.setup/
+/.shots/
