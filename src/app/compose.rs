@@ -60,8 +60,6 @@ pub(super) struct Compose {
     pub(super) hwnd: Option<isize>,
     /// the text was clicked while hidden under the list: it gets the keyboard once shown
     pub(super) focus_editor: bool,
-    /// the keyboard was inside the writing field last time (to see it go in)
-    pub(super) kb_inside: bool,
     /// where the writing field is (last drawn)
     pub(super) editor_rect: Option<Rect>,
     /// the mail account it is sent from (0: the main one)
@@ -296,7 +294,6 @@ impl MailApp {
             focus_seen: None,
             hwnd: None,
             focus_editor: false,
-            kb_inside: false,
             editor_rect: None,
             account,
             shot: Default::default(),

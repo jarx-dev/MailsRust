@@ -413,23 +413,6 @@ pub(super) fn window_edges(ui: &mut Ui) {
     }
 }
 
-/// A hint shown above a button instead of below it. The formatted email is shown by a separate
-/// browser view that always lies on top of the app's own drawing, so a hint pointing down into
-/// it would be hidden.
-/// Where the mouse pointer is on the screen (pixels).
-pub(super) fn cursor_at() -> Option<(i32, i32)> {
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::Foundation::POINT;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-        let mut p = POINT { x: 0, y: 0 };
-        if GetCursorPos(&mut p) != 0 {
-            return Some((p.x, p.y));
-        }
-    }
-    None
-}
-
 /// Where the keyboard is now, for the log ("this window", "inside it", "elsewhere", "none").
 pub(super) fn focus_state(h: isize) -> &'static str {
     #[cfg(windows)]

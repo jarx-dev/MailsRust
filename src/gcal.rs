@@ -613,11 +613,6 @@ pub fn check(url: &str, key: &str) -> (Result<String, String>, Result<String, St
     (cal, people)
 }
 
-/// One question to the script (for other parts of the app, e.g. the contacts).
-pub fn ask(url: &str, key: &str, params: &[(&str, String)]) -> Result<serde_json::Value, String> {
-    ask_script(url, key, params)
-}
-
 /// One question to the script: its answer (JSON).
 fn ask_script(url: &str, key: &str, params: &[(&str, String)]) -> Result<serde_json::Value, String> {
     let mut q = format!("{}?key={}", url.trim(), enc(key));
@@ -689,29 +684,6 @@ pub fn parse_script(v: &serde_json::Value, color_base: usize) -> Vec<Event> {
         }
     }
     out
-}
-
-/// An event made or changed in the app written to Google (main calendar): its Google id.
-pub fn script_save(url: &str, key: &str, gid: &str, title: &str, location: &str, start: NaiveDateTime, minutes: i64) -> Result<String, String> {
-    let end = start + Duration::minutes(minutes.max(5));
-    let v = ask_script(
-        url,
-        key,
-        &[
-            ("action", "save".into()),
-            ("id", gid.into()),
-            ("title", title.into()),
-            ("location", location.into()),
-            ("start", ms_of(start).to_string()),
-            ("end", ms_of(end).to_string()),
-        ],
-    )?;
-    v["id"].as_str().map(String::from).ok_or_else(|| "skrypt nie potwierdził zapisu".into())
-}
-
-/// An event deleted in the app, deleted in Google too.
-pub fn script_delete(url: &str, key: &str, gid: &str) -> Result<(), String> {
-    ask_script(url, key, &[("action", "delete".into()), ("id", gid.into())]).map(|_| ())
 }
 
 /// The first script address among the calendars (where new events are saved).

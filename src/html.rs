@@ -37,7 +37,7 @@ pub enum Block {
     /// A real table: rows of cells side by side. `weights` gives each column's share of the width.
     Table { rows: Vec<Vec<Cell>>, weights: Vec<f32>, border: Option<Rgb>, bg: Option<Rgb>, gap: f32 },
     /// A coloured or outlined box (e.g. a "card" in a newsletter).
-    Boxed { blocks: Vec<Block>, bg: Option<Rgb>, border: Option<Rgb>, center: bool },
+    Boxed { blocks: Vec<Block>, bg: Option<Rgb>, border: Option<Rgb> },
 }
 
 #[derive(Clone)]
@@ -430,9 +430,9 @@ fn walk(w: &mut Walker, node: ego_tree::NodeRef<Node>, st: &Style) {
                     let bd = border(&el);
                     if bg.is_some() || bd.is_some() {
                         w.flush();
-                        let (blocks, center) = sub_blocks(node, &s);
+                        let (blocks, _) = sub_blocks(node, &s);
                         if !blocks.is_empty() {
-                            w.blocks.push(Block::Boxed { blocks, bg, border: bd, center });
+                            w.blocks.push(Block::Boxed { blocks, bg, border: bd });
                         }
                         return;
                     }
@@ -443,10 +443,10 @@ fn walk(w: &mut Walker, node: ego_tree::NodeRef<Node>, st: &Style) {
                     let bd = border(&el);
                     if (bg.is_some() || bd.is_some()) && text_len(&el) > 0 || name == "blockquote" {
                         w.flush();
-                        let (blocks, center) = sub_blocks(node, &s);
+                        let (blocks, _) = sub_blocks(node, &s);
                         if !blocks.is_empty() {
                             let bd = if name == "blockquote" && bd.is_none() { Some([200, 200, 200]) } else { bd };
-                            w.blocks.push(Block::Boxed { blocks, bg, border: bd, center });
+                            w.blocks.push(Block::Boxed { blocks, bg, border: bd });
                         }
                         return;
                     }

@@ -1390,6 +1390,9 @@ pub(super) fn recipients_row(ui: &mut Ui, msg: u64, to: &str, cc: &str, indent: 
     ui.add_space(2.0);
 }
 
+/// A hint shown above a button instead of below it. The formatted email is shown by a separate
+/// browser view that always lies on top of the app's own drawing, so a hint pointing down into
+/// it would be hidden.
 pub(super) fn hint_above(ui: &Ui, resp: &egui::Response, text: &str) {
     if !resp.hovered() || text.is_empty() {
         return;

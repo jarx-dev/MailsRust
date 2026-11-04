@@ -287,12 +287,6 @@ pub fn fetch_raw(account: &Account, uid: u32) -> Result<Vec<u8>, String> {
     })
 }
 
-/// The server's folder for sent mail (Gmail: "[Gmail]/Wysłane" or "[Gmail]/Sent Mail"), by
-/// its special-use mark, as the server names it.
-pub fn sent_mailbox(acc: &Account) -> Option<String> {
-    special_mailbox(acc, Folder::Sent)
-}
-
 /// How a special folder is marked on the server, and its usual names.
 fn special_names(f: Folder) -> (&'static str, &'static [&'static str]) {
     match f {
@@ -609,8 +603,6 @@ pub struct InboxSync {
 const WINDOW: u32 = 300;
 /// How many messages the very first sync downloads before showing anything.
 const FIRST: u32 = 100;
-/// Older mail is brought in batches of this many, one after another on the same connection.
-const BACKFILL: usize = 200;
 /// Messages bigger than this are first stored with their header only; the rest comes when
 /// the message is opened (it is usually big because of attachments).
 const BIG: u32 = 512 * 1024;
