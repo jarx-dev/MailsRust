@@ -14,7 +14,7 @@ impl MailApp {
         let Some(staged) = self.update_staged.clone() else { return };
         let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         let quiet = minimized || self.clock() - self.last_input > 600.0;
-        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting;
+        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some();
         // forms hold their text only in memory; reading windows get input the main window doesn't see
         let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
         if !quiet || working || open {
