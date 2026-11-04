@@ -18,7 +18,7 @@ win=${WIN:-jarek@100.100.1.3}
 wdir=${WDIR:-'C:\Users\user\poczta-test'}
 wdir_scp=${wdir//\\//}
 target=x86_64-pc-windows-msvc
-ps() { ssh -o BatchMode=yes "$win" "powershell -NoProfile -Command \"$1\""; }
+ps() { ssh -o BatchMode=yes "$win" "powershell -NoProfile -Command \"\$ErrorActionPreference = 'Stop'; $1\""; }
 
 case ${1:-} in
 build)
