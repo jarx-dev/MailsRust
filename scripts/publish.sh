@@ -32,7 +32,7 @@ name="Poczta-$POCZTA_BUILD.exe"
 cp "$exe" "$out/$name.part" && mv "$out/$name.part" "$out/$name"
 sum=$(sha256sum "$out/$name" | cut -d' ' -f1)
 size=$(stat -c %s "$out/$name")
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | tr -d '\r' | head -1)
 jq -n --arg version "$version" --arg build "$POCZTA_BUILD" --argjson built_at "$built_at" \
   --arg sha256 "$sum" --arg url "$name" --argjson size "$size" --arg notes "$notes" \
   '{version:$version, build:$build, built_at:$built_at, sha256:$sha256, url:$url, size:$size, notes:$notes}' \
