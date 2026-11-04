@@ -46,12 +46,12 @@ fn built_at() -> u64 {
     env!("POCZTA_BUILT_AT").parse().unwrap_or(0)
 }
 
-/// "Wersja 2026-11-04 21:35 (e841647)", from the build time, for the menu: after an update it
-/// shows the newer date. "lokalna" marks a build that doesn't update itself.
-pub fn version() -> String {
-    let when = chrono::DateTime::from_timestamp(built_at() as i64, 0).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
-    let commit = BUILD.rsplit_once('-').map_or(BUILD, |(c, _)| c);
-    format!("Wersja {when} ({commit}{})", if PUBLISHED { "" } else { ", lokalna" })
+/// The short version for the menu, from the build time ("v26.1104.2135": year, month and day,
+/// hour and minute), so after an update it shows a later number; and the build id with its commit.
+pub fn version() -> (String, &'static str) {
+    let short = chrono::DateTime::from_timestamp(built_at() as i64, 0).map(|t| t.with_timezone(&chrono::Local).format("v%y.%m%d.%H%M").to_string()).unwrap_or_default();
+    // a build that doesn't update itself
+    (if PUBLISHED { short } else { format!("{short} lokalna") }, BUILD)
 }
 
 /// `latest.json` written by the publish script.
@@ -559,10 +559,11 @@ mod tests {
     }
 
     #[test]
-    fn version_shows_build_date_and_commit() {
-        let v = version();
-        let commit = BUILD.rsplit_once('-').map_or(BUILD, |(c, _)| c);
-        assert!(v.starts_with("Wersja 20") && v.contains(&format!("({commit}")), "{v}");
+    fn version_is_short_and_from_the_build_date() {
+        let (v, build) = version();
+        assert_eq!(build, BUILD);
+        let digits: String = v.chars().filter(|c| c.is_ascii_digit()).collect();
+        assert!(v.starts_with('v') && v.len() >= 13 && digits.len() == 10, "{v}");
     }
 
     #[test]
