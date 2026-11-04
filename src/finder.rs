@@ -149,13 +149,14 @@ impl Finder {
         if !self.vectors_dirty {
             return;
         }
+        // one write at a time (they share the same file); the previous one ended long ago, and
+        // the map isn't copied below while that thread still holds it
+        self.wait_saved();
         let ids: std::collections::HashSet<u64> = msgs.iter().map(|m| m.id).collect();
         // (only when some belong to messages that are gone: no copy otherwise)
         if self.vectors.keys().any(|id| !ids.contains(id)) {
             Arc::make_mut(&mut self.vectors).retain(|id, _| ids.contains(id));
         }
-        // one write at a time (they share the same file); the previous one ended long ago
-        self.wait_saved();
         let v = self.vectors.clone();
         self.saving = Some(std::thread::spawn(move || semantic::save_vectors(&v)));
         self.vectors_dirty = false;

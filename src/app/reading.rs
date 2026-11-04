@@ -133,11 +133,11 @@ impl MailApp {
         if m.html_path.is_empty() {
             return None;
         }
-        if let Some(b) = self.card_html.get(&m.id) {
+        if let Some(b) = self.card_html.get(&m.html_path) {
             return Some(b.clone());
         }
         let b = Arc::new(html::parse(&std::fs::read_to_string(&m.html_path).ok()?));
-        self.card_html.insert(m.id, b.clone());
+        self.card_html.insert(m.html_path.clone(), b.clone());
         Some(b)
     }
 

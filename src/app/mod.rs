@@ -327,8 +327,9 @@ pub struct MailApp {
     /// looking for the signature in sent mail (background), and how many sent messages were looked at
     sig_rx: Option<Receiver<Option<crate::signature::Found>>>,
     sig_seen: usize,
-    /// formatted versions of conversation messages unfolded in place
-    card_html: HashMap<u64, Arc<Vec<html::Block>>>,
+    /// formatted versions of conversation messages unfolded in place, by their file (the file
+    /// name follows its content, so a draft saved again gets a new entry)
+    card_html: HashMap<String, Arc<Vec<html::Block>>>,
     /// the signature's formatted version, ready to show (for its text)
     sig_blocks: Option<(String, Arc<Vec<html::Block>>)>,
     /// another window of the app has the mailbox open: this one doesn't save anything
@@ -1447,9 +1448,9 @@ impl eframe::App for MailApp {
         // thousands of messages in memory and the browser view one by one only kept the window
         // on screen for another second or two, so the app ends here and Windows frees it all.
         // the database is closed properly (else it checks itself on the next start)
+        self.finder.wait_saved();
         let t = std::time::Instant::now();
         drop(self.db.take());
-        self.finder.wait_saved();
         crate::diag::took("closing: database closed", t, "");
         crate::diag::log("closing: saved, ending the app");
         std::process::exit(0);
