@@ -20,8 +20,9 @@ aplikację pod szybkość, małe zużycie RAM i CPU oraz płynne UI. Zachowanie 
 - Etap 3 zrobiony w zakresie możliwym bez Windows (commity „Etap 3: …”, opis w `PERF.md`): HTML okna
   czytania parsowany raz, wektory wyszukiwania zapisywane w tle, martwy kod usunięty (rustc 18 → 5
   ostrzeżeń), profil `lto="thin"` + `codegen-units=1` (exe −9,8%).
-- Do zrobienia na Windows: ręczny test aplikacji (etap 1) oraz pomiary czasu, RAM i CPU do `PERF.md`
-  (etapy 2 i 4, procedura w `PERF.md`). Zostaje zapis redb w wątku UI przy autozapisie.
+- Do zrobienia na Windows: ręczny test aplikacji (etap 1). Pomiary etapów 2 i 4 zrobione zdalnie
+  przez `scripts/win-test.sh` (SSH do laptopa), wyniki w `PERF.md`; start skrócony z ~4,5 s do ~60 ms
+  (baza zamykana poprawnie). Zostaje zapis redb w wątku UI (45–106 ms przy pracy).
 - Aplikacja jest tylko pod Windows. Na Linuksie (NUC) sprawdzisz ją przez
   `cargo check|clippy --release --target x86_64-pc-windows-msvc`, a exe zbudujesz przez
   `cargo xwin build --release --target x86_64-pc-windows-msvc` (target `-gnu` wymaga `dlltool` z

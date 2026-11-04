@@ -17,9 +17,26 @@ porównanie przed/po jest na tym samym narzędziu.
 | Odczyt + parsowanie HTML w oknie czytania (tryb bez przeglądarki) | w każdej klatce | raz na wiadomość | `card_blocks` |
 | Zapis wektorów wyszukiwania (~8 MB / 30 tys. wiadomości) | w klatce autozapisu (co 30 s podczas analizy) | w wątku w tle | `Finder::save` |
 | `stat` załączników w oknie pisania | w każdej klatce | tylko przy „Wyślij” | `compose.rs` |
-| Start do pierwszej klatki | nie zmierzone | nie zmierzone | wymaga Windows, patrz niżej |
-| RAM / CPU w spoczynku | nie zmierzone | nie zmierzone | wymaga Windows |
-| RAM / CPU przy przewijaniu i HTML | nie zmierzone | nie zmierzone | wymaga Windows |
+
+## Pomiary na Windows (laptop, 78 507 wiadomości, baza 514–539 MB, NVMe)
+
+Zrobione 2026-11-04 przez `scripts/win-test.sh` (kopia skrzynki, offline, uruchomienia na pulpicie
+laptopa). „Przed” = `153e053`, „po” = `9fa09ba`. Czas od otwarcia okna.
+
+| Pomiar | Przed | Po | Uwagi |
+|---|---|---|---|
+| Otwarcie pliku bazy | **4 247–4 691 ms** przy każdym starcie (prawdziwe logi), 6 717 ms w teście | **1–3 ms** (12 startów, też po zapisie) | przyczyna: baza nie była zamykana (czytniki trzymały `Arc<Database>`), redb naprawiał cały plik przy starcie; na zimnym dysku 15 s |
+| Skrzynka gotowa | 4 397–4 854 ms (prawdziwe logi) | **50–63 ms** | przed pierwszą klatką: ekranu ładowania praktycznie nie widać |
+| Pierwsza klatka z całą skrzynką | — | 694–812 ms | rysowanie 78 tys. wiadomości i wątków; następny kandydat |
+| CPU w spoczynku (30–60 s po starcie) | 0,2–13,6% rdzenia | 0,0–0,8% rdzenia | w pierwszych ~15 s buduje się indeks wyszukiwania |
+| RAM w spoczynku | 381–397 MB | 385–392 MB | bez zmiany |
+| `POCZTA_BENCH` 40 s: CPU średnio / RAM max | 147% rdzenia / 648 MB | 102% rdzenia / 587 MB | po 1 przebiegu, rozrzut duży |
+| Zapis bazy w wątku UI | 45–106 ms co 1–3 s przy pracy (prawdziwe logi) | bez zmian | do zrobienia: zapis w tle |
+
+Rozrzut: kilka startów zaraz po skopiowaniu lub zmianie pliku bazy czytało wiadomości 3–8 s przy
+niskim CPU (czekanie na dysk), choć sama baza czyta je w 96–141 ms (`redb-open-bench`). Pasuje to do
+skanowania pliku przez ESET (`ekrn`); wyjątek w ESET dla `%LOCALAPPDATA%\Poczta\mail.redb` to decyzja
+właściciela komputera.
 
 ## Profil release
 
@@ -38,22 +55,20 @@ działają tylko, gdy są widoczne. Ciągłego `request_repaint()` w spoczynku n
 
 ## Co nadal dotyka dysku w wątku UI
 
-- Zapis bazy redb (`Db::save`) przy autozapisie co 30 s i po `save_now`: pisze tylko zmiany, ale
-  `commit()` czeka na fsync. Przeniesienie do wątku wymaga zmiany modelu własności `Store` — nie zrobione.
+- Zapis bazy redb (`Db::save`) przy autozapisie i po `save_now`: pisze tylko zmiany, ale na laptopie
+  zajmuje 45–106 ms (78 tys. wiadomości: przegląd odcisków + `commit()` z fsync), przy pracy co 1–3 s.
+  Przeniesienie do wątku wymaga zmiany modelu własności `Store` — nie zrobione.
 - Jednorazowe małe odczyty przy akcji: treść z redb przy otwarciu wiadomości (`ensure_body`), plik HTML
   wybranej wiadomości (`html_blocks`), logo domeny z cache (raz na domenę), obrazki `cid:` (raz).
 - `diag::log` dopisuje linię do `sync.log` synchronicznie (zdarzenia, nie klatki).
 - `stat` rozmiarów załączników w panelu czytania przy każdym rysowaniu tego panelu.
 
-## Jak zmierzyć na Windows (etap 2/4)
+## Jak mierzyć na Windows
 
-Zbuduj oba commity (`git checkout 153e053` i bieżący) i dla każdego exe:
+`scripts/win-test.sh` (dostęp SSH opisany w Hindsight: „Dostęp SSH z NUC do laptopa Windows”):
 
-1. Start: uruchom, w `%LOCALAPPDATA%\Poczta\sync.log` odczytaj
-   `startup: first screen drawn in N ms, M ms after opening` (średnia z 5 startów).
-2. Spoczynek: po 60 s od startu, w PowerShell:
-   `$p=Get-Process mailclient; $a=$p.CPU; Start-Sleep 60; (Get-Process mailclient).CPU-$a` (s CPU na minutę)
-   oraz `(Get-Process mailclient).WorkingSet64/1MB`.
-3. Przewijanie i HTML: `set POCZTA_PROFILE=1` i `set POCZTA_BENCH=1`, uruchom na ~60 s; log co 3 s ma
-   `profile <część>: X ms per call, longest Y ms` oraz `memory now: N MB`. CPU jak w p. 2.
-4. Wpisz liczby do tabeli wyżej.
+1. `scripts/win-test.sh build` — buduje exe i wysyła go na laptop.
+2. `scripts/win-test.sh fresh` — kopia prawdziwej skrzynki do testów (Poczta musi być zamknięta).
+3. `scripts/win-test.sh run 60000` — spoczynek; `run 40000 POCZTA_BENCH=1 POCZTA_PROFILE=1` — przeglądanie;
+   `run 10000 POCZTA_START=menu` — scenariusz z zapisem do bazy. Wyniki w `~/mailrust-tests/<czas>/`
+   (`sync.log` z `startup:` i `database:`, `cpu-mem.csv` co sekundę).
