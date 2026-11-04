@@ -339,6 +339,11 @@ pub struct MailApp {
     /// the icon next to the clock, and what was clicked on it
     _tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<TrayMsg>,
+    /// a newer build from the NUC, verified and waiting to be swapped in (see update.rs), and
+    /// when the person last touched the app (it restarts only after a quiet while)
+    update_rx: Option<Receiver<PathBuf>>,
+    update_staged: Option<PathBuf>,
+    last_input: f64,
     /// the taskbar's list of buttons (for the number on the program's button)
     taskbar: Option<crate::notify::Taskbar>,
     taskbar_tried: bool,
@@ -393,6 +398,10 @@ impl MailApp {
         let t = std::time::Instant::now();
         apply(&cc.egui_ctx);
         crate::diag::took("startup: fonts and colours", t, "");
+        // restarted by an update while it was minimized: it stays so (see update.rs)
+        if std::env::args().any(|a| a == "--minimized") {
+            cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
         // The mailbox lives in the local database; the very first time, it is moved there from
         // the older single-file storage.
         let started = std::time::Instant::now();
@@ -520,6 +529,9 @@ impl MailApp {
             protected_pw: None,
             _tray: tray.0,
             tray_rx: tray.1,
+            update_rx: None,
+            update_staged: None,
+            last_input: 0.0,
             taskbar: None,
             taskbar_tried: false,
             badge_shown: None,
@@ -1403,6 +1415,7 @@ impl eframe::App for MailApp {
         }
         self.auto_sync();
         self.watch_inbox();
+        self.install_update(ctx);
         if self.save_now {
             self.save_now = false;
             if let Some(storage) = frame.storage_mut() {

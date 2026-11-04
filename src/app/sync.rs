@@ -1,6 +1,34 @@
 use super::*;
 
 impl MailApp {
+    /// A newer build is swapped in when nothing would be lost or disturbed: nothing being written
+    /// or sent, and the window minimized or untouched for 10 minutes. The app then closes as
+    /// usual (saving everything) and the new build starts in its place.
+    pub(super) fn install_update(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
+            self.last_input = self.clock();
+        }
+        if let Some(p) = self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.update_staged = Some(p);
+        }
+        let Some(staged) = self.update_staged.clone() else { return };
+        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let quiet = minimized || self.clock() - self.last_input > 600.0;
+        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting;
+        if !quiet || working {
+            ctx.request_repaint_after(std::time::Duration::from_secs(30));
+            return;
+        }
+        self.update_staged = None;
+        match crate::update::apply(&staged, minimized) {
+            Ok(()) => {
+                crate::diag::log("update: new build in place, closing for the restart");
+                self.quit();
+            }
+            Err(e) => crate::diag::log(format!("update: not installed: {e}")),
+        }
+    }
+
     /// Takes over the mailbox once it has been read from disk (see `new`).
     pub(super) fn poll_loading(&mut self, frame: &eframe::Frame) {
         let Some(rx) = &self.loading else { return };
@@ -43,6 +71,11 @@ impl MailApp {
         self.store = store;
         self.db = db;
         self.touched = true;
+        if !self.read_only && self.shot.is_none() {
+            // the mailbox works: a freshly installed build tells its guard, then updates are looked for
+            crate::update::startup_complete();
+            self.update_rx = crate::update::start();
+        }
         if self.read_only {
             self.set_status("Poczta jest już otwarta w innym oknie — zamknij to okno");
         }

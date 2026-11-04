@@ -32,6 +32,7 @@ mod signature;
 mod theme;
 mod translate;
 mod unigram;
+mod update;
 mod webview;
 
 use std::path::PathBuf;
@@ -47,6 +48,11 @@ fn main() -> eframe::Result<()> {
 {}", std::backtrace::Backtrace::force_capture()));
     }));
     let args: Vec<String> = std::env::args().collect();
+    // the previous build watching over a freshly installed one (see update.rs)
+    if update::run_guard(&args) {
+        return Ok(());
+    }
+    update::finish_pending_update(&args);
     let shot = args
         .iter()
         .position(|a| a == "--screenshot")
