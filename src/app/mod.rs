@@ -1359,6 +1359,7 @@ impl eframe::App for MailApp {
                 }
                 self.selected = first;
                 self.touched = true;
+                self.read_only = true; // the swapped text is never saved into the test's mailbox
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
