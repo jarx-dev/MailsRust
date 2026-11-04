@@ -23,22 +23,26 @@ use std::time::{Duration, Instant};
 use url::{Host, Url};
 
 /// The update server on the NUC (the same file server as HyperRust's, its own folder).
-pub const DEFAULT_URL: &str = "http://100.100.1.2:8790/mailrust/latest.json";
+const DEFAULT_URL: &str = "http://100.100.1.2:8790/mailrust/latest.json";
 /// This build, embedded by build.rs (the publish script sets it, so EXE and manifest agree).
-pub const BUILD: &str = env!("POCZTA_BUILD");
+const BUILD: &str = env!("POCZTA_BUILD");
+/// Only builds made by scripts/publish.sh update themselves: a local build's identity can be
+/// stale, and a test run must not swap the program under the test.
+const PUBLISHED: bool = !env!("POCZTA_PUBLISHED").is_empty();
 const MAX_DOWNLOAD_BYTES: u64 = 200 * 1024 * 1024;
 const FIRST_CHECK: Duration = Duration::from_secs(20);
 const EVERY: Duration = Duration::from_secs(60);
 const AFTER_UPDATE_ARG: &str = "--after-update";
 const GUARD_ARG: &str = "--update-guard";
-/// How long the new build waits for the previous one to save and exit before stopping it.
-const OLD_EXIT_TIMEOUT: Duration = Duration::from_secs(60);
-/// How long a new build has to load the mailbox (after the previous one has exited).
+/// How long the previous build may take to save and exit before it is stopped (a stop could
+/// lose its last changes, so only a hung process waits that long).
+const OLD_EXIT_TIMEOUT: Duration = Duration::from_secs(600);
+/// How long a new build has to load the mailbox, counted from the previous one's exit.
 const STARTUP_GRACE: Duration = Duration::from_secs(180);
 
 static AFTER_UPDATE: AtomicBool = AtomicBool::new(false);
 
-pub fn built_at() -> u64 {
+fn built_at() -> u64 {
     env!("POCZTA_BUILT_AT").parse().unwrap_or(0)
 }
 
@@ -206,7 +210,9 @@ fn failed_path(exe: &Path) -> PathBuf {
 /// receiver (once). None when updates are off.
 pub fn start() -> Option<Receiver<PathBuf>> {
     let raw = std::env::var("POCZTA_UPDATE_URL").unwrap_or_else(|_| DEFAULT_URL.into());
-    if raw.trim().eq_ignore_ascii_case("off") || !cfg!(windows) {
+    // a separate test data folder means a test run; the swap and rollback need a *.exe name
+    let exe_named = std::env::current_exe().is_ok_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")));
+    if raw.trim().eq_ignore_ascii_case("off") || !cfg!(windows) || !PUBLISHED || !exe_named || std::env::var("POCZTA_DATA_DIR").is_ok() {
         return None;
     }
     let url = match validate_url(&raw) {
@@ -308,6 +314,8 @@ pub fn run_guard(args: &[String]) -> bool {
     let Ok(old) = std::env::current_exe() else { return true };
     let exe = old.with_extension(""); // Poczta.exe.old -> Poczta.exe
     let marker = ready_marker(&exe);
+    // the time to start counts once the previous build has saved and gone
+    platform::wait_for_exit(previous_pid, OLD_EXIT_TIMEOUT);
     match platform::watch_startup(new_pid, || marker.exists(), STARTUP_GRACE) {
         platform::Startup::Ready => {
             let _ = std::fs::remove_file(&marker);
@@ -347,10 +355,15 @@ pub fn finish_pending_update(args: &[String]) {
     crate::diag::log(format!("update: started as {BUILD}"));
 }
 
-/// The mailbox is loaded: tell the guard, forget a previously failed build and remove the
-/// leftovers of the swap once the guard has let them go.
-pub fn startup_complete() {
+/// The mailbox is loaded (`loaded`: read from the database, not replaced by the sample): tell
+/// the guard, forget a previously failed build and remove the leftovers of the swap once the
+/// guard has let them go.
+pub fn startup_complete(loaded: bool) {
     let Ok(exe) = std::env::current_exe() else { return };
+    if AFTER_UPDATE.load(Ordering::Relaxed) && !loaded {
+        // the guard will put the previous build back: its files stay
+        return;
+    }
     if AFTER_UPDATE.load(Ordering::Relaxed) {
         if let Err(e) = std::fs::write(ready_marker(&exe), BUILD) {
             crate::diag::log(format!("update: ready marker: {e}"));

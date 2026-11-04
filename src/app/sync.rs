@@ -15,7 +15,9 @@ impl MailApp {
         let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         let quiet = minimized || self.clock() - self.last_input > 600.0;
         let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting;
-        if !quiet || working {
+        // forms hold their text only in memory; reading windows get input the main window doesn't see
+        let open = self.editor.is_some() || self.book_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
+        if !quiet || working || open {
             ctx.request_repaint_after(std::time::Duration::from_secs(30));
             return;
         }
@@ -25,7 +27,11 @@ impl MailApp {
                 crate::diag::log("update: new build in place, closing for the restart");
                 self.quit();
             }
-            Err(e) => crate::diag::log(format!("update: not installed: {e}")),
+            Err(e) => {
+                crate::diag::log(format!("update: not installed: {e}"));
+                // looked for again (the staged file is reused), e.g. after a passing file lock
+                self.update_rx = crate::update::start();
+            }
         }
     }
 
@@ -43,6 +49,8 @@ impl MailApp {
             return;
         };
         self.loading = None;
+        // (a build that can't read the mailbox it finds is not confirmed to its update guard)
+        let loaded = from_db.is_some();
         // nothing in the database yet: the older single-file storage, moved over once
         let old = if from_db.is_none() { frame.storage().and_then(|s| eframe::get_value::<Store>(s, "store")) } else { None };
         let migrating = old.is_some() && db.is_some();
@@ -73,7 +81,7 @@ impl MailApp {
         self.touched = true;
         if !self.read_only && self.shot.is_none() {
             // the mailbox works: a freshly installed build tells its guard, then updates are looked for
-            crate::update::startup_complete();
+            crate::update::startup_complete(loaded);
             self.update_rx = crate::update::start();
         }
         if self.read_only {

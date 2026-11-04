@@ -41,7 +41,9 @@ fn build_identity() {
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-    let build = std::env::var("POCZTA_BUILD").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| {
+    let published = std::env::var("POCZTA_BUILD").ok().filter(|v| !v.trim().is_empty());
+    println!("cargo:rustc-env=POCZTA_PUBLISHED={}", if published.is_some() { "1" } else { "" });
+    let build = published.unwrap_or_else(|| {
         let sha = std::process::Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
             .output()

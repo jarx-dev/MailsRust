@@ -339,8 +339,7 @@ pub struct MailApp {
     /// the icon next to the clock, and what was clicked on it
     _tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<TrayMsg>,
-    /// a newer build from the NUC, verified and waiting to be swapped in (see update.rs), and
-    /// when the person last touched the app (it restarts only after a quiet while)
+    /// a verified newer build waiting to be swapped in (update.rs), and when the app was last touched
     update_rx: Option<Receiver<PathBuf>>,
     update_staged: Option<PathBuf>,
     last_input: f64,
@@ -399,9 +398,7 @@ impl MailApp {
         apply(&cc.egui_ctx);
         crate::diag::took("startup: fonts and colours", t, "");
         // restarted by an update while it was minimized: it stays so (see update.rs)
-        if std::env::args().any(|a| a == "--minimized") {
-            cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        }
+        if std::env::args().any(|a| a == "--minimized") { cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)); }
         // The mailbox lives in the local database; the very first time, it is moved there from
         // the older single-file storage.
         let started = std::time::Instant::now();
