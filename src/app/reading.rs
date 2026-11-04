@@ -127,6 +127,20 @@ impl MailApp {
         Some(blocks)
     }
 
+    /// The formatted version of a message outside the reading pane (a conversation card, a
+    /// reading window), read and parsed once per message, not on every redraw.
+    pub(super) fn card_blocks(&mut self, m: &Message) -> Option<Arc<Vec<html::Block>>> {
+        if m.html_path.is_empty() {
+            return None;
+        }
+        if let Some(b) = self.card_html.get(&m.id) {
+            return Some(b.clone());
+        }
+        let b = Arc::new(html::parse(&std::fs::read_to_string(&m.html_path).ok()?));
+        self.card_html.insert(m.id, b.clone());
+        Some(b)
+    }
+
     /// Bytes of a picture used in an email; starts a download for pictures from the web.
     pub(super) fn image_bytes(&mut self, m: &Message, src: &str) -> (String, ImgState) {
         use std::hash::{Hash, Hasher};
@@ -1099,7 +1113,7 @@ impl MailApp {
                                 }
                             }
                         } else {
-                            let blocks = if m.html_path.is_empty() { None } else { std::fs::read_to_string(&m.html_path).ok().map(|t| html::parse(&t)) };
+                            let blocks = self.card_blocks(&m);
                             egui::ScrollArea::vertical().id_salt(("reader-body", r.key)).auto_shrink([false, false]).show(ui, |ui| {
                                 Frame::new().stroke(Stroke::new(1.0, BORDER())).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(24, 20)).show(ui, |ui| {
                                     ui.set_width(ui.available_width());

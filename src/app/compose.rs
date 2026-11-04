@@ -1237,10 +1237,13 @@ Wpisy są **gotowe** i *sprawdzone*:
                 c.error = Some("Dodaj co najmniej jednego odbiorcę.".into());
                 outcome = None;
             }
-            let total: u64 = c.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
-            if outcome == Some("send") && total > 25 * 1024 * 1024 {
-                c.error = Some(format!("Załączniki są za duże ({}) — Gmail przyjmuje razem do 25 MB.", human_size(total)));
-                outcome = None;
+            if outcome == Some("send") {
+                // the files are looked at on disk only when sending, not on every redraw
+                let total: u64 = c.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
+                if total > 25 * 1024 * 1024 {
+                    c.error = Some(format!("Załączniki są za duże ({}) — Gmail przyjmuje razem do 25 MB.", human_size(total)));
+                    outcome = None;
+                }
             }
             if let Some(o) = outcome {
                 closed.push((i, o));

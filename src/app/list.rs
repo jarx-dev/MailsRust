@@ -295,17 +295,7 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.add_space(52.0);
                     ui.vertical(|ui| {
-                        let blocks = if x.html_path.is_empty() {
-                            None
-                        } else if let Some(b) = self.card_html.get(&x.id) {
-                            Some(b.clone())
-                        } else {
-                            let b = std::fs::read_to_string(&x.html_path).ok().map(|t| Arc::new(html::parse(&t)));
-                            if let Some(b) = &b {
-                                self.card_html.insert(x.id, b.clone());
-                            }
-                            b
-                        };
+                        let blocks = self.card_blocks(x);
                         let body = x.body.trim();
                         if let Some(b) = blocks.filter(|b| !b.is_empty()) {
                             // the formatted version, as the sender wrote it
