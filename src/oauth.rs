@@ -34,7 +34,7 @@ fn agent() -> Result<ureq::Agent, String> {
 
 fn random_token(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    if getrandom::getrandom(&mut buf).is_err() {
+    if getrandom::fill(&mut buf).is_err() {
         // Extremely unlikely; fall back to time-based bytes so sign-in still works.
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
