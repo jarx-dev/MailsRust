@@ -81,6 +81,30 @@ impl MailApp {
         let _ = frame;
     }
 
+    /// While the mailbox is being read: a plain loading screen (the window can be moved by it)
+    /// instead of an empty app that fills in a moment later. True when it was shown.
+    pub(super) fn loading_screen(&mut self, ui: &mut Ui) -> bool {
+        if self.loading.is_none() {
+            return false;
+        }
+        egui::CentralPanel::default().frame(Frame::new().fill(BG())).show(ui, |ui| {
+            let r = ui.max_rect();
+            if ui.interact(r, id("loading-drag"), Sense::drag()).drag_started_by(egui::PointerButton::Primary) {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            ui.scope_builder(egui::UiBuilder::new().max_rect(Rect::from_center_size(r.center(), Vec2::new(320.0, 140.0))), |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("Poczta").size(28.0).strong().color(TEXT()));
+                    ui.add_space(14.0);
+                    ui.add(egui::Spinner::new().size(22.0).color(ACCENT()));
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Wczytywanie poczty…").size(14.0).color(MUTED()));
+                });
+            });
+        });
+        true
+    }
+
     /// A small floating bubble at the bottom of the message list: "syncing…" while mail is being
     /// sent or received, then the result for a few seconds (longer for problems).
     /// A short note at the top of the window, e.g. after copying something.

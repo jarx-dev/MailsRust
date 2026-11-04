@@ -1027,6 +1027,7 @@ impl eframe::App for MailApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
         self.web_target = None;
+        if self.loading_screen(ui) { return; }
         // the same for the main window (the keyboard back from the email view)
         if self.main_hwnd.is_some_and(|h| focus_state(h) == "this window") && !ctx.input(|i| i.focused) {
             ctx.input_mut(|i| i.focused = true);
