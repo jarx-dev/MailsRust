@@ -361,8 +361,10 @@ pub fn finish_pending_update(args: &[String]) {
 pub fn startup_complete(loaded: bool) {
     let Ok(exe) = std::env::current_exe() else { return };
     if AFTER_UPDATE.load(Ordering::Relaxed) && !loaded {
-        // the guard will put the previous build back: its files stay
-        return;
+        // it would show (and save) the sample mailbox: end before anything is written, the
+        // guard sees it and puts the previous build back
+        crate::diag::log("update: this build can't read the mailbox; ending for the rollback");
+        std::process::exit(1);
     }
     if AFTER_UPDATE.load(Ordering::Relaxed) {
         if let Err(e) = std::fs::write(ready_marker(&exe), BUILD) {
