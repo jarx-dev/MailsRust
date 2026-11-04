@@ -228,6 +228,16 @@ impl MailApp {
                 {
                     self.save_now = true;
                 }
+                let mut autostart = crate::autostart::is_on();
+                if ui
+                    .checkbox(&mut autostart, "Uruchamiaj razem z Windows")
+                    .on_hover_text("Po zalogowaniu do Windows Poczta startuje zminimalizowana i odbiera pocztę w tle")
+                    .changed()
+                {
+                    if let Err(e) = crate::autostart::set(autostart) {
+                        self.flash(&format!("Autostart: {e}"));
+                    }
+                }
                 if ui.button("⏱  Diagnostyka synchronizacji").clicked() {
                     self.diag_open = true;
                     ui.close();

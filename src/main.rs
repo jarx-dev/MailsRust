@@ -2,6 +2,7 @@
 
 mod ai;
 mod app;
+mod autostart;
 mod book;
 mod cli;
 mod calendar;
