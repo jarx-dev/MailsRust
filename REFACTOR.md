@@ -11,6 +11,24 @@ aplikację pod szybkość, małe zużycie RAM i CPU oraz płynne UI. Zachowanie 
 - `src/app.rs` ma ~9500 linii. Prawie wszystko to jeden `impl MailApp` (linie ~797–8377)
   plus `impl eframe::App` (~8566–9030) i wolne funkcje pomocnicze.
 
+## Stan (2026-11-04)
+
+- Etap 1 zrobiony (commity „Etap 1: …”): `src/app/` = `mod.rs` (rdzeń, 1487 linii) + `compose`,
+  `reading`, `list`, `sidebar`, `sync`, `actions`, `contacts_ui`, `settings`, `window`; tryby CLI
+  z `main()` w `src/cli.rs`; `net.rs` bez zmian (części splecione). Build release i clippy bez
+  nowych ostrzeżeń (bazowo 18 ostrzeżeń rustc).
+- Etap 3 zrobiony w zakresie możliwym bez Windows (commity „Etap 3: …”, opis w `PERF.md`): HTML okna
+  czytania parsowany raz, wektory wyszukiwania zapisywane w tle, martwy kod usunięty (rustc 18 → 5
+  ostrzeżeń), profil `lto="thin"` + `codegen-units=1` (exe −9,8%).
+- Do zrobienia na Windows: ręczny test aplikacji (etap 1). Pomiary etapów 2 i 4 zrobione zdalnie
+  przez `scripts/win-test.sh` (SSH do laptopa), wyniki w `PERF.md`; start skrócony z ~4,5 s do ~60 ms
+  (baza zamykana poprawnie). Zostaje zapis redb w wątku UI (45–106 ms przy pracy).
+- Aplikacja jest tylko pod Windows. Na Linuksie (NUC) sprawdzisz ją przez
+  `cargo check|clippy --release --target x86_64-pc-windows-msvc`, a exe zbudujesz przez
+  `cargo xwin build --release --target x86_64-pc-windows-msvc` (target `-gnu` wymaga `dlltool` z
+  Windows, patrz `.cargo/config.toml`). Uruchomienie, zrzuty (`--screenshot` + `POCZTA_START=…`)
+  i pomiary czasu, RAM i CPU wymagają Windows.
+
 ## Etap 1: podział app.rs (najpierw, przed optymalizacją)
 
 Technika: zamień `app.rs` na `app/mod.rs` (albo `app.rs` + folder `app/`). Tematyczne części

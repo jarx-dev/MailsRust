@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=assets/WebView2Loader.dll");
     println!("cargo:rerun-if-changed=assets/poczta.ico");
+    build_identity();
     if std::env::var("CARGO_CFG_WINDOWS").is_err() {
         return;
     }
@@ -29,6 +30,32 @@ fn main() {
     if let Err(e) = embed_icon(&manifest, &out) {
         println!("cargo:warning=program icon not embedded: {e}");
     }
+}
+
+/// The build's identity for the self-updater (src/update.rs). scripts/publish.sh sets both, so
+/// the EXE and its latest.json agree; other builds use the git commit and the current time.
+fn build_identity() {
+    println!("cargo:rerun-if-env-changed=POCZTA_BUILD");
+    println!("cargo:rerun-if-env-changed=POCZTA_BUILT_AT");
+    let built_at = std::env::var("POCZTA_BUILT_AT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    let published = std::env::var("POCZTA_BUILD").ok().filter(|v| !v.trim().is_empty());
+    println!("cargo:rustc-env=POCZTA_PUBLISHED={}", if published.is_some() { "1" } else { "" });
+    let build = published.unwrap_or_else(|| {
+        let sha = std::process::Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        format!("{}-{built_at}", sha.unwrap_or_else(|| "local".into()))
+    });
+    println!("cargo:rustc-env=POCZTA_BUILD={build}");
+    println!("cargo:rustc-env=POCZTA_BUILT_AT={built_at}");
 }
 
 /// Turns assets/poczta.ico into a Windows resource and links it into the program.
@@ -79,6 +106,11 @@ fn embed_icon(manifest: &Path, out: &Path) -> Result<(), String> {
     entry(&mut res, 14, 1, 0x1030, &group);
     let res_path = out.join("poczta.res");
     std::fs::write(&res_path, &res).map_err(|e| e.to_string())?;
+    // the Microsoft linker (also lld-link from cargo-xwin) takes the resource file as it is
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins={}", res_path.display());
+        return Ok(());
+    }
 
     // windres turns it into an object file the linker understands
     let windres = manifest.join(".setup").join("binutils").join("windres.exe");

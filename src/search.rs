@@ -188,10 +188,6 @@ impl Index {
         Index { terms: packed, places, docs, avg_len }
     }
 
-    pub fn len(&self) -> usize {
-        self.docs.len()
-    }
-
     /// Messages matching the query, best first: (message id, score).
     pub fn search(&self, query: &str, limit: usize) -> Vec<(u64, f32)> {
         let q = words(query);

@@ -39,11 +39,6 @@ pub fn day_month(d: NaiveDate) -> String {
     format!("{} {}", d.day(), MONTH_GEN[d.month0() as usize])
 }
 
-/// "wtorek, 3 listopada 2026"
-pub fn long_date(d: NaiveDate) -> String {
-    format!("{}, {} {}", wd_full(d), day_month(d), d.year())
-}
-
 /// "3 lis"
 pub fn short_day_month(d: NaiveDate) -> String {
     let m = MONTH_GEN[d.month0() as usize];

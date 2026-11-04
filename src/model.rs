@@ -376,17 +376,6 @@ impl Store {
         self.next_id
     }
 
-    pub fn unread(&self, f: Folder) -> usize {
-        self.messages
-            .iter()
-            .filter(|m| m.folder == f && !m.read)
-            .count()
-    }
-
-    pub fn count(&self, f: Folder) -> usize {
-        self.messages.iter().filter(|m| m.folder == f).count()
-    }
-
     pub fn sample() -> Self {
         let now = Local::now().naive_local();
         let today = now.date();

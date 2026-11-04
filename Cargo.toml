@@ -31,27 +31,31 @@ anyrender_vello_cpu = "0.7"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Memory", "Win32_System_Com", "Win32_Media_Audio", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Memory", "Win32_System_Com", "Win32_Media_Audio", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"] }
 raw-window-handle = "0.6"
 wry = { version = "0.57", default-features = false }
 # (the same versions wry uses) a picture of the email view, shown under menus
 webview2-com = "0.39"
 windows = { version = "0.62", features = ["Win32_UI_Shell", "Win32_System_Com"] }
-tray-icon = "0.21"
+tray-icon = "0.26"
 imap = "2.4"
 native-tls = "0.2"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "native-tls", "hostname"] }
 mail-parser = "1"
 ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }
 serde_json = "1"
-sha2 = "0.10"
-base64 = "0.22"
-getrandom = "0.2"
+sha2 = "0.11"
+base64 = "0.23"
+getrandom = "0.4"
 
 [profile.release]
 opt-level = 2
 # a smaller program file starts faster (less for Windows to load and check)
 strip = true
+# exe ~10% smaller (33.4 -> 30.2 MB, measured in PERF.md); panic="abort" is out: the app catches
+# panics (net.rs `guarded`, background jobs)
+lto = "thin"
+codegen-units = 1
 
 [profile.dev]
 opt-level = 1

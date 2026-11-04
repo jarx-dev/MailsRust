@@ -290,7 +290,7 @@ impl Hub {
 /// A new random link name (128 bits, so it can't be guessed).
 pub fn new_token() -> String {
     let mut b = [0u8; 16];
-    let _ = getrandom::getrandom(&mut b);
+    let _ = getrandom::fill(&mut b);
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 

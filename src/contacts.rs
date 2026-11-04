@@ -135,19 +135,6 @@ pub fn list_rect(ctx: &egui::Context, salt: impl std::hash::Hash + std::fmt::Deb
     ctx.memory(|m| m.area_rect(id.with("list")))
 }
 
-/// True while a recipients box is being typed in (it has the keyboard).
-pub fn editing(ctx: &egui::Context, salt: impl std::hash::Hash + std::fmt::Debug) -> bool {
-    #[allow(deprecated)]
-    let id = egui::Id::new(("recipients", salt));
-    ctx.memory(|m| m.has_focus(id.with("edit")))
-}
-
-pub fn list_open(ctx: &egui::Context, salt: impl std::hash::Hash + std::fmt::Debug) -> bool {
-    #[allow(deprecated)]
-    let id = egui::Id::new(("recipients", salt));
-    ctx.data(|d| d.get_temp(id.with("open")).unwrap_or(false))
-}
-
 /// A one-line recipients box with suggestions under it. Arrow keys pick, Enter or Tab accepts.
 pub fn recipients_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, contacts: &[Contact], salt: impl std::hash::Hash + std::fmt::Debug) -> egui::Response {
     #[allow(deprecated)]
