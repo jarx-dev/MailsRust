@@ -38,17 +38,38 @@ impl MailApp {
     /// Takes over the mailbox once it has been read from disk (see `new`).
     pub(super) fn poll_loading(&mut self, frame: &eframe::Frame) {
         let Some(rx) = &self.loading else { return };
-        let Ok((db, from_db, entries)) = rx.try_recv() else {
-            // meanwhile, get the browser view for formatted mail ready (it takes a moment to
-            // start), from the second frame on so the window itself shows first
-            // (only for the browser view kept as a fallback: emails are drawn by the app)
-            if self.drawn >= 2 && self.shot.is_none() && std::env::var("POCZTA_BLITZ").is_err() {
-                self.mail_view.prepare(frame);
+        let (db, from_db, entries) = match rx.try_recv() {
+            Ok(Loaded::All(db, from_db, entries)) => (db, from_db, entries),
+            Ok(Loaded::Newest(store, reader)) => {
+                // the newest messages to look at while the rest is read (nothing is saved, sent
+                // or done with them: the window is just to look at, see `ui`)
+                self.store = store;
+                self.preview = Some(reader);
+                self.touched = true;
+                self.refresh_caches();
+                if self.selected.is_none() {
+                    self.selected = self.visible_ids().first().copied();
+                }
+                crate::diag::log(format!("startup: newest messages shown {} ms after opening", self.opened.elapsed().as_millis()));
+                return;
             }
-            self.ctx.request_repaint_after(std::time::Duration::from_millis(30));
-            return;
+            Err(_) => {
+                // meanwhile, get the browser view for formatted mail ready (it takes a moment to
+                // start), from the second frame on so the window itself shows first
+                // (only for the browser view kept as a fallback: emails are drawn by the app)
+                if self.drawn >= 2 && self.shot.is_none() && std::env::var("POCZTA_BLITZ").is_err() {
+                    self.mail_view.prepare(frame);
+                }
+                self.ctx.request_repaint_after(std::time::Duration::from_millis(30));
+                return;
+            }
         };
         self.loading = None;
+        // the message picked among the newest ones only: the real newest is chosen below (older
+        // mail fetched later has higher numbers, so the preview may not have it)
+        if self.preview.take().is_some() {
+            self.selected = None;
+        }
         // (a build that can't read the mailbox it finds is not confirmed to its update guard)
         let loaded = from_db.is_some();
         // nothing in the database yet: the older single-file storage, moved over once
@@ -889,8 +910,16 @@ pub(super) fn prepare_store(store: &mut Store) {
     }
 }
 
-/// The mailbox being read from disk: the database and what was in it.
-pub type Loading = Receiver<(Option<crate::db::Db>, Option<Store>, Option<Vec<crate::search::Entry>>)>;
+/// The mailbox being read from disk: first its newest messages, then the database and all
+/// that was in it.
+pub enum Loaded {
+    Newest(Store, crate::db::TextReader),
+    All(Option<crate::db::Db>, Option<Store>, Option<Vec<crate::search::Entry>>),
+}
+pub type Loading = Receiver<Loaded>;
+
+/// How many of the newest messages are shown while the rest is read.
+const NEWEST: usize = 500;
 
 /// Starts reading the mailbox in the background. Called as early as possible (before the
 /// window is even made), so the mail is ready about when the window is.
@@ -900,6 +929,10 @@ pub fn start_loading() -> Loading {
         let t = std::time::Instant::now();
         let mut db = crate::db::Db::open().map_err(|e| crate::diag::log(format!("database error: {e}"))).ok();
         crate::diag::took("  database: opened", t, "");
+        if let Some((s, reader)) = db.as_ref().and_then(|d| Some((d.newest(NEWEST)?, d.reader()))) {
+            crate::diag::took("  database: newest messages read", t, "");
+            let _ = ltx.send(Loaded::Newest(s, reader));
+        }
         let mut store = db.as_mut().and_then(|d| d.load());
         if let Some(s) = store.as_mut() {
             prepare_store(s);
@@ -911,7 +944,7 @@ pub fn start_loading() -> Loading {
         let entries = store.as_ref().map(|s| crate::finder::entries(&s.messages));
         crate::diag::took("startup: texts for search copied", t, "");
         crate::diag::mem("after reading the mailbox");
-        let _ = ltx.send((db, store, entries));
+        let _ = ltx.send(Loaded::All(db, store, entries));
     });
     lrx
 }

@@ -126,6 +126,10 @@ impl MailApp {
     }
 
     pub(super) fn counts(&mut self) -> Arc<Counts> {
+        // only the newest messages are in yet: no numbers rather than wrong ones
+        if self.preview.is_some() {
+            return Arc::default();
+        }
         // (tags are counted for the account in focus: a change of account counts again)
         let key = self.msg_sig ^ (self.view_account as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         if let Some((sig, c)) = &self.counts {

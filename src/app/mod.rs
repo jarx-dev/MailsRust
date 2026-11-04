@@ -324,6 +324,8 @@ pub struct MailApp {
     counts: Option<(u64, Arc<Counts>)>,
     /// the mailbox being read from disk in the background at startup
     loading: Option<Loading>,
+    /// only the newest messages are in `store` yet (the rest still being read); their texts
+    preview: Option<crate::db::TextReader>,
     /// looking for the signature in sent mail (background), and how many sent messages were looked at
     sig_rx: Option<Receiver<Option<crate::signature::Found>>>,
     sig_seen: usize,
@@ -567,6 +569,7 @@ impl MailApp {
             vis: Default::default(),
             counts: None,
             loading,
+            preview: None,
             sig_rx: None,
             sig_seen: 0,
             card_html: HashMap::new(),
@@ -1028,11 +1031,19 @@ impl eframe::App for MailApp {
         }
         self.web_target = None;
         if self.loading_screen(ui) { return; }
+        if self.preview.is_some() {
+            // only the newest messages: to look at until the whole mailbox is in (anything done
+            // to them now would be lost when it takes their place)
+            ui.disable();
+            let _ = self.mail_view.keys();
+        }
         // the same for the main window (the keyboard back from the email view)
         if self.main_hwnd.is_some_and(|h| focus_state(h) == "this window") && !ctx.input(|i| i.focused) {
             ctx.input_mut(|i| i.focused = true);
         }
-        self.read_after_a_while(&ctx);
+        if self.preview.is_none() {
+            self.read_after_a_while(&ctx);
+        }
         self.nav_test_step(&ctx);
         {
             let _p = crate::prof::span("refresh caches");
@@ -1045,7 +1056,9 @@ impl eframe::App for MailApp {
             self.refresh_caches();
         }
         self.take_dropped_files(&ctx);
-        self.keyboard(&ctx);
+        if self.preview.is_none() {
+            self.keyboard(&ctx);
+        }
 
         egui::Panel::top("top")
             .frame(Frame::new().fill(BG()).inner_margin(Margin { left: 8, right: 4, top: 6, bottom: 6 }))

@@ -72,7 +72,13 @@ impl MailApp {
         if !self.msg(id).is_some_and(|m| m.on_disk) {
             return;
         }
-        let text = self.db.as_mut().and_then(|d| d.text(id));
+        // (while only the newest messages are in, the database is still being read: their
+        // texts come through its reader)
+        let text = match (self.db.as_mut(), &self.preview) {
+            (Some(d), _) => d.text(id),
+            (None, Some(r)) => r.text(id),
+            (None, None) => None,
+        };
         if let Some(m) = self.msg_mut(id) {
             m.body = text.unwrap_or_default();
             m.on_disk = false;

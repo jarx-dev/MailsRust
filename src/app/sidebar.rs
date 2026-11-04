@@ -406,7 +406,7 @@ impl MailApp {
             });
         // What is being prepared in the background: the offline copy and search by meaning.
         let mut notes: Vec<String> = Vec::new();
-        if self.store.has_real_mail && self.store.sync.map(|s| !s.complete).unwrap_or(false) {
+        if self.store.has_real_mail && self.preview.is_none() && self.store.sync.map(|s| !s.complete).unwrap_or(false) {
             let n = self.counts().folder_count.get(&Folder::Inbox).copied().unwrap_or(0);
             notes.push(format!("Pobieranie całej skrzynki… ({n} wiadomości offline)"));
         }

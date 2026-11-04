@@ -123,6 +123,20 @@ impl Db {
         Ok(Db { db: std::sync::Arc::new(db), saved_rows: HashMap::new(), saved_texts: HashMap::new(), saved_meta: 0 })
     }
 
+    /// The account and only the `n` newest messages (by number): a few pages of the file, read
+    /// at once even when Windows no longer keeps the file in memory (the whole mailbox then
+    /// takes seconds). Shown while `load` reads the rest.
+    pub fn newest(&self, n: usize) -> Option<Store> {
+        let r = self.db.begin_read().ok()?;
+        let mut store: Store = serde_json::from_slice(r.open_table(META).ok()?.get("store").ok()??.value()).ok()?;
+        let rows = r.open_table(MESSAGES).ok()?;
+        let mut messages: Vec<Message> = rows.iter().ok()?.rev().take(n).flatten().filter_map(|(_, v)| serde_json::from_slice::<Message>(v.value()).ok()).collect();
+        messages.reverse();
+        messages.iter_mut().for_each(|m| m.on_disk = true);
+        store.messages = messages;
+        Some(store)
+    }
+
     /// The mailbox as saved last time (None if the database is still empty).
     pub fn load(&mut self) -> Option<Store> {
         let r = self.db.begin_read().ok()?;

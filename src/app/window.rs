@@ -84,7 +84,9 @@ impl MailApp {
     /// While the mailbox is being read: a plain loading screen (the window can be moved by it)
     /// instead of an empty app that fills in a moment later. True when it was shown.
     pub(super) fn loading_screen(&mut self, ui: &mut Ui) -> bool {
-        if self.loading.is_none() {
+        // the newest messages are in: shown, unless the whole mailbox is about to follow (a
+        // moment's wait instead of a list that changes at once)
+        if self.loading.is_none() || (self.preview.is_some() &&self.opened.elapsed() > std::time::Duration::from_millis(300)) {
             return false;
         }
         egui::CentralPanel::default().frame(Frame::new().fill(BG())).show(ui, |ui| {
