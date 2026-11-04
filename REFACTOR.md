@@ -16,10 +16,17 @@ aplikację pod szybkość, małe zużycie RAM i CPU oraz płynne UI. Zachowanie 
 - Etap 1 zrobiony (commity „Etap 1: …”): `src/app/` = `mod.rs` (rdzeń, 1487 linii) + `compose`,
   `reading`, `list`, `sidebar`, `sync`, `actions`, `contacts_ui`, `settings`, `window`; tryby CLI
   z `main()` w `src/cli.rs`; `net.rs` bez zmian (części splecione). Build release i clippy bez
-  nowych ostrzeżeń (bazowo 18 ostrzeżeń rustc). Ręczny test aplikacji i etapy 2–4: do zrobienia.
-- Aplikacja jest tylko pod Windows. Na Linuksie (NUC) sprawdzisz ją tylko przez
-  `cargo check|clippy --release --target x86_64-pc-windows-gnu`; uruchomienie, zrzuty
-  (`--screenshot` + `POCZTA_START=…`) i pomiary do `PERF.md` wymagają Windows.
+  nowych ostrzeżeń (bazowo 18 ostrzeżeń rustc).
+- Etap 3 zrobiony w zakresie możliwym bez Windows (commity „Etap 3: …”, opis w `PERF.md`): HTML okna
+  czytania parsowany raz, wektory wyszukiwania zapisywane w tle, martwy kod usunięty (rustc 18 → 5
+  ostrzeżeń), profil `lto="thin"` + `codegen-units=1` (exe −9,8%).
+- Do zrobienia na Windows: ręczny test aplikacji (etap 1) oraz pomiary czasu, RAM i CPU do `PERF.md`
+  (etapy 2 i 4, procedura w `PERF.md`). Zostaje zapis redb w wątku UI przy autozapisie.
+- Aplikacja jest tylko pod Windows. Na Linuksie (NUC) sprawdzisz ją przez
+  `cargo check|clippy --release --target x86_64-pc-windows-msvc`, a exe zbudujesz przez
+  `cargo xwin build --release --target x86_64-pc-windows-msvc` (target `-gnu` wymaga `dlltool` z
+  Windows, patrz `.cargo/config.toml`). Uruchomienie, zrzuty (`--screenshot` + `POCZTA_START=…`)
+  i pomiary czasu, RAM i CPU wymagają Windows.
 
 ## Etap 1: podział app.rs (najpierw, przed optymalizacją)
 
