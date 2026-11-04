@@ -46,6 +46,14 @@ fn built_at() -> u64 {
     env!("POCZTA_BUILT_AT").parse().unwrap_or(0)
 }
 
+/// "Wersja 2026-11-04 21:35 (e841647)", from the build time, for the menu: after an update it
+/// shows the newer date. "lokalna" marks a build that doesn't update itself.
+pub fn version() -> String {
+    let when = chrono::DateTime::from_timestamp(built_at() as i64, 0).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+    let commit = BUILD.rsplit_once('-').map_or(BUILD, |(c, _)| c);
+    format!("Wersja {when} ({commit}{})", if PUBLISHED { "" } else { ", lokalna" })
+}
+
 /// `latest.json` written by the publish script.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
@@ -548,6 +556,13 @@ mod tests {
         assert!(verify(b"MZ\x90\x00resT", &m).is_err(), "hash");
         assert!(verify(b"MZ", &m).is_err(), "size");
         assert!(verify(b"<html>", &manifest(b"<html>")).is_err(), "header");
+    }
+
+    #[test]
+    fn version_shows_build_date_and_commit() {
+        let v = version();
+        let commit = BUILD.rsplit_once('-').map_or(BUILD, |(c, _)| c);
+        assert!(v.starts_with("Wersja 20") && v.contains(&format!("({commit}")), "{v}");
     }
 
     #[test]

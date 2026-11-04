@@ -236,6 +236,8 @@ impl MailApp {
                 if ui.button("Zakończ").on_hover_text("Kończy działanie programu (zamknięcie okna tylko je minimalizuje)").clicked() {
                     self.quit();
                 }
+                ui.label(RichText::new(crate::update::version()).size(11.5).color(MUTED()))
+                    .on_hover_text("Kiedy zbudowano tę wersję programu: po aktualizacji pokazuje nowszą datę");
             });
             ui.add_space(6.0);
             let new_label = if self.module == Module::Calendar { "Nowe" } else { "Nowy" };
