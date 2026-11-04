@@ -13,13 +13,21 @@ const TEXTS: TableDefinition<u64, &str> = TableDefinition::new("texts");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
 /// Reads message texts from the database, from any thread (the texts stay on disk until
-/// a message is opened, and the search reads them from here in the background).
+/// a message is opened, and the search reads them from here in the background). It doesn't keep
+/// the database open: only the app's `Db` does, so closing it really closes the file.
 #[derive(Clone)]
-pub struct TextReader(std::sync::Arc<Database>);
+pub struct TextReader(std::sync::Weak<Database>);
+
+/// Set while the app closes the database: background reads stop, so the file can close.
+static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl TextReader {
     pub fn text(&self, id: u64) -> Option<String> {
-        let r = self.0.begin_read().ok()?;
+        if CLOSING.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let db = self.0.upgrade()?;
+        let r = db.begin_read().ok()?;
         let t = r.open_table(TEXTS).ok()?;
         let v = t.get(id).ok()??;
         Some(v.value().to_string())
@@ -225,12 +233,31 @@ impl Db {
 
     /// A reader of message texts for other threads.
     pub fn reader(&self) -> TextReader {
-        TextReader(self.db.clone())
+        TextReader(std::sync::Arc::downgrade(&self.db))
+    }
+
+    /// Closes the file properly (waiting up to a second for reads still running on other
+    /// threads). Without that, the next start repairs the whole file first: seconds for a big
+    /// mailbox. False if it was still in use.
+    pub fn close(self) -> bool {
+        CLOSING.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut db = self.db;
+        for _ in 0..100 {
+            match std::sync::Arc::try_unwrap(db) {
+                Ok(d) => {
+                    drop(d);
+                    return true;
+                }
+                Err(still) => db = still,
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
     }
 
     /// The text of one message (read when it is opened).
     pub fn text(&mut self, id: u64) -> Option<String> {
-        let t = TextReader(self.db.clone()).text(id)?;
+        let t = self.reader().text(id)?;
         self.saved_texts.insert(id, text_key(&t));
         Some(t)
     }
