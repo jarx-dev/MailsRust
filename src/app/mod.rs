@@ -1449,6 +1449,7 @@ impl eframe::App for MailApp {
         // the database is closed properly (else it checks itself on the next start)
         let t = std::time::Instant::now();
         drop(self.db.take());
+        self.finder.wait_saved();
         crate::diag::took("closing: database closed", t, "");
         crate::diag::log("closing: saved, ending the app");
         std::process::exit(0);

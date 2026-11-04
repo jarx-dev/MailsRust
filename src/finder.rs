@@ -35,6 +35,8 @@ pub struct Finder {
     /// search is still reading it, which is rare)
     vectors: Arc<HashMap<u64, Vec<i8>>>,
     vectors_dirty: bool,
+    /// the meanings being written to disk on another thread (the window doesn't wait for it)
+    saving: Option<std::thread::JoinHandle<()>>,
     embedding: bool,
     vec_tx: Sender<Vec<(u64, Vec<i8>)>>,
     vec_rx: Receiver<Vec<(u64, Vec<i8>)>>,
@@ -83,6 +85,7 @@ impl Finder {
             load_rx,
             vectors: Arc::new(HashMap::new()),
             vectors_dirty: false,
+            saving: None,
             embedding: false,
             vec_tx,
             vec_rx,
@@ -151,8 +154,18 @@ impl Finder {
         if self.vectors.keys().any(|id| !ids.contains(id)) {
             Arc::make_mut(&mut self.vectors).retain(|id, _| ids.contains(id));
         }
-        semantic::save_vectors(&self.vectors);
+        // one write at a time (they share the same file); the previous one ended long ago
+        self.wait_saved();
+        let v = self.vectors.clone();
+        self.saving = Some(std::thread::spawn(move || semantic::save_vectors(&v)));
         self.vectors_dirty = false;
+    }
+
+    /// Waits for the meanings being written (before the app ends).
+    pub fn wait_saved(&mut self) {
+        if let Some(h) = self.saving.take() {
+            let _ = h.join();
+        }
     }
 
     /// Called every frame: keeps everything up to date and answers the search.
