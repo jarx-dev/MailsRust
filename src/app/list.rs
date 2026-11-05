@@ -418,22 +418,26 @@ impl MailApp {
     }
 
     /// The conversation's messages newer than the open one, below it, folded to one line each
-    /// (oldest first); a click opens one, a double click opens it in a window of its own.
+    /// (oldest first, all of them, scrolling in the room of `LATER_SHOWN`); a click opens one, a
+    /// double click opens it in a window of its own.
     pub(super) fn later_cards(&mut self, ui: &mut Ui, open: u64) {
         let ids: Vec<u64> = self.thread_later.clone();
         if ids.is_empty() || self.thread_for != Some(open) {
             return;
         }
         ui.add_space(6.0);
-        for id in ids.iter().take(LATER_SHOWN) {
-            let Some(x) = self.msg(*id).cloned() else { continue };
-            if self.thread_card(ui, &x, false) {
-                self.actions.push(Action::Select(x.id));
+        // (under the email view only its kept room; under a plain text whatever is left too)
+        let room = (ids.len().min(LATER_SHOWN) as f32 * 54.0).max(ui.available_height() - 28.0);
+        egui::ScrollArea::vertical().id_salt(("later", open)).max_height(room).auto_shrink([false, true]).show(ui, |ui| {
+            for id in &ids {
+                let Some(x) = self.msg(*id).cloned() else { continue };
+                if self.thread_card(ui, &x, false) {
+                    self.actions.push(Action::Select(x.id));
+                }
             }
-        }
+        });
         if ids.len() > LATER_SHOWN {
-            let more = ids.len() - LATER_SHOWN;
-            let label = format!("↓  jeszcze {more} {} w tej rozmowie", pl_newer(more));
+            let label = format!("↓  Przejdź do najnowszej ({} {} w tej rozmowie)", ids.len(), pl_newer(ids.len()));
             let resp = ui.add(egui::Label::new(RichText::new(label).size(12.5).color(ACCENT())).sense(Sense::click()));
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 if let Some(last) = ids.last() {
