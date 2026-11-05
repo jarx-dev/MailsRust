@@ -500,26 +500,33 @@ specjalista ds. Informatyki".into();
             && self.store.account.can_connect()
             && self.store.has_real_mail
             && !self.quitting;
-        let a = &self.store.account;
-        let who = format!("{}|{}|{}|{}", a.username, a.imap_host, a.imap_port, a.use_oauth);
-        if !usable || self.watch.as_ref().is_some_and(|(w, ..)| *w != who) {
-            if let Some((_, stop, _)) = self.watch.take() {
+        // one waiting connection for every account that can sign in (each tells of its own inbox)
+        let who = |a: &crate::model::Account| format!("{}|{}|{}|{}", a.username, a.imap_host, a.imap_port, a.use_oauth);
+        let wanted: Vec<(u32, String)> = if usable {
+            (0..=self.store.extra.len() as u32).map(|i| (i, self.account_ref(i))).filter(|(_, a)| a.can_connect()).map(|(i, a)| (i, who(a))).collect()
+        } else {
+            Vec::new()
+        };
+        self.watch.retain(|(w, stop, _)| {
+            let keep = wanted.iter().any(|(_, x)| x == w);
+            if !keep {
                 stop.store(true, Ordering::Relaxed);
             }
-        }
+            keep
+        });
         if !usable {
             return;
         }
-        if self.watch.is_none() {
-            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let (tx, rx) = channel();
-            net::watch_inbox(self.store.account.clone(), stop.clone(), tx, self.ctx.clone());
-            self.watch = Some((who, stop, rx));
-        }
-        if let Some((_, _, rx)) = &self.watch {
-            if rx.try_iter().count() > 0 {
-                self.watch_due = true;
+        for (i, w) in wanted {
+            if !self.watch.iter().any(|(x, ..)| *x == w) {
+                let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let (tx, rx) = channel();
+                net::watch_inbox(self.account_for(i), stop.clone(), tx, self.ctx.clone());
+                self.watch.push((w, stop, rx));
             }
+        }
+        if self.watch.iter().fold(false, |any, (_, _, rx)| rx.try_iter().count() > 0 || any) {
+            self.watch_due = true;
         }
         if self.watch_due && !self.receiving && !self.ops_running && self.pending_ops.is_empty() {
             self.watch_due = false;
@@ -578,6 +585,8 @@ specjalista ds. Informatyki".into();
                     let last = sync.last;
                     // the first step brings new mail and recent changes; later steps older mail
                     let backfill = sync.flags.is_empty() && sync.window_from.is_none();
+                    // the step that only brings Gmail's labels, right after the new mail
+                    let labels_only = !sync.flags.is_empty() && sync.window_from.is_none();
                     if last {
                         self.receiving_left = self.receiving_left.saturating_sub(1);
                         if self.receiving_left == 0 {
@@ -737,7 +746,7 @@ specjalista ds. Informatyki".into();
                                 2..=4 => format!("{added} nowe wiadomości"),
                                 _ => format!("{added} nowych wiadomości"),
                             });
-                        } else if !quiet {
+                        } else if !quiet && !labels_only {
                             self.set_status("Wszystko aktualne");
                         }
                     }

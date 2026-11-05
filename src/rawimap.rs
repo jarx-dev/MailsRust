@@ -101,7 +101,7 @@ impl RawImap {
                 use base64::Engine;
                 let sasl = format!("user={}\x01auth=Bearer {}\x01\x01", acc.username.trim(), token);
                 let b64 = base64::engine::general_purpose::STANDARD.encode(sasl);
-                me.cmd(&format!("AUTHENTICATE XOAUTH2 {b64}"))?;
+                me.cmd(&format!("AUTHENTICATE XOAUTH2 {b64}")).inspect_err(|_| crate::oauth::forget_tokens())?;
             }
             None => {
                 me.cmd(&format!("LOGIN {} {}", quote(acc.username.trim()), quote(&acc.password)))?;

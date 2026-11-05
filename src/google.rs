@@ -49,6 +49,7 @@ fn explain(e: ureq::Error, what: &str) -> String {
                 return "brak zgody na dostęp — kliknij „Zaloguj ponownie przez Google” i zaznacz dostęp do kalendarza i kontaktów".into();
             }
             if code == 401 {
+                crate::oauth::forget_tokens();
                 return "Google nie przyjął logowania — zaloguj się ponownie przez Google".into();
             }
             let msg = serde_json::from_str::<Value>(&body).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or(body);

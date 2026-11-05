@@ -51,9 +51,13 @@ pub fn run(args: &[String]) -> bool {
         }
         let known: std::collections::HashSet<u32> =
             store.messages.iter().filter(|m| m.folder == model::Folder::Inbox).filter_map(|m| m.uid).collect();
-        let (tx, rx) = std::sync::mpsc::channel();
         let sent_known: std::collections::HashSet<u32> =
             store.messages.iter().filter(|m| m.folder == model::Folder::Sent).filter_map(|m| m.uid).collect();
+        // SYNC_ROUNDS=2: a second round right after, as the app's later checks run
+        let rounds: u32 = std::env::var("SYNC_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        for round in 1..=rounds {
+        diag::log(format!("== sync-check round {round}"));
+        let (tx, rx) = std::sync::mpsc::channel();
         net::receive(
             store.account.clone(),
             0,
@@ -91,6 +95,7 @@ pub fn run(args: &[String]) -> bool {
                 }
                 _ => {}
             }
+        }
         }
         return true;
     }
