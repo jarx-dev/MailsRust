@@ -15,6 +15,8 @@ pub enum NetResult {
     Synced,
     /// The full version of a message that was stored with its header only.
     Full { acct: u32, uid: u32, folder: Folder, message: Box<Message> },
+    /// Copied people (DW) of an account's stored mail: (folder, uid, "a@x.pl, b@y.pl").
+    Copies { acct: u32, found: Result<Vec<(Folder, u32, String)>, String> },
 }
 
 /// Runs a background job so that even an unexpected crash inside it comes back as an
@@ -1201,6 +1203,53 @@ pub fn decode_mutf7(s: &str) -> String {
     out
 }
 
+/// "Anna Nowak <a@x.pl>, b@y.pl": the people of a To / Cc header (names without the marks that
+/// would split the list: it is read back by splitting at commas).
+fn addresses(list: Option<mail_parser::AddressList>) -> String {
+    list.map(|a| {
+        a.mailboxes()
+            .filter_map(|x| {
+                let addr = x.address()?;
+                let name: String = x.name().unwrap_or("").chars().filter(|c| !",;\"<>".contains(*c)).collect();
+                let name = name.trim();
+                Some(if name.is_empty() || name == addr { addr.to_string() } else { format!("{name} <{addr}>") })
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+    .unwrap_or_default()
+}
+
+/// Once per account, for mail stored before the app kept copied people (DW): the Cc line of
+/// every message in its folders, read without changing anything on the server.
+pub fn fill_copies(account: Account, acct: u32, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
+    std::thread::spawn(move || {
+        let t = std::time::Instant::now();
+        let found = guarded(|| {
+            let mut session = open_session(&account)?;
+            let mut found = Vec::new();
+            for f in [Folder::Inbox, Folder::Sent, Folder::Trash, Folder::Junk] {
+                // (the special folders are known after the first sync, which runs before this)
+                let Some(name) = (if f == Folder::Inbox { Some("INBOX".into()) } else { special_mailbox(&account, f) }) else { continue };
+                session.examine(&name).map_err(|e| e.to_string())?;
+                let fetches = session.uid_fetch("1:*", "(UID BODY.PEEK[HEADER.FIELDS (CC)])").map_err(|e| e.to_string())?;
+                for x in fetches.iter() {
+                    let (Some(uid), Some(h)) = (x.uid, x.header()) else { continue };
+                    let cc = mail_parser::MessageParser::default().parse(h).map(|m| addresses(m.cc())).unwrap_or_default();
+                    if !cc.is_empty() {
+                        found.push((f, uid, cc));
+                    }
+                }
+            }
+            let _ = session.logout();
+            Ok(found)
+        });
+        crate::diag::took("copied people (DW) read", t, format!("{}: {}", account.email, found.as_ref().map(|f| format!("{} messages with DW", f.len())).unwrap_or_else(|e| e.clone())));
+        let _ = tx.send(NetResult::Copies { acct, found });
+        ctx.request_repaint();
+    });
+}
+
 pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
     let msg = mail_parser::MessageParser::default().parse(raw)?;
     let (from_name, from_addr) = msg
@@ -1212,15 +1261,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
             (name, addr)
         })
         .unwrap_or_else(|| ("(unknown sender)".into(), String::new()));
-    let to = msg
-        .to()
-        .map(|a| {
-            a.mailboxes()
-                .filter_map(|x| x.address().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default();
+    let (to, cc) = (addresses(msg.to()), addresses(msg.cc()));
     let date = msg
         .date()
         .and_then(|d| Local.timestamp_opt(d.to_timestamp(), 0).single())
@@ -1275,7 +1316,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         from_name,
         from_addr,
         to,
-        cc: String::new(),
+        cc,
         subject: msg.subject().unwrap_or("(no subject)").to_string(),
         body,
         date,
@@ -1381,4 +1422,14 @@ fn smtp_send(acc: &Account, m: &Outgoing) -> Result<(), String> {
         e.to_string()
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn copied_people_are_read() {
+        let raw = b"From: A <a@x.pl>\r\nTo: b@x.pl\r\nCc: \"Lis, Ewa\" <c@x.pl>,\r\n =?UTF-8?Q?D=C5=BA?= <d@x.pl>\r\nSubject: s\r\n\r\nbody\r\n";
+        let m = super::parse(raw, false, false).unwrap();
+        assert_eq!((m.to.as_str(), m.cc.as_str()), ("b@x.pl", "Lis Ewa <c@x.pl>, Dź <d@x.pl>"));
+    }
 }

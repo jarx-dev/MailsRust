@@ -357,6 +357,9 @@ pub struct Store {
     pub trash_sync: Option<crate::net::SyncState>,
     #[serde(default)]
     pub junk_sync: Option<crate::net::SyncState>,
+    /// Accounts (by address) whose stored mail got its copied people (DW) from the server.
+    #[serde(default)]
+    pub copies_read: Vec<String>,
 }
 
 /// A further mail account and how far its folders are synced.
@@ -393,6 +396,7 @@ impl Store {
             sent_sync: None,
             trash_sync: None,
             junk_sync: None,
+            copies_read: vec![],
         };
 
         type Row<'a> = (Folder, &'a str, &'a str, &'a str, &'a str, NaiveDateTime, bool, bool, Vec<&'a str>, &'a str);

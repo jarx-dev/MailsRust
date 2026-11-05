@@ -486,6 +486,17 @@ specjalista ds. Informatyki".into();
             self.quiet_sync = true;
             self.send_receive();
         }
+        // once, after the first sync: the copied people (DW) of mail stored before they were kept
+        if !self.copies_asked && self.last_sync >= 0.0 && !self.receiving && self.store.has_real_mail {
+            self.copies_asked = true;
+            for a in 0..=self.store.extra.len() as u32 {
+                let acc = self.account_for(a);
+                if acc.can_connect() && !self.store.copies_read.contains(&acc.email) {
+                    self.busy += 1;
+                    net::fill_copies(acc, a, self.tx.clone(), self.ctx.clone());
+                }
+            }
+        }
         self.ctx.request_repaint_after(std::time::Duration::from_secs(15));
     }
 
@@ -806,6 +817,21 @@ specjalista ds. Informatyki".into();
                         }
                     }
                 }
+                NetResult::Copies { acct, found } => match found {
+                    Ok(found) => {
+                        let found: HashMap<(Folder, u32), String> = found.into_iter().map(|(f, uid, cc)| ((f, uid), cc)).collect();
+                        for m in self.store.messages.iter_mut().filter(|m| m.account == acct && m.cc.is_empty()) {
+                            if let Some(cc) = m.uid.and_then(|uid| found.get(&(m.folder, uid))) {
+                                m.cc = cc.clone();
+                            }
+                        }
+                        let email = self.account_ref(acct).email.clone();
+                        self.store.copies_read.push(email);
+                        self.save_now = true;
+                    }
+                    // (asked again at the next start)
+                    Err(e) => crate::diag::log(format!("copied people (DW) not read: {e}")),
+                },
                 NetResult::Sent { id } => {
                     if let Some(m) = self.msg_mut(id) {
                         m.folder = Folder::Sent;

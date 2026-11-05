@@ -669,17 +669,26 @@ impl MailApp {
             let to_line = fit_names(ui, "do ", &to_people, room);
             let cc_line = fit_names(ui, "DW: ", &cc_people, room);
             line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0), &to_line, 13.5, ACCENT(), room);
+            let mut rows = vec![(sr.top() + 26.0, &to_line, &to_people)];
             let mut next_y = sr.top() + 50.0;
             if !cc_people.is_empty() {
                 line(ui.painter(), Pos2::new(sr.left() + 60.0, next_y), &cc_line, 13.5, ACCENT(), room);
+                rows.push((next_y - 2.0, &cc_line, &cc_people));
                 next_y += 22.0;
             }
-            // more people than shown: a click on the lines shows everyone (and folds them again)
-            if to_line.contains("  +") || cc_line.contains("  +") || rcpt_open {
-                let area = Rect::from_min_max(Pos2::new(sr.left() + 60.0, sr.top() + 26.0), Pos2::new(sr.left() + 60.0 + room, next_y));
-                let r = ui.interact(area, id(("rcpt-lines", m.id)), Sense::click());
-                hint_above(ui, &r, if rcpt_open { "Zwiń listę adresatów" } else { "Pokaż wszystkich adresatów" });
-                if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            // a pointer on a line shows its people's addresses; with more people than shown, a
+            // click on it shows everyone (and folds them again)
+            let more = to_line.contains("  +") || cc_line.contains("  +") || rcpt_open;
+            for (k, (top, text, people)) in rows.into_iter().enumerate() {
+                let w = text_width(ui, text, FontId::proportional(13.5)).min(room);
+                let area = Rect::from_min_size(Pos2::new(sr.left() + 60.0, top), Vec2::new(w, 22.0));
+                let r = ui.interact(area, id(("rcpt-line", m.id, k)), if more { Sense::click() } else { Sense::hover() });
+                let mut hint = people.iter().map(|(n, a)| if n == a { a.clone() } else { format!("{n} — {a}") }).collect::<Vec<_>>().join("\n");
+                if more {
+                    hint += if rcpt_open { "\n(kliknij, aby zwinąć listę)" } else { "\n(kliknij, aby pokazać wszystkich)" };
+                }
+                hint_above(ui, &r, &hint);
+                if more && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     ui.data_mut(|d| d.insert_temp(rcpt_key, !rcpt_open));
                 }
             }
