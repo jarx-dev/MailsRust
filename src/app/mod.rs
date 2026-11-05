@@ -293,6 +293,8 @@ pub struct MailApp {
     receiving: bool,
     quiet_sync: bool,
     last_sync: f64,
+    /// The copied people (DW) of older mail were asked for in this session (see `net::fill_copies`).
+    copies_asked: bool,
     prefs: Prefs,
     finder: crate::finder::Finder,
     db: Option<crate::db::Db>,
@@ -514,6 +516,7 @@ impl MailApp {
             receiving: false,
             quiet_sync: false,
             last_sync: -1.0,
+            copies_asked: false,
             prefs: Prefs::default(),
             finder: crate::finder::Finder::new(search_on),
             db,
