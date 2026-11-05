@@ -370,7 +370,9 @@ impl MailApp {
             }
         }
         // the cards scroll in their own space; with the open message folded they may use it all
-        let max_h = if self.main_folded { ui.available_height() - 70.0 } else { (ui.available_height() * 0.55).max(160.0) };
+        // (the newer ones are known now: their room below is kept free)
+        self.thread_later = later.iter().map(|x| x.id).collect();
+        let max_h = if self.main_folded { (ui.available_height() - 70.0 - self.later_height(m.id)).max(60.0) } else { (ui.available_height() * 0.55).max(160.0) };
         egui::ScrollArea::vertical().id_salt(("thread", m.id)).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
             for x in &shown {
                 let unfolded = self.thread_unfolded.contains(&x.id);
@@ -389,8 +391,6 @@ impl MailApp {
                 }
             }
         });
-        // the newer messages of the conversation go below the open one (see `later_cards`)
-        self.thread_later = later.iter().map(|x| x.id).collect();
         ui.add_space(6.0);
         true
     }

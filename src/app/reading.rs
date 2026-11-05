@@ -543,6 +543,8 @@ impl MailApp {
                 if self.thread_card(ui, &m, false) {
                     self.main_folded = false;
                 }
+                // the newer ones (e.g. the reply just sent) below it, as with the message open
+                self.later_cards(ui, m.id);
                 return;
             }
             if in_thread {
