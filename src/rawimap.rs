@@ -138,8 +138,10 @@ impl RawImap {
     }
 
     /// Folder with a special use such as \Trash or \Junk (its name as the server writes it).
-    pub fn special_folder(&mut self, attr: &str, fallbacks: &[&str]) -> Option<String> {
-        let lines = self.cmd("LIST \"\" \"*\"").ok()?;
+    /// The folder with that special mark (or one of the usual names); an error when the server
+    /// couldn't list its folders (not the same as "there is none").
+    pub fn special_folder(&mut self, attr: &str, fallbacks: &[&str]) -> Result<Option<String>, String> {
+        let lines = self.cmd("LIST \"\" \"*\"")?;
         let mut names = Vec::new();
         for l in lines {
             let Some(rest) = l.strip_prefix("* LIST (") else { continue };
@@ -158,13 +160,11 @@ impl RawImap {
                 after.to_string()
             };
             if attrs.split_whitespace().any(|a| a.eq_ignore_ascii_case(attr)) {
-                return Some(name);
+                return Ok(Some(name));
             }
             names.push(name);
         }
-        fallbacks
-            .iter()
-            .find_map(|f| names.iter().find(|n| n.eq_ignore_ascii_case(f)).cloned())
+        Ok(fallbacks.iter().find_map(|f| names.iter().find(|n| n.eq_ignore_ascii_case(f)).cloned()))
     }
 
     pub fn quote(s: &str) -> String {

@@ -331,6 +331,8 @@ pub fn special_mailbox(acc: &Account, f: Folder) -> Option<String> {
     let (mark, names) = special_names(f);
     let name = c.special_folder(mark, names);
     c.logout();
+    // (kept only when the server listed its folders)
+    let name = name.ok()?;
     if let Ok(mut m) = SPECIAL.lock() {
         m.insert(key, name.clone());
     }
@@ -494,7 +496,7 @@ pub fn run_ops(account: Account, ops: Vec<Op>, tx: Sender<NetResult>, ctx: efram
             }
             for (f, list) in others {
                 let (mark, names) = special_names(f);
-                match c.special_folder(mark, names) {
+                match c.special_folder(mark, names).ok().flatten() {
                     Some(name) => groups.push((name, list)),
                     None => failed += list.len(),
                 }
@@ -529,9 +531,9 @@ pub fn run_ops(account: Account, ops: Vec<Op>, tx: Sender<NetResult>, ctx: efram
                         let slot = if is_trash { &mut trash } else { &mut junk };
                         if slot.is_none() {
                             *slot = Some(if is_trash {
-                                c.special_folder("\\Trash", &["[Gmail]/Kosz", "[Gmail]/Trash", "Trash", "Kosz", "Deleted Items", "Deleted"])
+                                c.special_folder("\\Trash", &["[Gmail]/Kosz", "[Gmail]/Trash", "Trash", "Kosz", "Deleted Items", "Deleted"]).ok().flatten()
                             } else {
-                                c.special_folder("\\Junk", &["[Gmail]/Spam", "Spam", "Junk", "Junk E-mail"])
+                                c.special_folder("\\Junk", &["[Gmail]/Spam", "Spam", "Junk", "Junk E-mail"]).ok().flatten()
                             });
                         }
                         match slot.clone().flatten() {

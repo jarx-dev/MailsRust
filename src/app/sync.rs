@@ -493,6 +493,11 @@ specjalista ds. Informatyki".into();
     /// as soon as the server reports a change (the regular check every 2 minutes stays as a backup).
     pub(super) fn watch_inbox(&mut self) {
         use std::sync::atomic::Ordering;
+        // the account window edits the sign-in as it is typed: the waiting connections are
+        // started again once, after it closes (not on every letter of a password)
+        if self.account_open {
+            return;
+        }
         let usable = self.loading.is_none()
             && !self.read_only
             && self.shot.is_none()
@@ -613,7 +618,8 @@ specjalista ds. Informatyki".into();
                         }
                     }
                     let changes_waiting = !self.pending_ops.is_empty() || self.ops_running;
-                    if labels_only {
+                    // (labels that couldn't be fetched come empty: nothing changed then)
+                    if labels_only && !sync.labels.is_empty() {
                         // Gmail's labels of the window just synced (its read / flag state was the
                         // first step's: applied then, never again, as it may be older than a click
                         // since). With our own changes on their way, only messages without labels
