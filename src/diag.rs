@@ -64,6 +64,12 @@ pub fn kb(bytes: usize) -> String {
 
 /// Memory this program uses now (private, in MB), for the speed log.
 pub fn mem_mb() -> u64 {
+    mem_both().0
+}
+
+/// (private, in RAM now): what the program holds, and the part of it in RAM (the working set,
+/// as Task Manager shows it).
+fn mem_both() -> (u64, u64) {
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX};
@@ -71,15 +77,16 @@ pub fn mem_mb() -> u64 {
         let mut c: PROCESS_MEMORY_COUNTERS_EX = std::mem::zeroed();
         c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
         if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c as *mut _ as *mut _, c.cb) != 0 {
-            return (c.PrivateUsage / 1_048_576) as u64;
+            return ((c.PrivateUsage / 1_048_576) as u64, (c.WorkingSetSize / 1_048_576) as u64);
         }
     }
-    0
+    (0, 0)
 }
 
 /// A line in the log with the memory used now.
 pub fn mem(what: &str) {
-    log(format!("memory {what}: {} MB", mem_mb()));
+    let (private, ram) = mem_both();
+    log(format!("memory {what}: {private} MB ({ram} MB in RAM)"));
 }
 
 /// Gives memory that was used for a while (e.g. while loading) and is free again back to
@@ -89,6 +96,17 @@ pub fn give_back_memory() {
     unsafe {
         use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
         HeapCompact(GetProcessHeap(), 0);
+    }
+}
+
+/// The app went to the background: memory it isn't using is handed to Windows (for other
+/// programs; what the app touches again comes back from Windows' list in a moment).
+pub fn trim_memory() {
+    give_back_memory();
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::{ProcessStatus::K32EmptyWorkingSet, Threading::GetCurrentProcess};
+        K32EmptyWorkingSet(GetCurrentProcess());
     }
 }
 

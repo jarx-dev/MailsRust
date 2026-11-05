@@ -8,6 +8,7 @@
 #   scripts/win-test.sh build                 # build the EXE here and send it (with win-run.cmd)
 #   scripts/win-test.sh fresh                 # copy the real mailbox for the tests (Poczta closed!)
 #   scripts/win-test.sh run <ms> [VAR=value]  # one run, closed after <ms>; extra variables for the app
+#                                             # (POCZTA_ARGS=--minimized: arguments for the EXE)
 #
 # Results: ~/mailrust-tests/<time>/ (sync.log of the run, cpu-mem.csv). Env: WIN (default
 # jarek@100.100.1.3), WDIR (default C:\Users\user\poczta-test).

@@ -38,17 +38,39 @@ impl MailApp {
     /// Takes over the mailbox once it has been read from disk (see `new`).
     pub(super) fn poll_loading(&mut self, frame: &eframe::Frame) {
         let Some(rx) = &self.loading else { return };
-        let Ok((db, from_db, entries)) = rx.try_recv() else {
-            // meanwhile, get the browser view for formatted mail ready (it takes a moment to
-            // start), from the second frame on so the window itself shows first
-            // (only for the browser view kept as a fallback: emails are drawn by the app)
-            if self.drawn >= 2 && self.shot.is_none() && std::env::var("POCZTA_BLITZ").is_err() {
-                self.mail_view.prepare(frame);
+        let (db, from_db, entries) = match rx.try_recv() {
+            Ok(Loaded::All(db, from_db, entries)) => (db, from_db, entries),
+            Ok(Loaded::Newest(store, reader)) => {
+                // the newest messages to look at while the rest is read (nothing is saved, sent
+                // or done with them: the window is just to look at, see `ui`)
+                self.store = store;
+                self.preview = Some(reader);
+                self.touched = true;
+                self.refresh_caches();
+                if self.selected.is_none() {
+                    self.selected = self.visible_ids().first().copied();
+                }
+                crate::diag::log(format!("startup: newest messages shown {} ms after opening", self.opened.elapsed().as_millis()));
+                self.ctx.request_repaint();
+                return;
             }
-            self.ctx.request_repaint_after(std::time::Duration::from_millis(30));
-            return;
+            Err(_) => {
+                // meanwhile, get the browser view for formatted mail ready (it takes a moment to
+                // start), from the second frame on so the window itself shows first
+                // (only for the browser view kept as a fallback: emails are drawn by the app)
+                if self.drawn >= 2 && self.shot.is_none() && std::env::var("POCZTA_BLITZ").is_err() {
+                    self.mail_view.prepare(frame);
+                }
+                self.ctx.request_repaint_after(std::time::Duration::from_millis(30));
+                return;
+            }
         };
         self.loading = None;
+        // the message picked among the newest ones only: the real newest is chosen below (older
+        // mail fetched later has higher numbers, so the preview may not have it)
+        if self.preview.take().is_some() {
+            self.selected = None;
+        }
         // (a build that can't read the mailbox it finds is not confirmed to its update guard)
         let loaded = from_db.is_some();
         // nothing in the database yet: the older single-file storage, moved over once
@@ -471,6 +493,11 @@ specjalista ds. Informatyki".into();
     /// as soon as the server reports a change (the regular check every 2 minutes stays as a backup).
     pub(super) fn watch_inbox(&mut self) {
         use std::sync::atomic::Ordering;
+        // the account window edits the sign-in as it is typed: the waiting connections are
+        // started again once, after it closes (not on every letter of a password)
+        if self.account_open {
+            return;
+        }
         let usable = self.loading.is_none()
             && !self.read_only
             && self.shot.is_none()
@@ -478,26 +505,39 @@ specjalista ds. Informatyki".into();
             && self.store.account.can_connect()
             && self.store.has_real_mail
             && !self.quitting;
-        let a = &self.store.account;
-        let who = format!("{}|{}|{}|{}", a.username, a.imap_host, a.imap_port, a.use_oauth);
-        if !usable || self.watch.as_ref().is_some_and(|(w, ..)| *w != who) {
-            if let Some((_, stop, _)) = self.watch.take() {
+        // one waiting connection for every account that can sign in (each tells of its own inbox;
+        // started again when its sign-in changes: new password or Google sign-in)
+        let who = |a: &crate::model::Account| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&a.password, &a.oauth_refresh_token).hash(&mut h);
+            format!("{}|{}|{}|{}|{:x}", a.username, a.imap_host, a.imap_port, a.use_oauth, h.finish())
+        };
+        let wanted: Vec<(u32, String)> = if usable {
+            (0..=self.store.extra.len() as u32).map(|i| (i, self.account_ref(i))).filter(|(_, a)| a.can_connect()).map(|(i, a)| (i, who(a))).collect()
+        } else {
+            Vec::new()
+        };
+        self.watch.retain(|(w, stop, _)| {
+            let keep = wanted.iter().any(|(_, x)| x == w);
+            if !keep {
                 stop.store(true, Ordering::Relaxed);
             }
-        }
+            keep
+        });
         if !usable {
             return;
         }
-        if self.watch.is_none() {
-            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let (tx, rx) = channel();
-            net::watch_inbox(self.store.account.clone(), stop.clone(), tx, self.ctx.clone());
-            self.watch = Some((who, stop, rx));
-        }
-        if let Some((_, _, rx)) = &self.watch {
-            if rx.try_iter().count() > 0 {
-                self.watch_due = true;
+        for (i, w) in wanted {
+            if !self.watch.iter().any(|(x, ..)| *x == w) {
+                let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let (tx, rx) = channel();
+                net::watch_inbox(self.account_for(i), stop.clone(), tx, self.ctx.clone());
+                self.watch.push((w, stop, rx));
             }
+        }
+        if self.watch.iter().fold(false, |any, (_, _, rx)| rx.try_iter().count() > 0 || any) {
+            self.watch_due = true;
         }
         if self.watch_due && !self.receiving && !self.ops_running && self.pending_ops.is_empty() {
             self.watch_due = false;
@@ -556,6 +596,9 @@ specjalista ds. Informatyki".into();
                     let last = sync.last;
                     // the first step brings new mail and recent changes; later steps older mail
                     let backfill = sync.flags.is_empty() && sync.window_from.is_none();
+                    // the step that only brings Gmail's labels, right after the new mail
+                    let labels_only = !sync.flags.is_empty() && sync.window_from.is_none();
+                    let first_step = sync.window_from.is_some();
                     if last {
                         self.receiving_left = self.receiving_left.saturating_sub(1);
                         if self.receiving_left == 0 {
@@ -575,9 +618,21 @@ specjalista ds. Informatyki".into();
                         }
                     }
                     let changes_waiting = !self.pending_ops.is_empty() || self.ops_running;
+                    // (labels that couldn't be fetched come empty: nothing changed then)
+                    if labels_only && !sync.labels.is_empty() {
+                        // Gmail's labels of the window just synced (its read / flag state was the
+                        // first step's: applied then, never again, as it may be older than a click
+                        // since). With our own changes on their way, only messages without labels
+                        // (the new ones) get theirs.
+                        for m in self.store.messages.iter_mut().filter(|m| m.folder == f && m.account == acct) {
+                            if m.uid.is_some_and(|u| sync.flags.contains_key(&u)) && (!changes_waiting || m.labels.is_empty()) {
+                                m.labels = m.uid.and_then(|u| sync.labels.get(&u).cloned()).unwrap_or_default();
+                            }
+                        }
+                    }
                     // Read / flag / tag changes made elsewhere (e.g. on the phone), unless our own
                     // changes are still on their way to the server.
-                    if !backfill && !changes_waiting {
+                    if !backfill && !labels_only && !changes_waiting {
                         for m in self.store.messages.iter_mut().filter(|m| m.folder == f && m.account == acct) {
                             let Some(u) = m.uid else { continue };
                             if let Some((seen, flagged)) = sync.flags.get(&u) {
@@ -661,7 +716,10 @@ specjalista ds. Informatyki".into();
                         }
                         if let Some(i) = found {
                             let old = &mut self.store.messages[i];
-                            old.labels = m.labels.clone();
+                            // (the first step comes without labels: they follow in a step of their own)
+                            if !first_step {
+                                old.labels = m.labels.clone();
+                            }
                             if old.folder == f {
                                 old.uid = m.uid;
                             }
@@ -715,7 +773,7 @@ specjalista ds. Informatyki".into();
                                 2..=4 => format!("{added} nowe wiadomości"),
                                 _ => format!("{added} nowych wiadomości"),
                             });
-                        } else if !quiet {
+                        } else if !quiet && !labels_only {
                             self.set_status("Wszystko aktualne");
                         }
                     }
@@ -889,8 +947,16 @@ pub(super) fn prepare_store(store: &mut Store) {
     }
 }
 
-/// The mailbox being read from disk: the database and what was in it.
-pub type Loading = Receiver<(Option<crate::db::Db>, Option<Store>, Option<Vec<crate::search::Entry>>)>;
+/// The mailbox being read from disk: first its newest messages, then the database and all
+/// that was in it.
+pub enum Loaded {
+    Newest(Store, crate::db::TextReader),
+    All(Option<crate::db::Db>, Option<Store>, Option<Vec<crate::search::Entry>>),
+}
+pub type Loading = Receiver<Loaded>;
+
+/// How many of the newest messages are shown while the rest is read.
+const NEWEST: usize = 500;
 
 /// Starts reading the mailbox in the background. Called as early as possible (before the
 /// window is even made), so the mail is ready about when the window is.
@@ -900,6 +966,10 @@ pub fn start_loading() -> Loading {
         let t = std::time::Instant::now();
         let mut db = crate::db::Db::open().map_err(|e| crate::diag::log(format!("database error: {e}"))).ok();
         crate::diag::took("  database: opened", t, "");
+        if let Some((s, reader)) = db.as_ref().and_then(|d| Some((d.newest(NEWEST)?, d.reader()))) {
+            crate::diag::took("  database: newest messages read", t, "");
+            let _ = ltx.send(Loaded::Newest(s, reader));
+        }
         let mut store = db.as_mut().and_then(|d| d.load());
         if let Some(s) = store.as_mut() {
             prepare_store(s);
@@ -911,7 +981,7 @@ pub fn start_loading() -> Loading {
         let entries = store.as_ref().map(|s| crate::finder::entries(&s.messages));
         crate::diag::took("startup: texts for search copied", t, "");
         crate::diag::mem("after reading the mailbox");
-        let _ = ltx.send((db, store, entries));
+        let _ = ltx.send(Loaded::All(db, store, entries));
     });
     lrx
 }

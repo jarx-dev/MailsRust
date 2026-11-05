@@ -40,6 +40,12 @@ pub(super) enum Action {
 
 impl MailApp {
     pub(super) fn apply_actions(&mut self) {
+        // only the newest messages are in yet (the window is just to look at): nothing is done
+        // on this partial copy, it would be lost when the whole mailbox takes its place
+        if self.preview.is_some() {
+            self.actions.clear();
+            return;
+        }
         let actions = std::mem::take(&mut self.actions);
         for a in actions {
             // an action may have changed messages: look again

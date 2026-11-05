@@ -324,6 +324,8 @@ pub struct MailApp {
     counts: Option<(u64, Arc<Counts>)>,
     /// the mailbox being read from disk in the background at startup
     loading: Option<Loading>,
+    /// only the newest messages are in `store` yet (the rest still being read); their texts
+    preview: Option<crate::db::TextReader>,
     /// looking for the signature in sent mail (background), and how many sent messages were looked at
     sig_rx: Option<Receiver<Option<crate::signature::Found>>>,
     sig_seen: usize,
@@ -359,7 +361,7 @@ pub struct MailApp {
     /// clicks on that note (it lives on a thread of its own)
     popup_click: (Sender<()>, Receiver<()>),
     /// the connection waiting for new mail on the server: (which account, stop, signals)
-    watch: Option<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<()>)>,
+    watch: Vec<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<()>)>,
     /// the server said something changed: fetch as soon as the current work is done
     watch_due: bool,
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it
@@ -541,7 +543,7 @@ impl MailApp {
                 // the click wakes the app (it may be minimized)
                 (tx, rx)
             },
-            watch: None,
+            watch: Vec::new(),
             watch_due: false,
             gcal_text: String::new(),
             gcal_loaded: false,
@@ -567,6 +569,7 @@ impl MailApp {
             vis: Default::default(),
             counts: None,
             loading,
+            preview: None,
             sig_rx: None,
             sig_seen: 0,
             card_html: HashMap::new(),
@@ -1028,11 +1031,19 @@ impl eframe::App for MailApp {
         }
         self.web_target = None;
         if self.loading_screen(ui) { return; }
+        if self.preview.is_some() {
+            // only the newest messages: to look at until the whole mailbox is in (anything done
+            // to them now would be lost when it takes their place)
+            ui.disable();
+            let _ = self.mail_view.keys();
+        }
         // the same for the main window (the keyboard back from the email view)
         if self.main_hwnd.is_some_and(|h| focus_state(h) == "this window") && !ctx.input(|i| i.focused) {
             ctx.input_mut(|i| i.focused = true);
         }
-        self.read_after_a_while(&ctx);
+        if self.preview.is_none() {
+            self.read_after_a_while(&ctx);
+        }
         self.nav_test_step(&ctx);
         {
             let _p = crate::prof::span("refresh caches");
@@ -1044,8 +1055,10 @@ impl eframe::App for MailApp {
             self.input_last = input;
             self.refresh_caches();
         }
-        self.take_dropped_files(&ctx);
-        self.keyboard(&ctx);
+        if self.preview.is_none() {
+            self.take_dropped_files(&ctx);
+            self.keyboard(&ctx);
+        }
 
         egui::Panel::top("top")
             .frame(Frame::new().fill(BG()).inner_margin(Margin { left: 8, right: 4, top: 6, bottom: 6 }))
@@ -1169,7 +1182,8 @@ impl eframe::App for MailApp {
         self.toast(&ctx);
         self.flash_ui(&ctx);
         // The browser view sits on top of everything, so it steps aside while a menu or dialog is open.
-        let covered = self.account_open || self.extra_edit.is_some() || self.ai_open || self.gcal_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail;
+        // (and in the background: an open writing window keeps the screen drawn, but the view stays closed)
+        let covered = self.account_open || self.extra_edit.is_some() || self.ai_open || self.gcal_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
         let want = if covered {
             None
         } else {
@@ -1415,6 +1429,7 @@ impl eframe::App for MailApp {
         self.auto_sync();
         self.watch_inbox();
         self.install_update(ctx);
+        self.background_memory(ctx);
         if self.save_now {
             self.save_now = false;
             if let Some(storage) = frame.storage_mut() {

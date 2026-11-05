@@ -232,15 +232,20 @@ pub fn receive(
     std::thread::spawn(move || {
         // results go to the app batch by batch while the sync runs; the inbox first, then sent
         // mail, the bin and spam (also what was done on the phone or the web)
-        let all = || -> Result<(), String> {
-            fetch_inbox(&account, acct, "INBOX", Folder::Inbox, !others.is_empty(), state, &known, &tx, &ctx)?;
+        // one connection for all the folders (opened again only after a folder failed)
+        let mut conn: Option<Session> = None;
+        let mut all = || -> Result<(), String> {
+            fetch_inbox(&account, &mut conn, acct, "INBOX", Folder::Inbox, !others.is_empty(), state, &known, &tx, &ctx)?;
             let n = others.len();
             for (i, (f, st, kn)) in others.iter().enumerate() {
                 let more = i + 1 < n;
                 match special_mailbox(&account, *f) {
                     Some(name) => {
-                        if let Err(e) = fetch_inbox(&account, acct, &name, *f, more, *st, kn, &tx, &ctx) {
-                            // one folder failing doesn't stop the others
+                        if let Err(e) = fetch_inbox(&account, &mut conn, acct, &name, *f, more, *st, kn, &tx, &ctx) {
+                            // one folder failing doesn't stop the others (on a new connection);
+                            // its name is looked up again next time (renamed on the server?)
+                            conn = None;
+                            forget_special_mailbox(&account, *f);
                             crate::diag::log(format!("sync of {:?} failed: {e}", f));
                             if !more {
                                 return Err(e);
@@ -265,9 +270,12 @@ pub fn receive(
                     }
                 }
             }
+            if let Some(mut s) = conn.take() {
+                let _ = s.logout();
+            }
             Ok(())
         };
-        if let Err(e) = guarded(all) {
+        if let Err(e) = guarded(&mut all) {
             let _ = tx.send(NetResult::Failed { what: "Receiving mail".into(), error: e, id: None });
             ctx.request_repaint();
         }
@@ -296,13 +304,38 @@ fn special_names(f: Folder) -> (&'static str, &'static [&'static str]) {
     }
 }
 
-/// The server's folder for sent mail, the bin or spam, as the server names it.
+/// Folder names found per account and folder (also "none"); see `special_mailbox`.
+static SPECIAL: std::sync::Mutex<std::collections::BTreeMap<String, Option<String>>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn special_key(acc: &Account, f: Folder) -> String {
+    format!("{}|{}|{}|{:?}", acc.username.trim(), acc.imap_host.trim(), acc.imap_port, f)
+}
+
+/// A folder name that no longer opens (renamed on the server): looked up again next time.
+pub fn forget_special_mailbox(acc: &Account, f: Folder) {
+    if let Ok(mut m) = SPECIAL.lock() {
+        m.remove(&special_key(acc, f));
+    }
+}
+
+/// The server's folder for sent mail, the bin or spam, as the server names it. Found once per
+/// account and kept (it was a connection and a sign-in of its own on every sync).
 pub fn special_mailbox(acc: &Account, f: Folder) -> Option<String> {
+    let key = special_key(acc, f);
+    if let Some(found) = SPECIAL.lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return found;
+    }
     let token = if acc.use_oauth { oauth_token(acc).ok() } else { None };
+    // (no connection: nothing kept, asked again next time)
     let mut c = crate::rawimap::RawImap::open(acc, token).ok()?;
     let (mark, names) = special_names(f);
     let name = c.special_folder(mark, names);
     c.logout();
+    // (kept only when the server listed its folders)
+    let name = name.ok()?;
+    if let Ok(mut m) = SPECIAL.lock() {
+        m.insert(key, name.clone());
+    }
     name
 }
 
@@ -394,7 +427,11 @@ fn open_session(acc: &Account) -> Result<Session, String> {
             user: acc.username.trim().to_string(),
             token: oauth_token(acc)?,
         };
-        client.authenticate("XOAUTH2", &auth).map_err(|e| e.0.to_string())
+        client.authenticate("XOAUTH2", &auth).map_err(|e| {
+            // (a kept token the server no longer takes: a fresh one next time)
+            crate::oauth::forget_tokens();
+            e.0.to_string()
+        })
     } else {
         client.login(acc.username.trim(), &acc.password).map_err(|e| e.0.to_string())
     };
@@ -459,7 +496,7 @@ pub fn run_ops(account: Account, ops: Vec<Op>, tx: Sender<NetResult>, ctx: efram
             }
             for (f, list) in others {
                 let (mark, names) = special_names(f);
-                match c.special_folder(mark, names) {
+                match c.special_folder(mark, names).ok().flatten() {
                     Some(name) => groups.push((name, list)),
                     None => failed += list.len(),
                 }
@@ -494,9 +531,9 @@ pub fn run_ops(account: Account, ops: Vec<Op>, tx: Sender<NetResult>, ctx: efram
                         let slot = if is_trash { &mut trash } else { &mut junk };
                         if slot.is_none() {
                             *slot = Some(if is_trash {
-                                c.special_folder("\\Trash", &["[Gmail]/Kosz", "[Gmail]/Trash", "Trash", "Kosz", "Deleted Items", "Deleted"])
+                                c.special_folder("\\Trash", &["[Gmail]/Kosz", "[Gmail]/Trash", "Trash", "Kosz", "Deleted Items", "Deleted"]).ok().flatten()
                             } else {
-                                c.special_folder("\\Junk", &["[Gmail]/Spam", "Spam", "Junk", "Junk E-mail"])
+                                c.special_folder("\\Junk", &["[Gmail]/Spam", "Spam", "Junk", "Junk E-mail"]).ok().flatten()
                             });
                         }
                         match slot.clone().flatten() {
@@ -879,6 +916,7 @@ impl<'a> Labels<'a> {
 #[allow(clippy::too_many_arguments)]
 fn fetch_inbox(
     acc: &Account,
+    conn: &mut Option<Session>,
     acct: u32,
     mailbox: &str,
     folder: Folder,
@@ -890,16 +928,22 @@ fn fetch_inbox(
 ) -> Result<(), String> {
     let started = std::time::Instant::now();
     crate::diag::log(format!("── sync started: {}", if folder == Folder::Sent { "sent mail" } else { "inbox" }));
-    let t = std::time::Instant::now();
-    let mut session = open_session(acc)?;
-    crate::diag::took("connect + sign in", t, &acc.imap_host);
+    let session = match conn {
+        Some(s) => s,
+        None => {
+            let t = std::time::Instant::now();
+            let s = open_session(acc)?;
+            crate::diag::took("connect + sign in", t, &acc.imap_host);
+            conn.insert(s)
+        }
+    };
     let t = std::time::Instant::now();
     let mbox = if folder == Folder::Inbox { session.select(mailbox) } else { session.examine(mailbox) }.map_err(|e| e.to_string())?;
     crate::diag::took("open folder", t, format!("{} messages on the server", mbox.exists));
     let uidvalidity = mbox.uid_validity.unwrap_or(0);
     let incremental = state.filter(|s| s.uidvalidity == uidvalidity && s.last_uid > 0 && uidvalidity != 0);
-    // Gmail labels are read for the inbox only
-    let mut labels = Labels { acc, conn: None, broken: folder != Folder::Inbox };
+    // Gmail labels are read for Gmail's inbox only (other servers: no connection asked in vain)
+    let mut labels = Labels { acc, conn: None, broken: folder != Folder::Inbox || !acc.imap_host.to_lowercase().contains("gmail") };
     let send = |mut s: InboxSync| {
         if more_after {
             s.last = false;
@@ -924,7 +968,6 @@ fn fetch_inbox(
     if mbox.exists == 0 {
         first.state.complete = true;
         first.last = true;
-        let _ = session.logout();
         send(first);
         return Ok(());
     }
@@ -965,7 +1008,7 @@ fn fetch_inbox(
             true
         })?;
     } else {
-        download(&mut session, &wanted, &mut first.new)?;
+        download(session, &wanted, &mut first.new)?;
     }
     crate::diag::took(if incremental.is_some() { "new mail" } else { "first download" }, t, format!("{} messages", wanted.len()));
     first.state.last_uid = first.flags.keys().copied().max().unwrap_or(0).max(first.state.last_uid);
@@ -973,26 +1016,29 @@ fn fetch_inbox(
         // not known yet (e.g. after an update): continue from the newest
         first.state.oldest_uid = wanted.iter().copied().min().unwrap_or(first.state.last_uid + 1);
     }
-    if let (Some(lo), Some(hi)) = (first.flags.keys().min().copied(), first.flags.keys().max().copied()) {
+    let mut state = first.state;
+    let done = state.complete || state.oldest_uid <= 1;
+    if done {
+        first.state.complete = true;
+    }
+    // New mail goes to the app at once; Gmail's labels (asked on a connection of their own,
+    // about a second) follow as a step of their own, with the same read / flag state.
+    let window = match (first.flags.keys().min().copied(), first.flags.keys().max().copied()) {
+        (Some(lo), Some(hi)) if !labels.broken => Some((lo, hi)),
+        _ => None,
+    };
+    first.last = done && window.is_none();
+    let (flags, first_state) = (if window.is_some() { first.flags.clone() } else { Default::default() }, first.state);
+    send(first);
+    if let Some((lo, hi)) = window {
         let t = std::time::Instant::now();
         let map = labels.get(lo, hi);
         crate::diag::took("tags (Gmail labels)", t, format!("{} messages with tags", map.values().filter(|v| !v.is_empty()).count()));
-        for m in first.new.iter_mut() {
-            if let Some(u) = m.uid {
-                m.labels = map.get(&u).cloned().unwrap_or_default();
-            }
-        }
-        first.labels = map;
+        send(InboxSync { acct, folder, new: vec![], flags, labels: map, window_from: None, state: first_state, full: false, last: done });
     }
-    let mut state = first.state;
-    if state.complete || state.oldest_uid <= 1 {
-        first.state.complete = true;
-        first.last = true;
-        let _ = session.logout();
-        send(first);
+    if done {
         return Ok(());
     }
-    send(first);
 
     // 3. Older mail, batch after batch on the same connection, until the whole inbox is here.
     let t = std::time::Instant::now();
@@ -1004,8 +1050,10 @@ fn fetch_inbox(
         .collect();
     older.sort_unstable_by(|a, b| b.cmp(a)); // newest first
     crate::diag::took("list of older mail", t, format!("{} messages still to download", older.len()));
-    // the main connection isn't needed while the parallel connections download
+    // the main connection isn't needed while the parallel connections download (it would
+    // time out meanwhile: the next folder opens a new one)
     let _ = session.logout();
+    *conn = None;
     if older.is_empty() {
         state.complete = true;
         send(InboxSync { acct, folder, new: vec![], flags: Default::default(), labels: Default::default(), window_from: None, state, full: false, last: true });
@@ -1326,6 +1374,11 @@ fn smtp_send(acc: &Account, m: &Outgoing) -> Result<(), String> {
             .credentials(Credentials::new(acc.username.trim().to_string(), acc.password.clone()))
             .build()
     };
-    mailer.send(&email).map_err(|e| e.to_string())?;
+    mailer.send(&email).map_err(|e| {
+        if acc.use_oauth {
+            crate::oauth::forget_tokens();
+        }
+        e.to_string()
+    })?;
     Ok(())
 }

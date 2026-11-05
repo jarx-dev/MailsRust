@@ -298,8 +298,24 @@ pub fn login(client_id: &str, client_secret: &str) -> Result<LoginResult, String
     Ok(LoginResult { refresh_token, email, name, scopes })
 }
 
-/// A fresh short-lived access token from the saved refresh token.
+/// Access tokens last an hour: each is kept (per refresh token) for its first half hour,
+/// instead of asking Google for a new one for every connection (0.3–0.5 s each).
+static TOKENS: std::sync::Mutex<std::collections::BTreeMap<String, (String, std::time::Instant)>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// A token was refused (e.g. revoked before its time): fresh ones are asked for next.
+pub fn forget_tokens() {
+    if let Ok(mut t) = TOKENS.lock() {
+        t.clear();
+    }
+}
+
+/// A short-lived access token from the saved refresh token (kept while it is valid).
 pub fn access_token(client_id: &str, client_secret: &str, refresh_token: &str) -> Result<String, String> {
+    if let Some((token, until)) = TOKENS.lock().ok().and_then(|t| t.get(refresh_token).cloned()) {
+        if std::time::Instant::now() < until {
+            return Ok(token);
+        }
+    }
     let mut form: Vec<(&str, &str)> = vec![
         ("client_id", client_id.trim()),
         ("refresh_token", refresh_token),
@@ -321,10 +337,15 @@ pub fn access_token(client_id: &str, client_secret: &str, refresh_token: &str) -
         })?
         .into_json()
         .map_err(|e| e.to_string())?;
-    v.get("access_token")
-        .and_then(|x| x.as_str())
-        .map(String::from)
-        .ok_or_else(|| "Google nie zwrócił tokenu dostępu.".into())
+    let token: String = v.get("access_token").and_then(|x| x.as_str()).map(String::from).ok_or("Google nie zwrócił tokenu dostępu.")?;
+    let life = v.get("expires_in").and_then(|x| x.as_u64()).unwrap_or(3600);
+    // handed out only while it has 30 minutes left: a connection waiting for new mail lives 25
+    // minutes on the token it signed in with
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(life.saturating_sub(1800));
+    if let Ok(mut t) = TOKENS.lock() {
+        t.insert(refresh_token.to_string(), (token.clone(), until));
+    }
+    Ok(token)
 }
 
 /// The SASL XOAUTH2 string Gmail expects for IMAP.
