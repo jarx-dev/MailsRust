@@ -219,9 +219,12 @@ specjalista ds. Informatyki".into();
         }
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         let newest = ids.iter().filter_map(|id| self.msg(*id)).max_by_key(|m| m.date);
-        let (from, subject) = newest
-            .map(|m| (if m.from_name.trim().is_empty() { m.from_addr.clone() } else { m.from_name.clone() }, m.subject.clone()))
+        let (from, subject, from_addr) = newest
+            .map(|m| (if m.from_name.trim().is_empty() { m.from_addr.clone() } else { m.from_name.clone() }, m.subject.clone(), m.from_addr.clone()))
             .unwrap_or_default();
+        // the sender's picture as in the list: the company logo (when known), or coloured initials
+        let logo = self.logo_for(&from_addr).and_then(|(_, b)| image::load_from_memory(&b).ok()).map(|i| i.to_rgba8());
+        let [r, g, b, _] = crate::theme::avatar_color(&from).to_array();
         let n = ids.len();
         let head = match n {
             1 => "Nowa wiadomość".to_string(),
@@ -229,7 +232,20 @@ specjalista ds. Informatyki".into();
             _ => format!("{n} nowych wiadomości"),
         };
         let subject_shown = if subject.trim().is_empty() { "(bez tematu)".to_string() } else { subject.clone() };
-        crate::popup::show(crate::popup::Note { head, from: from.clone(), subject: subject_shown, dark: self.prefs.dark }, 8, self.popup_click.0.clone(), self.ctx.clone());
+        crate::popup::show(
+            crate::popup::Note {
+                head,
+                from: from.clone(),
+                subject: subject_shown,
+                dark: self.prefs.dark,
+                logo,
+                initials: crate::model::initials(&from),
+                color: (r as u32) << 16 | (g as u32) << 8 | b as u32,
+            },
+            8,
+            self.popup_click.0.clone(),
+            self.ctx.clone(),
+        );
         self.popup = Some(NewMail { ids });
         self.ctx.request_repaint();
     }

@@ -8,6 +8,10 @@ pub struct Note {
     pub from: String,
     pub subject: String,
     pub dark: bool,
+    /// the sender's picture as in the app: their company logo, or initials on their colour
+    pub logo: Option<image::RgbaImage>,
+    pub initials: String,
+    pub color: u32,
 }
 
 #[cfg(windows)]
@@ -28,6 +32,42 @@ mod imp {
         wake: eframe::egui::Context,
         hwnd: isize,
         scale: f32,
+        /// the logo in its circle, made for this screen (`d`×`d` pixels, BGRA, top row first)
+        picture: Option<Vec<u8>>,
+    }
+
+    /// The logo as the app shows it: on a light circle with a thin rim, in a square of the note's
+    /// colour `back` (edges smoothed).
+    fn round_logo(logo: &image::RgbaImage, d: u32, back: u32, circle: u32, rim: u32) -> Vec<u8> {
+        let side = ((d as f32) * 0.65).round() as u32;
+        let small = image::imageops::thumbnail(logo, side, side);
+        let (ox, oy) = ((d - small.width()) / 2, (d - small.height()) / 2);
+        let r = d as f32 / 2.0;
+        let mix = |a: u32, b: [f32; 3], k: f32| -> [f32; 3] {
+            let a = [(a >> 16 & 0xFF) as f32, (a >> 8 & 0xFF) as f32, (a & 0xFF) as f32];
+            [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
+        };
+        let rgbf = |c: u32| [(c >> 16 & 0xFF) as f32, (c >> 8 & 0xFF) as f32, (c & 0xFF) as f32];
+        let mut out = Vec::with_capacity((d * d * 4) as usize);
+        for y in 0..d {
+            for x in 0..d {
+                let dist = ((x as f32 + 0.5 - r).powi(2) + (y as f32 + 0.5 - r).powi(2)).sqrt();
+                // inside the circle: its colour, the logo over it, the rim at the edge
+                let mut c = rgbf(circle);
+                if x >= ox && y >= oy && x - ox < small.width() && y - oy < small.height() {
+                    let p = small.get_pixel(x - ox, y - oy).0;
+                    let k = p[3] as f32 / 255.0;
+                    c = [c[0] + (p[0] as f32 - c[0]) * k, c[1] + (p[1] as f32 - c[1]) * k, c[2] + (p[2] as f32 - c[2]) * k];
+                }
+                let on_rim = (1.0 - (dist - (r - 1.0)).abs()).clamp(0.0, 1.0);
+                let rc = rgbf(rim);
+                c = [c[0] + (rc[0] - c[0]) * on_rim, c[1] + (rc[1] - c[1]) * on_rim, c[2] + (rc[2] - c[2]) * on_rim];
+                let inside = (r - dist + 0.5).clamp(0.0, 1.0);
+                let c = mix(back, c, inside);
+                out.extend_from_slice(&[c[2] as u8, c[1] as u8, c[0] as u8, 0]);
+            }
+        }
+        out
     }
 
     static SHOWN: Mutex<Option<Shown>> = Mutex::new(None);
@@ -78,25 +118,34 @@ mod imp {
                         Rectangle(hdc, 0, 0, rc.right, rc.bottom);
                         SelectObject(hdc, op);
                         DeleteObject(pen);
-                        // the round sign with an envelope
-                        let accent = CreateSolidBrush(rgb(0x1E6FD9));
-                        SelectObject(hdc, accent);
-                        let np = SelectObject(hdc, GetStockObject(NULL_PEN));
-                        Ellipse(hdc, px(14.0), px(23.0), px(54.0), px(63.0));
-                        SelectObject(hdc, np);
-                        SelectObject(hdc, ob);
-                        DeleteObject(accent);
+                        // the sender's round picture: their company logo, or initials on their colour
+                        let (x0, y0, d) = (px(14.0), px(23.0), px(40.0));
+                        if let Some(bgra) = &s.picture {
+                            let mut bi: BITMAPINFO = std::mem::zeroed();
+                            bi.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: d, biHeight: -d, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB, ..std::mem::zeroed() };
+                            SetDIBitsToDevice(hdc, x0, y0, d as u32, d as u32, 0, 0, 0, d as u32, bgra.as_ptr() as *const std::ffi::c_void, &bi, DIB_RGB_COLORS);
+                            SelectObject(hdc, ob);
+                        } else {
+                            let fill = CreateSolidBrush(rgb(s.note.color));
+                            SelectObject(hdc, fill);
+                            let np = SelectObject(hdc, GetStockObject(NULL_PEN));
+                            Ellipse(hdc, x0, y0, x0 + d, y0 + d);
+                            SelectObject(hdc, np);
+                            SelectObject(hdc, ob);
+                            DeleteObject(fill);
+                        }
                         SetBkMode(hdc, TRANSPARENT as i32);
-                        let sym = RECT { left: px(14.0), top: px(23.0), right: px(54.0), bottom: px(63.0) };
-                        let face = wide("Segoe UI Symbol");
-                        let font = CreateFontW(-px(19.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr());
-                        let of = SelectObject(hdc, font);
-                        SetTextColor(hdc, rgb(0xFFFFFF));
-                        let env: Vec<u16> = "✉".encode_utf16().collect();
-                        let mut sr = sym;
-                        DrawTextW(hdc, env.as_ptr(), env.len() as i32, &mut sr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-                        SelectObject(hdc, of);
-                        DeleteObject(font);
+                        if s.picture.is_none() {
+                            let face = wide("Segoe UI");
+                            let font = CreateFontW(-px(15.0), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr());
+                            let of = SelectObject(hdc, font);
+                            SetTextColor(hdc, rgb(0xFFFFFF));
+                            let w: Vec<u16> = s.note.initials.encode_utf16().collect();
+                            let mut sr = RECT { left: x0, top: y0, right: x0 + d, bottom: y0 + d };
+                            DrawTextW(hdc, w.as_ptr(), w.len() as i32, &mut sr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                            SelectObject(hdc, of);
+                            DeleteObject(font);
+                        }
                         let left = px(66.0);
                         let right = rc.right - px(30.0);
                         text(hdc, &s.note.head, 11.5, false, 0x1E6FD9, RECT { left, top: px(10.0), right, bottom: px(28.0) }, k);
@@ -205,7 +254,10 @@ mod imp {
                 return;
             }
             if let Ok(mut g) = SHOWN.lock() {
-                *g = Some(Shown { note, clicked, wake, hwnd: hwnd as isize, scale });
+                // (the note's colours: background, logo circle, rim, as drawn in WM_PAINT and the app)
+                let (back, circle, rim) = if note.dark { (0x26282B, 0xC9CDD3, 0x3A3D42) } else { (0xFFFFFF, 0xFFFFFF, 0xD9DCE0) };
+                let picture = note.logo.as_ref().map(|l| round_logo(l, (40.0 * scale).round() as u32, back, circle, rim));
+                *g = Some(Shown { note, clicked, wake, hwnd: hwnd as isize, scale, picture });
             }
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             UpdateWindow(hwnd);
