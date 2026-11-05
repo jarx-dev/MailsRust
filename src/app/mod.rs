@@ -877,6 +877,14 @@ tel.: 600-100-200".into();
                     app.thread_for = Some(first.id);
                     app.main_folded = std::env::var("POCZTA_FOLD_MAIN").is_ok();
                 }
+                if std::env::var("POCZTA_OPEN_OLDEST").is_ok() {
+                    // test picture: the oldest one open, more newer ones below it than fit
+                    let topic = thread_subject(&first.subject);
+                    let oldest = app.store.messages.iter().filter(|m| thread_subject(&m.subject) == topic).min_by_key(|m| m.date).map(|m| m.id);
+                    app.selected = oldest;
+                    app.thread_for = oldest;
+                    app.thread_unfolded.clear();
+                }
             }
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("syncing") {
