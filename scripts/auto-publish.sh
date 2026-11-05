@@ -20,6 +20,8 @@ failed=${XDG_STATE_HOME:-$HOME/.local/state}/mailrust-autopublish-failed
 if [[ ${1:-} == --install ]]; then
   # (plain git: the shell's git wrapper moves new worktrees under ~/.t3, where they get cleaned up)
   [[ -d $tree ]] || /usr/bin/git -C "$repo" worktree add -q --detach "$tree" origin/main
+  # the same Rust as the main tree (its version is set per folder with rustup)
+  rustup override set --path "$tree" "$(cd "$repo" && rustup show active-toolchain | cut -d' ' -f1)"
   units=$HOME/.config/systemd/user
   mkdir -p "$units"
   cat > "$units/mailrust-autopublish.service" <<EOF
