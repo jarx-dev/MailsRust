@@ -620,6 +620,10 @@ impl MailApp {
         app.ai_open = std::env::var("POCZTA_START").as_deref() == Ok("ai-settings");
         app.gcal_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("account-calendar") | Ok("google-check"));
         app.gcal_open |= std::env::var("POCZTA_START").as_deref() == Ok("google-scopes");
+        // (tests: a search typed at the start)
+        if let Ok(q) = std::env::var("POCZTA_QUERY") {
+            app.search = q;
+        }
         if std::env::var("POCZTA_START").as_deref() == Ok("account") {
             app.account_open = true;
             app.store.account.use_gmail();
