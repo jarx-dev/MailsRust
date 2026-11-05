@@ -7,6 +7,9 @@
 #
 #   scripts/publish.sh
 #
+# Every merge to main is published by itself (scripts/auto-publish.sh, systemd timer); by hand
+# only for a build outside main.
+#
 # Env: POCZTA_UPDATE_DIR (default ~/hyperrust-updates/mailrust), KEEP (default 5 builds).
 set -euo pipefail
 
