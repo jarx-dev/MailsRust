@@ -56,46 +56,46 @@ pub fn run(args: &[String]) -> bool {
         // SYNC_ROUNDS=2: a second round right after, as the app's later checks run
         let rounds: u32 = std::env::var("SYNC_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
         for round in 1..=rounds {
-        diag::log(format!("== sync-check round {round}"));
-        let (tx, rx) = std::sync::mpsc::channel();
-        net::receive(
-            store.account.clone(),
-            0,
-            store.sync,
-            known.clone(),
-            vec![
-                (model::Folder::Sent, store.sent_sync, sent_known.clone()),
-                (model::Folder::Trash, store.trash_sync, Default::default()),
-                (model::Folder::Junk, store.junk_sync, Default::default()),
-            ],
-            tx,
-            eframe::egui::Context::default(),
-        );
-        while let Ok(r) = rx.recv() {
-            match r {
-                net::NetResult::Received(s) => {
-                    let here = if s.folder == model::Folder::Sent { &sent_known } else { &known };
-                    let fresh: Vec<&model::Message> = s.new.iter().filter(|m| m.uid.is_some_and(|u| !here.contains(&u))).collect();
-                    println!(
-                        "{:?} batch: {} messages, {} not here yet ({} unread: {:?}), last={}",
-                        s.folder,
-                        s.new.len(),
-                        fresh.len(),
-                        fresh.iter().filter(|m| !m.read).count(),
-                        fresh.iter().filter(|m| !m.read).map(|m| m.uid).collect::<Vec<_>>(),
-                        s.last
-                    );
-                    if s.last {
+            diag::log(format!("== sync-check round {round}"));
+            let (tx, rx) = std::sync::mpsc::channel();
+            net::receive(
+                store.account.clone(),
+                0,
+                store.sync,
+                known.clone(),
+                vec![
+                    (model::Folder::Sent, store.sent_sync, sent_known.clone()),
+                    (model::Folder::Trash, store.trash_sync, Default::default()),
+                    (model::Folder::Junk, store.junk_sync, Default::default()),
+                ],
+                tx,
+                eframe::egui::Context::default(),
+            );
+            while let Ok(r) = rx.recv() {
+                match r {
+                    net::NetResult::Received(s) => {
+                        let here = if s.folder == model::Folder::Sent { &sent_known } else { &known };
+                        let fresh: Vec<&model::Message> = s.new.iter().filter(|m| m.uid.is_some_and(|u| !here.contains(&u))).collect();
+                        println!(
+                            "{:?} batch: {} messages, {} not here yet ({} unread: {:?}), last={}",
+                            s.folder,
+                            s.new.len(),
+                            fresh.len(),
+                            fresh.iter().filter(|m| !m.read).count(),
+                            fresh.iter().filter(|m| !m.read).map(|m| m.uid).collect::<Vec<_>>(),
+                            s.last
+                        );
+                        if s.last {
+                            break;
+                        }
+                    }
+                    net::NetResult::Failed { error, .. } => {
+                        println!("failed: {error}");
                         break;
                     }
+                    _ => {}
                 }
-                net::NetResult::Failed { error, .. } => {
-                    println!("failed: {error}");
-                    break;
-                }
-                _ => {}
             }
-        }
         }
         return true;
     }

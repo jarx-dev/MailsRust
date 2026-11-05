@@ -242,8 +242,10 @@ pub fn receive(
                 match special_mailbox(&account, *f) {
                     Some(name) => {
                         if let Err(e) = fetch_inbox(&account, &mut conn, acct, &name, *f, more, *st, kn, &tx, &ctx) {
-                            // one folder failing doesn't stop the others (on a new connection)
+                            // one folder failing doesn't stop the others (on a new connection);
+                            // its name is looked up again next time (renamed on the server?)
                             conn = None;
+                            forget_special_mailbox(&account, *f);
                             crate::diag::log(format!("sync of {:?} failed: {e}", f));
                             if !more {
                                 return Err(e);
@@ -302,21 +304,35 @@ fn special_names(f: Folder) -> (&'static str, &'static [&'static str]) {
     }
 }
 
+/// Folder names found per account and folder (also "none"); see `special_mailbox`.
+static SPECIAL: std::sync::Mutex<std::collections::BTreeMap<String, Option<String>>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn special_key(acc: &Account, f: Folder) -> String {
+    format!("{}|{}|{}|{:?}", acc.username.trim(), acc.imap_host.trim(), acc.imap_port, f)
+}
+
+/// A folder name that no longer opens (renamed on the server): looked up again next time.
+pub fn forget_special_mailbox(acc: &Account, f: Folder) {
+    if let Ok(mut m) = SPECIAL.lock() {
+        m.remove(&special_key(acc, f));
+    }
+}
+
 /// The server's folder for sent mail, the bin or spam, as the server names it. Found once per
 /// account and kept (it was a connection and a sign-in of its own on every sync).
 pub fn special_mailbox(acc: &Account, f: Folder) -> Option<String> {
-    static FOUND: std::sync::Mutex<std::collections::BTreeMap<String, String>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
-    let key = format!("{}|{}|{:?}", acc.username.trim(), acc.imap_host.trim(), f);
-    if let Some(name) = FOUND.lock().ok().and_then(|m| m.get(&key).cloned()) {
-        return Some(name);
+    let key = special_key(acc, f);
+    if let Some(found) = SPECIAL.lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return found;
     }
     let token = if acc.use_oauth { oauth_token(acc).ok() } else { None };
+    // (no connection: nothing kept, asked again next time)
     let mut c = crate::rawimap::RawImap::open(acc, token).ok()?;
     let (mark, names) = special_names(f);
     let name = c.special_folder(mark, names);
     c.logout();
-    if let (Some(n), Ok(mut m)) = (&name, FOUND.lock()) {
-        m.insert(key, n.clone());
+    if let Ok(mut m) = SPECIAL.lock() {
+        m.insert(key, name.clone());
     }
     name
 }
@@ -924,8 +940,8 @@ fn fetch_inbox(
     crate::diag::took("open folder", t, format!("{} messages on the server", mbox.exists));
     let uidvalidity = mbox.uid_validity.unwrap_or(0);
     let incremental = state.filter(|s| s.uidvalidity == uidvalidity && s.last_uid > 0 && uidvalidity != 0);
-    // Gmail labels are read for the inbox only
-    let mut labels = Labels { acc, conn: None, broken: folder != Folder::Inbox };
+    // Gmail labels are read for Gmail's inbox only (other servers: no connection asked in vain)
+    let mut labels = Labels { acc, conn: None, broken: folder != Folder::Inbox || !acc.imap_host.to_lowercase().contains("gmail") };
     let send = |mut s: InboxSync| {
         if more_after {
             s.last = false;
