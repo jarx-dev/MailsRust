@@ -776,6 +776,8 @@ tel.: 600-100-200".into();
                 app.store.messages.push(before);
                 app.store.messages.push(after);
                 app.selected = Some(base.id);
+                app.thread_for = Some(base.id);
+                app.main_folded = std::env::var("POCZTA_FOLD_MAIN").is_ok();
             }
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("mark-all") {
