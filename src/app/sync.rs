@@ -2,8 +2,8 @@ use super::*;
 
 impl MailApp {
     /// A newer build is swapped in when nothing would be lost or disturbed: nothing being written
-    /// or sent, and the window minimized or untouched for 10 minutes. The app then closes as
-    /// usual (saving everything) and the new build starts in its place.
+    /// or sent, and the window minimized, behind other windows for 2 minutes or untouched for 10
+    /// minutes. The app then closes as usual (saving everything) and the new build starts in its place.
     pub(super) fn install_update(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
             self.last_input = self.clock();
@@ -12,8 +12,11 @@ impl MailApp {
             self.update_staged = Some(p);
         }
         let Some(staged) = self.update_staged.clone() else { return };
-        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
-        let quiet = minimized || self.clock() - self.last_input > 600.0;
+        let (minimized, focused) = ctx.input(|i| (i.viewport().minimized.unwrap_or(false), i.viewport().focused.unwrap_or(true)));
+        // behind other windows (or the desktop, Win+D: not minimized for Windows) for 2 minutes
+        // with no pointer over it either: the new build starts minimized
+        let behind = !focused && self.clock() - self.last_input > 120.0;
+        let quiet = minimized || behind || self.clock() - self.last_input > 600.0;
         let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some();
         // forms hold their text only in memory; reading windows get input the main window doesn't see
         let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
@@ -22,7 +25,7 @@ impl MailApp {
             return;
         }
         self.update_staged = None;
-        match crate::update::apply(&staged, minimized) {
+        match crate::update::apply(&staged, minimized || behind) {
             Ok(()) => {
                 crate::diag::log("update: new build in place, closing for the restart");
                 self.quit();

@@ -3,7 +3,7 @@
 # self-updater (src/update.rs): <dir>/Poczta-<build>.exe + <dir>/latest.json. HyperRust's update
 # server (systemd user unit hyperrust-updates, ~/hyperrust-updates on the Tailscale address,
 # port 8790) serves <dir>; running copies pick the build up within about a minute and swap it in
-# when the app is minimized or untouched for 10 minutes.
+# when the app is minimized, behind other windows for 2 minutes or untouched for 10 minutes.
 #
 #   scripts/publish.sh
 #
