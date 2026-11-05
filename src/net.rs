@@ -1203,9 +1203,21 @@ pub fn decode_mutf7(s: &str) -> String {
     out
 }
 
-/// "a@x.pl, b@y.pl": the addresses of a To / Cc header.
+/// "Anna Nowak <a@x.pl>, b@y.pl": the people of a To / Cc header (names without the marks that
+/// would split the list: it is read back by splitting at commas).
 fn addresses(list: Option<mail_parser::AddressList>) -> String {
-    list.map(|a| a.mailboxes().filter_map(|x| x.address().map(|s| s.to_string())).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+    list.map(|a| {
+        a.mailboxes()
+            .filter_map(|x| {
+                let addr = x.address()?;
+                let name: String = x.name().unwrap_or("").chars().filter(|c| !",;\"<>".contains(*c)).collect();
+                let name = name.trim();
+                Some(if name.is_empty() || name == addr { addr.to_string() } else { format!("{name} <{addr}>") })
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+    .unwrap_or_default()
 }
 
 /// Once per account, for mail stored before the app kept copied people (DW): the Cc line of
@@ -1416,8 +1428,8 @@ fn smtp_send(acc: &Account, m: &Outgoing) -> Result<(), String> {
 mod tests {
     #[test]
     fn copied_people_are_read() {
-        let raw = b"From: A <a@x.pl>\r\nTo: B <b@x.pl>\r\nCc: C <c@x.pl>,\r\n =?UTF-8?Q?D=C5=BA?= <d@x.pl>\r\nSubject: s\r\n\r\nbody\r\n";
+        let raw = b"From: A <a@x.pl>\r\nTo: b@x.pl\r\nCc: \"Lis, Ewa\" <c@x.pl>,\r\n =?UTF-8?Q?D=C5=BA?= <d@x.pl>\r\nSubject: s\r\n\r\nbody\r\n";
         let m = super::parse(raw, false, false).unwrap();
-        assert_eq!((m.to.as_str(), m.cc.as_str()), ("b@x.pl", "c@x.pl, d@x.pl"));
+        assert_eq!((m.to.as_str(), m.cc.as_str()), ("b@x.pl", "Lis Ewa <c@x.pl>, Dź <d@x.pl>"));
     }
 }
