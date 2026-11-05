@@ -297,7 +297,8 @@ impl MailApp {
                 }
                 clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
                 ui.horizontal(|ui| {
-                    ui.add_space(52.0);
+                    // the text uses the card's whole width (the same margin as on the right)
+                    ui.add_space(12.0);
                     ui.vertical(|ui| {
                         let blocks = self.card_blocks(x);
                         let body = x.body.trim();
