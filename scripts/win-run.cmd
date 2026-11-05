@@ -13,5 +13,5 @@ set POCZTA_OFFLINE=1
 set POCZTA_NO_SEARCH=1
 cd /d "%DIR%"
 del /q "%DIR%\done.txt" 2>nul
-"%DIR%\mailclient.exe"
+"%DIR%\mailclient.exe" %POCZTA_ARGS%
 echo %ERRORLEVEL%>"%DIR%\done.txt"

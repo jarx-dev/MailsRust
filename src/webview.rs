@@ -62,11 +62,13 @@ pub struct MailView {
     asked: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
     late_noted: bool,
     nav_at: Option<std::time::Instant>,
+    /// since when the app is in the background (Edge keeps as little in memory as it can)
+    background_since: Option<std::time::Instant>,
 }
 
 impl Default for MailView {
     fn default() -> Self {
-        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false }
+        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false, background_since: None }
     }
 }
 
@@ -81,7 +83,11 @@ pub fn away() -> egui::Rect {
 /// of settings, so the views share it). When it is in use by another copy of the app, a second
 /// folder (so a view still gets made).
 pub fn data_dir(second: bool) -> Option<std::path::PathBuf> {
-    let base = crate::model::cache_dir().parent().map(|p| p.to_path_buf())?;
+    // (a test copy has a browser of its own, never sharing the running app's)
+    let base = match std::env::var("POCZTA_DATA_DIR") {
+        Ok(d) => std::path::PathBuf::from(d),
+        Err(_) => crate::model::cache_dir().parent().map(|p| p.to_path_buf())?,
+    };
     Some(if second { base.join(format!("webview-{}", std::process::id())) } else { base.join("webview") })
 }
 
@@ -123,7 +129,7 @@ fn file_url(path: &std::path::Path) -> String {
 pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::WebView, wry::WebContext), String> {
     let html = prepare(m).ok_or("brak wersji sformatowanej")?;
     let path = crate::model::cache_put(html.as_bytes(), "html");
-    let dir = crate::model::cache_dir().parent().map(|p| p.join("webview"));
+    let dir = data_dir(false);
     let mut context = wry::WebContext::new(dir);
     let start = file_url(std::path::Path::new(&path));
     let first = start.clone();
@@ -169,7 +175,7 @@ pub fn file_view(hwnd: isize, path: &str, rect: egui::Rect) -> Result<(wry::WebV
     } else {
         file_url(p)
     };
-    let dir = crate::model::cache_dir().parent().map(|p| p.join("webview"));
+    let dir = data_dir(false);
     let mut context = wry::WebContext::new(dir);
     let view = wry::WebViewBuilder::new_with_web_context(&mut context)
         .with_url(url)
@@ -313,6 +319,47 @@ fn prepare(m: &Message) -> Option<String> {
 }
 
 impl MailView {
+    /// The app went to the background (minimized, in the tray) or came back. In the background
+    /// Edge lets go of what it can (its own low-memory mode); back in front, normal again.
+    pub fn set_background(&mut self, on: bool) {
+        self.background_since = on.then(std::time::Instant::now);
+        #[cfg(windows)]
+        if let Some(v) = &self.view {
+            use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL};
+            use windows::core::Interface;
+            use wry::WebViewExtWindows;
+            let level = if on { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+            // (an Edge older than this setting: nothing done)
+            if let Ok(w) = v.webview().cast::<ICoreWebView2_19>() {
+                let _ = unsafe { w.SetMemoryUsageTargetLevel(level) };
+            }
+        }
+    }
+
+    pub fn in_background(&self) -> bool {
+        self.background_since.is_some()
+    }
+
+    /// In the background with the view still open: how long until it is `after` there (zero:
+    /// time to close it).
+    pub fn close_in(&self, after: std::time::Duration) -> Option<std::time::Duration> {
+        self.view.as_ref()?;
+        Some(after.saturating_sub(self.background_since?.elapsed()))
+    }
+
+    /// Edge closed altogether (all its processes end, unless a writing window still uses them).
+    /// It starts again when an email is shown.
+    pub fn close(&mut self) {
+        self.view = None;
+        self._context = None;
+        self.shown = None;
+        self.visible = false;
+        self.last_rect = None;
+        self.navs = self.loaded.load(std::sync::atomic::Ordering::SeqCst);
+        // (a picture being taken never finishes now)
+        self.shot_busy.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Shows `want` (message and where to draw it) or hides the view when `want` is None.
     /// Starts the browser view ahead of time (hidden), so the first formatted email shows at once.
     pub fn prepare(&mut self, frame: &eframe::Frame) {

@@ -225,6 +225,38 @@ impl MailApp {
         }
     }
 
+    /// Minimized (or in the tray) the app is in the background: it and its email view hand back
+    /// the memory they can, and after a while the email view (Edge) is closed altogether; back
+    /// in front, it works normally again.
+    pub(super) fn background_memory(&mut self, ctx: &egui::Context) {
+        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if self.loading.is_some() {
+            return;
+        }
+        if minimized != self.mail_view.in_background() {
+            self.mail_view.set_background(minimized);
+            if minimized {
+                crate::diag::trim_memory();
+                crate::diag::mem("in the background, memory handed back");
+            } else {
+                crate::diag::log("back from the background");
+            }
+        }
+        if minimized {
+            match self.mail_view.close_in(std::time::Duration::from_secs(30)) {
+                Some(left) if left.is_zero() => {
+                    self.mail_view.close();
+                    crate::diag::trim_memory();
+                    crate::diag::mem("in the background, email view closed");
+                }
+                // (woken then, also when nothing else wakes the app; asked again every pass, as
+                // an earlier wake-up replaces this one)
+                Some(left) => ctx.request_repaint_after(left),
+                None => {}
+            }
+        }
+    }
+
     pub(super) fn keyboard(&mut self, ctx: &egui::Context) {
         // Delete pressed while reading inside the email
         for k in self.mail_view.keys() {

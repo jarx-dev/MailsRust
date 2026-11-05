@@ -1055,8 +1055,8 @@ impl eframe::App for MailApp {
             self.input_last = input;
             self.refresh_caches();
         }
-        self.take_dropped_files(&ctx);
         if self.preview.is_none() {
+            self.take_dropped_files(&ctx);
             self.keyboard(&ctx);
         }
 
@@ -1182,7 +1182,8 @@ impl eframe::App for MailApp {
         self.toast(&ctx);
         self.flash_ui(&ctx);
         // The browser view sits on top of everything, so it steps aside while a menu or dialog is open.
-        let covered = self.account_open || self.extra_edit.is_some() || self.ai_open || self.gcal_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail;
+        // (and in the background: an open writing window keeps the screen drawn, but the view stays closed)
+        let covered = self.account_open || self.extra_edit.is_some() || self.ai_open || self.gcal_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
         let want = if covered {
             None
         } else {
@@ -1428,6 +1429,7 @@ impl eframe::App for MailApp {
         self.auto_sync();
         self.watch_inbox();
         self.install_update(ctx);
+        self.background_memory(ctx);
         if self.save_now {
             self.save_now = false;
             if let Some(storage) = frame.storage_mut() {

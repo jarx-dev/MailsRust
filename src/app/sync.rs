@@ -51,6 +51,7 @@ impl MailApp {
                     self.selected = self.visible_ids().first().copied();
                 }
                 crate::diag::log(format!("startup: newest messages shown {} ms after opening", self.opened.elapsed().as_millis()));
+                self.ctx.request_repaint();
                 return;
             }
             Err(_) => {
