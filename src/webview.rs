@@ -67,11 +67,13 @@ pub struct MailView {
     /// the view was made anew (at the start, back from the background): it stays outside the
     /// window until its first email is in, as its first frames are black
     fresh: bool,
+    /// an email wanted with no view yet: since when (the view is made a moment later)
+    wanted_at: Option<std::time::Instant>,
 }
 
 impl Default for MailView {
     fn default() -> Self {
-        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false, background_since: None, fresh: false }
+        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false, background_since: None, fresh: false, wanted_at: None }
     }
 }
 
@@ -452,6 +454,17 @@ impl MailView {
             return;
         };
         if self.view.is_none() && !self.failed {
+            // making the view stops the app for ~0.4 s; the window is drawn first, or the place of
+            // the view closed in the background stays black meanwhile (back from the background)
+            let wait = std::time::Duration::from_millis(60);
+            let since = *self.wanted_at.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() < wait {
+                if let Some(c) = &self.wake {
+                    c.request_repaint_after(wait.saturating_sub(since.elapsed()));
+                }
+                return;
+            }
+            self.wanted_at = None;
             self.build(frame, rect);
         }
         let Some(view) = &self.view else { return };
