@@ -64,11 +64,14 @@ pub struct MailView {
     nav_at: Option<std::time::Instant>,
     /// since when the app is in the background (Edge keeps as little in memory as it can)
     background_since: Option<std::time::Instant>,
+    /// the view was made anew (at the start, back from the background): it stays outside the
+    /// window until its first email is in, as its first frames are black
+    fresh: bool,
 }
 
 impl Default for MailView {
     fn default() -> Self {
-        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false, background_since: None }
+        Self { shot: Default::default(), shot_busy: Default::default(), shot_at: None, keys: std::sync::mpsc::channel(), wake: None, view: None, _context: None, shown: None, visible: false, failed: false, last_rect: None, navs: 0, loaded: Default::default(), nav_at: None, asked: Default::default(), late_noted: false, background_since: None, fresh: false }
     }
 }
 
@@ -381,6 +384,7 @@ impl MailView {
                 crate::diag::took("startup: browser view for formatted mail", started, "");
                 self.view = Some(v);
                 self._context = Some(context);
+                self.fresh = true;
             }
             Err(e) => {
                 crate::diag::log(format!("email view: browser not available ({e})"));
@@ -481,13 +485,25 @@ impl MailView {
             }
             self.shown = Some(m.id);
         }
-        if self.last_rect != Some(rect) {
-            let _ = view.set_bounds(bounds(rect));
-            self.last_rect = Some(rect);
-        }
         // the new email not in yet: nothing rather than the one before (at most a moment)
         // (for the log: an email that takes long to come in)
         let behind = self.loaded.load(std::sync::atomic::Ordering::SeqCst) < self.navs;
+        // a view made anew waits outside the window for its first email (at most 2 s), so no
+        // black frame shows; the app's own background is seen there meanwhile
+        let wait = std::time::Duration::from_secs(2);
+        let waiting = self.fresh && behind && self.nav_at.is_some_and(|t| t.elapsed() < wait);
+        if waiting {
+            if let (Some(c), Some(t)) = (&self.wake, self.nav_at) {
+                c.request_repaint_after(wait.saturating_sub(t.elapsed()));
+            }
+        } else {
+            self.fresh = false;
+        }
+        let target = if waiting { away() } else { rect };
+        if self.last_rect != Some(target) {
+            let _ = view.set_bounds(bounds(target));
+            self.last_rect = Some(target);
+        }
         if behind && !self.late_noted && self.nav_at.is_some_and(|t| t.elapsed().as_secs() >= 3) {
             self.late_noted = true;
             crate::diag::log("email view: the email is still loading after 3 s");
