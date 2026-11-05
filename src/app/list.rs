@@ -491,7 +491,7 @@ impl MailApp {
         let mut last_group = "";
         for m in &list {
             let g = group_of(m.date.date(), today);
-            // search results are ordered by how well they match, so no date headings then
+            // (search results: no date headings, those found by meaning come after the rest)
             if g != last_group && !searching {
                 last_group = g;
                 rows.push((Row::Group(g), y));
@@ -511,11 +511,14 @@ impl MailApp {
 
     pub(super) fn visible(&self) -> Vec<&Message> {
         let q = self.search.trim().to_lowercase();
-        // Searching: results from the search index, best match first.
+        // Searching: results from the search index, newest first; those found only by their
+        // meaning (not their words) after the others.
         if !q.is_empty() {
             if let Some(hits) = self.finder.hits() {
                 // (only in the account in focus)
-                return hits.iter().filter_map(|id| self.msg(*id)).filter(|m| m.folder != Folder::Trash && m.account == self.view_account).collect();
+                let mut v: Vec<&Message> = hits.iter().filter_map(|id| self.msg(*id)).filter(|m| m.folder != Folder::Trash && m.account == self.view_account).collect();
+                v.sort_by_key(|m| (self.finder.by_meaning.contains(&m.id), std::cmp::Reverse(m.date)));
+                return v;
             }
             // the index is ready and the answer is a few milliseconds away: no stopgap scan
             if self.finder.has_index() {

@@ -351,7 +351,8 @@ impl Finder {
         // far stay until the new ones come
         std::thread::spawn(move || {
             let mut score: HashMap<u64, f32> = HashMap::new();
-            let lex = idx.search(&q, 400);
+            // every message with the words (the list shows them newest first, so none is cut off)
+            let lex = idx.search(&q, usize::MAX);
             let top_lex = lex.first().map(|x| x.1).unwrap_or(1.0).max(1e-6);
             for (id, s) in &lex {
                 score.insert(*id, 0.7 * s / top_lex);
@@ -373,7 +374,7 @@ impl Finder {
             }
             let mut ranked: Vec<(u64, f32)> = score.into_iter().filter(|(id, _)| !trash.contains(id)).collect();
             ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            let _ = tx.send((key, ranked.into_iter().map(|x| x.0).take(300).collect(), by_meaning));
+            let _ = tx.send((key, ranked.into_iter().map(|x| x.0).collect(), by_meaning));
             ctx.request_repaint();
         });
     }
