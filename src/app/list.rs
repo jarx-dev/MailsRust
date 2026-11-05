@@ -291,11 +291,32 @@ impl MailApp {
                 p.text(Pos2::new(r.right(), r.top() + 8.0), Align2::RIGHT_TOP, &when, FontId::proportional(12.5), MUTED());
                 line_f(p, Pos2::new(r.left() + 52.0, r.top() + 6.0), &who, semibold(14.0), ACCENT(), r.width() - 70.0 - tw);
                 let to_name = if x.to.is_empty() { "—".to_string() } else { split_address(x.to.split(',').next().unwrap_or("")).0 };
-                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &format!("do {to_name}"), 12.5, MUTED(), r.width() - 66.0);
+                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &format!("do {to_name}"), 12.5, MUTED(), r.width() - 200.0);
                 if resp.double_clicked() {
                     self.actions.push(Action::OpenWindow(x.id));
                 }
                 clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
+                // what to do with this message, under its time (as on the open message)
+                let tools = [("⤢", "Otwórz"), ("➦", "Prześlij dalej"), ("⮪", "Odpowiedz wszystkim"), ("↶", "Odpowiedz")];
+                for (k, (glyph, tip)) in tools.iter().enumerate() {
+                    let b = Rect::from_min_size(Pos2::new(r.right() - 28.0 - k as f32 * 30.0, r.top() + 22.0), Vec2::splat(28.0));
+                    let br = ui.interact(b, id(("card-tool", x.id, k)), Sense::click());
+                    if br.hovered() {
+                        ui.painter().rect_filled(b, CornerRadius::same(5), HOVER());
+                    }
+                    // (the reply arrow is drawn thinner by the font: a size up, as on the open message)
+                    let (size, at) = if *glyph == "↶" { (19.0, b.center() - Vec2::new(0.0, 2.0)) } else { (15.0, b.center()) };
+                    ui.painter().text(at, Align2::CENTER_CENTER, *glyph, FontId::proportional(size), MUTED());
+                    hint_above(ui, &br, tip);
+                    if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        self.actions.push(match k {
+                            0 => Action::Select(x.id),
+                            1 => Action::Forward(x.id),
+                            2 => Action::Reply(x.id, true),
+                            _ => Action::Reply(x.id, false),
+                        });
+                    }
+                }
                 ui.horizontal(|ui| {
                     // the text uses the card's whole width (the same margin as on the right)
                     ui.add_space(12.0);
@@ -303,10 +324,11 @@ impl MailApp {
                         let blocks = self.card_blocks(x);
                         let body = x.body.trim();
                         if let Some(b) = blocks.filter(|b| !b.is_empty()) {
-                            // the formatted version, as the sender wrote it
+                            // the formatted version, as the sender wrote it (wider than the card:
+                            // it scrolls sideways inside it instead of pushing the card out)
                             Frame::new().fill(BG()).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(12)).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
-                                self.render_html(ui, x, &b);
+                                egui::ScrollArea::horizontal().id_salt(("card-html", x.id)).show(ui, |ui| self.render_html(ui, x, &b));
                             });
                         } else if body.is_empty() && x.partial {
                             ui.label(RichText::new("Treść tej wiadomości nie została jeszcze pobrana — otwórz ją, aby ją pobrać.").color(MUTED()));
@@ -322,20 +344,6 @@ impl MailApp {
                         if !x.attachments.is_empty() {
                             ui.label(RichText::new(format!("📎 {}", x.attachments.join(", "))).size(12.5).color(MUTED()));
                         }
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 14.0;
-                            let link = |ui: &mut Ui, t: &str| ui.add(egui::Label::new(RichText::new(t).size(12.5).color(ACCENT())).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
-                            if link(ui, "↶ Odpowiedz") {
-                                self.actions.push(Action::Reply(x.id, false));
-                            }
-                            if link(ui, "➦ Prześlij dalej") {
-                                self.actions.push(Action::Forward(x.id));
-                            }
-                            if link(ui, "⤢ Otwórz") {
-                                self.actions.push(Action::Select(x.id));
-                            }
-                        });
                     });
                 });
             });
