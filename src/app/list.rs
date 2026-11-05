@@ -268,11 +268,13 @@ impl MailApp {
             line_f(p, Pos2::new(r.left() + 52.0, r.top() + 5.0), &who, semibold(14.0), ACCENT(), r.width() - 80.0 - tw);
             line(p, Pos2::new(r.left() + 52.0, r.top() + 26.0), &x.preview(), 13.0, TEXT2(), r.width() - 66.0);
             // a double click opens the message in a window of its own (both clicks also fold
-            // and unfold it, so it stays as it was)
-            if resp.double_clicked() {
+            // and unfold it, so it stays as it was); a formatted one opens at the first click
+            let formatted = !x.html_path.is_empty();
+            if resp.double_clicked() && !formatted {
                 self.actions.push(Action::OpenWindow(x.id));
             }
-            return resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Kliknij, aby rozwinąć · dwukrotnie, aby otworzyć w osobnym oknie").clicked();
+            let tip = if formatted { "Kliknij, aby otworzyć" } else { "Kliknij, aby rozwinąć · dwukrotnie, aby otworzyć w osobnym oknie" };
+            return resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked();
         }
         let mut clicked = false;
         Frame::new()
@@ -291,15 +293,17 @@ impl MailApp {
                 p.text(Pos2::new(r.right(), r.top() + 8.0), Align2::RIGHT_TOP, &when, FontId::proportional(12.5), MUTED());
                 line_f(p, Pos2::new(r.left() + 52.0, r.top() + 6.0), &who, semibold(14.0), ACCENT(), r.width() - 70.0 - tw);
                 let to_name = if x.to.is_empty() { "—".to_string() } else { split_address(x.to.split(',').next().unwrap_or("")).0 };
-                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &format!("do {to_name}"), 12.5, MUTED(), r.width() - 200.0);
+                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &format!("do {to_name}"), 12.5, MUTED(), r.width() - 270.0);
                 if resp.double_clicked() {
                     self.actions.push(Action::OpenWindow(x.id));
                 }
                 clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
                 // what to do with this message, under its time (as on the open message)
-                let tools = [("⤢", "Otwórz"), ("➦", "Prześlij dalej"), ("⮪", "Odpowiedz wszystkim"), ("↶", "Odpowiedz")];
+                let tools = [("⤢", "Otwórz"), ("➦", "Prześlij dalej"), ("⮪", "Odpowiedz wszystkim"), ("↶", "Odpowiedz"), ("🔗", "Kopiuj link dla AI"), ("⋯", "Więcej")];
                 for (k, (glyph, tip)) in tools.iter().enumerate() {
-                    let b = Rect::from_min_size(Pos2::new(r.right() - 28.0 - k as f32 * 30.0, r.top() + 22.0), Vec2::splat(28.0));
+                    // (the reply buttons and Otwórz on the right, the AI link and the menu before them)
+                    let slot = if k >= 4 { k + 1 } else { k };
+                    let b = Rect::from_min_size(Pos2::new(r.right() - 28.0 - slot as f32 * 30.0, r.top() + 22.0), Vec2::splat(28.0));
                     let br = ui.interact(b, id(("card-tool", x.id, k)), Sense::click());
                     if br.hovered() {
                         ui.painter().rect_filled(b, CornerRadius::same(5), HOVER());
@@ -308,12 +312,19 @@ impl MailApp {
                     let (size, at) = if *glyph == "↶" { (19.0, b.center() - Vec2::new(0.0, 2.0)) } else { (15.0, b.center()) };
                     ui.painter().text(at, Align2::CENTER_CENTER, *glyph, FontId::proportional(size), MUTED());
                     hint_above(ui, &br, tip);
+                    if k == 5 {
+                        let (id, read, flagged) = (x.id, x.read, x.flagged);
+                        let br = br.on_hover_cursor(egui::CursorIcon::PointingHand);
+                        egui::Popup::menu(&br).show(|ui| self.message_menu(ui, id, read, flagged));
+                        continue;
+                    }
                     if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         self.actions.push(match k {
                             0 => Action::Select(x.id),
                             1 => Action::Forward(x.id),
                             2 => Action::Reply(x.id, true),
-                            _ => Action::Reply(x.id, false),
+                            3 => Action::Reply(x.id, false),
+                            _ => Action::CopyForAi(x.id),
                         });
                     }
                 }
@@ -390,6 +401,9 @@ impl MailApp {
                 if self.thread_card(ui, x, unfolded) {
                     if unfolded {
                         self.thread_unfolded.remove(&x.id);
+                    } else if !x.html_path.is_empty() {
+                        // a formatted one opens in the email view, so it looks exactly as the open one
+                        self.actions.push(Action::Select(x.id));
                     } else {
                         self.thread_unfolded.insert(x.id);
                         if !x.read {
