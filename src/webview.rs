@@ -64,7 +64,7 @@ pub struct MailView {
     nav_at: Option<std::time::Instant>,
     /// since when the app is in the background (Edge keeps as little in memory as it can)
     background_since: Option<std::time::Instant>,
-    /// the view was made anew (at the start, back from the background): it stays outside the
+    /// the view was made anew (at the start): it stays outside the
     /// window until its first email is in, as its first frames are black
     fresh: bool,
     /// an email wanted with no view yet: since when (the view is made a moment later)
@@ -345,26 +345,6 @@ impl MailView {
         self.background_since.is_some()
     }
 
-    /// In the background with the view still open: how long until it is `after` there (zero:
-    /// time to close it).
-    pub fn close_in(&self, after: std::time::Duration) -> Option<std::time::Duration> {
-        self.view.as_ref()?;
-        Some(after.saturating_sub(self.background_since?.elapsed()))
-    }
-
-    /// Edge closed altogether (all its processes end, unless a writing window still uses them).
-    /// It starts again when an email is shown.
-    pub fn close(&mut self) {
-        self.view = None;
-        self._context = None;
-        self.shown = None;
-        self.visible = false;
-        self.last_rect = None;
-        self.navs = self.loaded.load(std::sync::atomic::Ordering::SeqCst);
-        // (a picture being taken never finishes now)
-        self.shot_busy.store(false, std::sync::atomic::Ordering::Relaxed);
-    }
-
     /// Shows `want` (message and where to draw it) or hides the view when `want` is None.
     /// Starts the browser view ahead of time (hidden), so the first formatted email shows at once.
     pub fn prepare(&mut self, frame: &eframe::Frame) {
@@ -454,8 +434,8 @@ impl MailView {
             return;
         };
         if self.view.is_none() && !self.failed {
-            // making the view stops the app for ~0.4 s; the window is drawn first, or the place of
-            // the view closed in the background stays black meanwhile (back from the background)
+            // making the view stops the app for ~0.4 s; the window is drawn first, so it never
+            // shows an undrawn (black) part meanwhile
             let wait = std::time::Duration::from_millis(60);
             let since = *self.wanted_at.get_or_insert_with(std::time::Instant::now);
             if since.elapsed() < wait {
