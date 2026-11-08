@@ -39,6 +39,8 @@ mod settings;
 
 mod window;
 use window::*;
+#[cfg(windows)]
+pub use window::another_copy_shown;
 
 fn id(salt: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
     #[allow(deprecated)]
@@ -379,6 +381,8 @@ pub struct MailApp {
     gcal_push: Option<(Sender<(Option<u64>, Result<(), String>)>, Receiver<(Option<u64>, Result<(), String>)>)>,
     /// ending for good (not just closing the window)
     quitting: bool,
+    /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
+    hidden: bool,
     /// the password that `password_saved` holds encrypted
     protected_pw: Option<String>,
     /// messages may have changed since the last save
@@ -557,6 +561,7 @@ impl MailApp {
             google_check_rx: None,
             gcal_push: None,
             quitting: false,
+            hidden: false,
             db_dirty: true,
             touched: true,
             input_last: false,
@@ -616,6 +621,17 @@ impl MailApp {
         }
         // a key pressed inside the email wakes the app
         app.mail_view.wake = Some(cc.egui_ctx.clone());
+        let _ = APP_CTX.set(cc.egui_ctx.clone());
+        // restarted by an update while it was in the tray: it stays there (hidden in `logic`);
+        // with no tray icon, minimized instead
+        if std::env::args().any(|a| a == "--tray") {
+            if app._tray.is_some() {
+                app.hidden = true;
+            } else {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+        }
         // test pictures: the AI settings, the Google Calendar window
         app.ai_open = std::env::var("POCZTA_START").as_deref() == Ok("ai-settings");
         app.gcal_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("account-calendar") | Ok("google-check"));
@@ -1040,12 +1056,9 @@ impl eframe::App for MailApp {
             }
         }
         self.bench_step(&ctx);
-        // closing the window only minimizes the app (checked here too: the request arrives with
-        // the screen's own input)
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        }
+        // closing the window puts the app into the tray (checked here too: the request arrives
+        // with the screen's own input)
+        self.close_to_tray(&ctx);
         self.web_target = None;
         if self.loading_screen(ui) { return; }
         if self.preview.is_some() {
@@ -1424,9 +1437,7 @@ impl eframe::App for MailApp {
         // a click on the note about new mail: the window in front with the newest new message
         if self.popup_click.1.try_iter().count() > 0 {
             if let Some(p) = self.popup.take() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                self.show_window(ctx);
                 self.module = Module::Mail;
                 self.view = MailView::Folder(Folder::Inbox);
                 self.search.clear();
@@ -1462,23 +1473,21 @@ impl eframe::App for MailApp {
             }
             ctx.request_repaint_after(std::time::Duration::from_millis((ms.saturating_sub(self.opened.elapsed().as_millis()) as u64).clamp(50, 60_000)));
         }
-        // the tray icon: show the window again, or quit for good
+        // the tray icon (or the program started again): show the window again, or quit for good
+        if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.show_window(ctx);
+        }
+        // (eframe shows the window after its first frames: started into the tray, hidden again)
+        if self.hidden && self.drawn <= 3 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
         while let Ok(t) = self.tray_rx.try_recv() {
             match t {
-                TrayMsg::Show => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                }
+                TrayMsg::Show => self.show_window(ctx),
                 TrayMsg::Quit => self.quit(),
             }
         }
-        // closing the window (its button, Alt+F4, the taskbar) only minimizes the app; it keeps
-        // receiving mail. It ends from the tray icon or the menu's "Zakończ".
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        }
+        self.close_to_tray(ctx);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

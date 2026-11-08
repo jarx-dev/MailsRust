@@ -15,8 +15,8 @@ impl MailApp {
         let (minimized, focused) = ctx.input(|i| (i.viewport().minimized.unwrap_or(false), i.viewport().focused.unwrap_or(true)));
         // behind other windows (or the desktop, Win+D: not minimized for Windows) for 2 minutes
         // with no pointer over it either: the new build starts minimized
-        let behind = !focused && self.clock() - self.last_input > 120.0;
-        let quiet = minimized || behind || self.clock() - self.last_input > 600.0;
+        let behind = !focused && !self.hidden && self.clock() - self.last_input > 120.0;
+        let quiet = self.hidden || minimized || behind || self.clock() - self.last_input > 600.0;
         let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some();
         // forms hold their text only in memory; reading windows get input the main window doesn't see
         let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
@@ -25,7 +25,9 @@ impl MailApp {
             return;
         }
         self.update_staged = None;
-        match crate::update::apply(&staged, minimized || behind) {
+        // the new build starts as this one is: in the tray, minimized, or shown
+        let start = if self.hidden { Some("--tray") } else if minimized || behind { Some("--minimized") } else { None };
+        match crate::update::apply(&staged, start) {
             Ok(()) => {
                 crate::diag::log("update: new build in place, closing for the restart");
                 self.quit();
@@ -217,7 +219,7 @@ specjalista ds. Informatyki".into();
         }
         crate::notify::sound();
         let (focused, minimized) = self.ctx.input(|i| (i.viewport().focused.unwrap_or(false), i.viewport().minimized.unwrap_or(false)));
-        if focused && !minimized && std::env::var("POCZTA_NOTIFY_TEST").is_err() {
+        if focused && !minimized && !self.hidden && std::env::var("POCZTA_NOTIFY_TEST").is_err() {
             return;
         }
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));

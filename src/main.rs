@@ -64,6 +64,13 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    // one copy of the program: started again, it brings the running one to the front and ends
+    // (a test copy with its own data folder counts as a program of its own)
+    #[cfg(windows)]
+    if shot.is_none() && app::another_copy_shown() {
+        return Ok(());
+    }
+
     // a window size saved while the window was minimized (tiny) is forgotten: the window then
     // opens at its normal size instead of as a small strip in the corner
     {

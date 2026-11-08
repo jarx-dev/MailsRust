@@ -277,8 +277,8 @@ fn check_and_download(url: &Url) -> Result<Option<PathBuf>, String> {
 }
 
 /// Swaps the EXE and starts the new build and its guard; on error everything is put back.
-/// `minimized`: the new build starts minimized, as this one is.
-pub fn apply(staged: &Path, minimized: bool) -> Result<(), String> {
+/// `start`: how the new build starts (`--tray`, `--minimized`), as this one is.
+pub fn apply(staged: &Path, start: Option<&str>) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let old = old_path(&exe);
     let _ = std::fs::remove_file(&old);
@@ -290,8 +290,8 @@ pub fn apply(staged: &Path, minimized: bool) -> Result<(), String> {
     }
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg(AFTER_UPDATE_ARG).arg(std::process::id().to_string());
-    if minimized {
-        cmd.arg("--minimized");
+    if let Some(a) = start {
+        cmd.arg(a);
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
