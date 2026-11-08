@@ -347,19 +347,38 @@ impl MailApp {
                     let was_empty = self.search.trim().is_empty();
                     let hint = if !self.store.extra.is_empty() {
                         let a = self.account_ref(self.view_account);
-                        format!("🔍  Szukaj w: {}", if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() })
+                        format!("Szukaj w: {}", if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() })
                     } else if self.finder.meaning_ready() {
-                        "🔍  Szukaj — słowa lub znaczenie".to_string()
+                        "Szukaj — słowa lub znaczenie".to_string()
                     } else {
-                        "🔍  Szukaj".to_string()
+                        "Szukaj".to_string()
                     };
+                    // room on the left for the magnifier and on the right for the clearing ×
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.search)
                             .hint_text(RichText::new(hint).italics())
                             .desired_width(w)
-                            .margin(Margin::symmetric(10, 5)),
+                            .margin(Margin { left: 32, right: 30, top: 5, bottom: 5 }),
                     );
-                    if r.changed() {
+                    ui.painter().text(Pos2::new(r.rect.left() + 16.0, r.rect.center().y), Align2::CENTER_CENTER, ic::SEARCH, FontId::proportional(14.0), MUTED());
+                    let mut cleared = false;
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) && !self.search.is_empty() {
+                        self.search.clear();
+                        cleared = true;
+                    }
+                    if !self.search.is_empty() {
+                        let x = Rect::from_center_size(Pos2::new(r.rect.right() - 15.0, r.rect.center().y), Vec2::splat(22.0));
+                        let xr = ui.interact(x, id("search-clear"), Sense::click());
+                        if xr.hovered() {
+                            ui.painter().rect_filled(x, CornerRadius::same(4), HOVER());
+                        }
+                        ui.painter().text(x.center(), Align2::CENTER_CENTER, ic::CLEAR, FontId::proportional(11.0), MUTED());
+                        if xr.on_hover_text("Wyczyść wyszukiwanie (Esc)").clicked() {
+                            self.search.clear();
+                            cleared = true;
+                        }
+                    }
+                    if r.changed() || cleared {
                         if was_empty {
                             // a new search starts where the person is: in sent mail, received, or everywhere
                             self.scope = match self.view {

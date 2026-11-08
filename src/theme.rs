@@ -100,6 +100,9 @@ pub mod ic {
     pub const MORE: &str = "\u{E712}";
     pub const TRANSLATE: &str = "\u{F2B7}";
     pub const OPEN: &str = "\u{E8A7}";
+    pub const SEARCH: &str = "\u{E721}";
+    pub const CLEAR: &str = "\u{E711}";
+    pub const CHECK: &str = "\u{E8FB}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

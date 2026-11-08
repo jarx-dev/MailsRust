@@ -723,10 +723,10 @@ impl MailApp {
                         });
                     } else {
                         ui.horizontal(|ui| {
-                            let btn = egui::Button::new(RichText::new("   G    Zaloguj przez Google   ").size(15.0).color(TEXT()))
+                            let btn = egui::Button::new(RichText::new("G    Zaloguj przez Google").color(TEXT()))
                                 .fill(BG())
                                 .stroke(Stroke::new(1.0, BORDER()))
-                                .min_size(Vec2::new(260.0, 38.0));
+                                .min_size(Vec2::new(0.0, 30.0));
                             if ui.add_enabled(!signing_in, btn).clicked() {
                                 start_sign_in = true;
                             }
@@ -785,7 +785,7 @@ impl MailApp {
                                 });
                             });
                     }
-                    egui::CollapsingHeader::new(RichText::new("Zaawansowane").small().color(MUTED()))
+                    egui::CollapsingHeader::new(RichText::new("Zaawansowane").color(MUTED()))
                         .id_salt("oauth-advanced")
                         .show(ui, |ui| {
                             egui::Grid::new("accgrid-oauth").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -866,7 +866,7 @@ impl MailApp {
                     }
                     let a = &mut self.store.account;
                     ui.horizontal(|ui| {
-                        if ui.small_button("Pobierz ponownie z wysłanych").on_hover_text("Szuka podpisu w Twoich ostatnich wiadomościach wysłanych").clicked() {
+                        if ui.button("Pobierz ponownie z wysłanych").on_hover_text("Szuka podpisu w Twoich ostatnich wiadomościach wysłanych").clicked() {
                             a.signature_auto = true;
                             refresh_signature = true;
                         }

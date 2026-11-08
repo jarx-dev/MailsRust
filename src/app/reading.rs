@@ -617,10 +617,9 @@ impl MailApp {
                             ui.painter().rect_filled(rr, CornerRadius::same(5), HOVER());
                         }
                         if k == 5 {
-                            // a reply arrow, crossed out: no reply needed (coloured when marked)
+                            // a tick: no reply needed (coloured when marked)
                             let col = if marked { Color32::from_rgb(0x8E, 0x5B, 0xD0) } else { MUTED() };
-                            ui.painter().text(rr.center(), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(16.0), col);
-                            ui.painter().line_segment([rr.center() + Vec2::new(-7.0, 7.0), rr.center() + Vec2::new(7.0, -7.0)], Stroke::new(1.6, col));
+                            ui.painter().text(rr.center(), Align2::CENTER_CENTER, ic::CHECK, FontId::proportional(16.0), col);
                         } else {
                             paint_icon(ui.painter(), rr.center(), glyph, 16.0, MUTED());
                         }
