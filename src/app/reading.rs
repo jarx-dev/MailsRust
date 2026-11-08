@@ -759,7 +759,7 @@ impl MailApp {
                                     hint_above(ui, &open, &tip);
                                     let (sep, _) = ui.allocate_exact_size(Vec2::new(9.0, 18.0), Sense::hover());
                                     ui.painter().vline(sep.center().x, sep.y_range(), Stroke::new(1.0, BORDER()));
-                                    let save = ui.add(egui::Button::new(RichText::new("⬇").size(15.0).color(ACCENT())).frame(false));
+                                    let save = ui.add(egui::Button::new(RichText::new(ic::DOWNLOAD).size(14.0).color(ACCENT())).frame(false));
                                     hint_above(ui, &save, "Zapisz w folderze Pobrane");
                                     if open.clicked() {
                                         self.actions.push(if can_preview { Action::PreviewAttachment(m.id, i) } else { Action::SaveAttachment(m.id, i) });
@@ -1083,7 +1083,7 @@ impl MailApp {
                                     if open_it.clicked() {
                                         self.actions.push(Action::OpenAttachment(m.id, k));
                                     }
-                                    let save = ui.add(egui::Button::new(RichText::new("⬇").color(ACCENT())).frame(false));
+                                    let save = ui.add(egui::Button::new(RichText::new(ic::DOWNLOAD).color(ACCENT())).frame(false));
                                     hint_above(ui, &save, "Zapisz w folderze Pobrane");
                                     if save.clicked() {
                                         self.actions.push(Action::SaveAttachment(m.id, k));

@@ -43,7 +43,7 @@ themed! {
     HOVER = 0xF4F4F4, 0x2B2E33;
     BORDER = 0xE4E4E4, 0x3A3D44;
     TEXT = 0x222222, 0xE4E6EA;
-    MUTED = 0x767676, 0x9AA0A8;
+    MUTED = 0x666666, 0x9AA0A8;
     ICON = 0x444444, 0xC4C8CE;
     /// the background of the window and its panels
     BG = 0xFFFFFF, 0x1E1F22;
@@ -52,7 +52,7 @@ themed! {
     /// second-line text (subjects of read mail and the like)
     TEXT2 = 0x555555, 0xB9BDC4;
     /// faint text (the start of a message in the list)
-    FAINT = 0x8A8A8A, 0x8C929A;
+    FAINT = 0x767676, 0x8C929A;
     /// the "important" label
     IMPORTANT = 0xFFE38A, 0x5C4812;
     /// behind company logos (most are made for a white page)
@@ -84,6 +84,7 @@ pub mod ic {
     pub const SUN: &str = "\u{E706}";
     pub const CALENDAR: &str = "\u{E787}";
     pub const PERSON: &str = "\u{E77B}";
+    pub const PEOPLE: &str = "\u{E716}";
     pub const REPLY: &str = "\u{E97A}";
     pub const INBOX: &str = "\u{E896}";
     pub const OUTBOX: &str = "\u{E898}";
@@ -103,6 +104,7 @@ pub mod ic {
     pub const SEARCH: &str = "\u{E721}";
     pub const CLEAR: &str = "\u{E711}";
     pub const CHECK: &str = "\u{E8FB}";
+    pub const DOWNLOAD: &str = "\u{E896}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

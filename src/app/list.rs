@@ -801,7 +801,7 @@ impl MailApp {
         line_f(p, Pos2::new(x, r.top() + 24.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w);
         if !m.read {
             // a small blue dot left of the picture marks messages not opened yet
-            p.circle_filled(Pos2::new(r.left() + 4.5, r.top() + 24.0), 3.5, ACCENT());
+            p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + 24.0), 3.0, ACCENT());
         }
         // Third line: the message's tags first, then the start of the text.
         let mut tx = x;

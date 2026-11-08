@@ -470,7 +470,7 @@ impl MailApp {
         let counts = self.counts();
         let (unread_all, flagged) = (counts.unread_all, counts.flagged);
         for (v, icon, n) in [(MailView::Unread, ic::MAIL, unread_all), (MailView::Flagged, ic::FLAG, flagged)] {
-            let row = folder_row_r(ui, icon, MUTED(), v.title(), n, self.view == v && self.search.is_empty(), 28.0);
+            let row = folder_row_r(ui, icon, MUTED(), v.title(), n, v == MailView::Unread, self.view == v && self.search.is_empty(), 28.0);
             if v == MailView::Unread && mark_all_menu(&row, n) {
                 self.actions.push(Action::MarkAllRead(None, None));
             }
@@ -615,7 +615,7 @@ impl MailApp {
                     Folder::Junk => Color32::from_rgb(0xD9, 0x6B, 0x2B),
                     _ => MUTED(),
                 };
-                let row = folder_row_r(ui, f.icon(), col, f.name(), n, self.view == MailView::Folder(f) && self.view_account == 0 && self.search.is_empty(), 44.0);
+                let row = folder_row_r(ui, f.icon(), col, f.name(), n, !matches!(f, Folder::Drafts | Folder::Outbox), self.view == MailView::Folder(f) && self.view_account == 0 && self.search.is_empty(), 44.0);
                 let unread = counts.folder_unread.get(&f).copied().unwrap_or(0);
                 if mark_all_menu(&row, unread) {
                     self.actions.push(Action::MarkAllRead(Some(0), Some(f)));
@@ -671,7 +671,7 @@ impl MailApp {
                         _ => MUTED(),
                     };
                     let on = self.view == MailView::Folder(f) && self.view_account == acct && self.search.is_empty();
-                    let row = folder_row_r(ui, f.icon(), col, f.name(), n, on, 44.0);
+                    let row = folder_row_r(ui, f.icon(), col, f.name(), n, !matches!(f, Folder::Drafts | Folder::Outbox), on, 44.0);
                     let unread = counts.acct_unread.get(&(acct, f)).copied().unwrap_or(0);
                     if mark_all_menu(&row, unread) {
                         self.actions.push(Action::MarkAllRead(Some(acct), Some(f)));
@@ -950,9 +950,9 @@ impl MailApp {
     }
 }
 
-/// One folder line: icon, name, count on the right.
+/// One folder line: icon, name, count on the right (a plain number, not unread mail).
 pub(super) fn folder_row(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, on: bool, indent: f32) -> bool {
-    folder_row_r(ui, icon, icon_col, name, count, on, indent).clicked()
+    folder_row_r(ui, icon, icon_col, name, count, false, on, indent).clicked()
 }
 
 /// A row of the left bar with a right-click menu: "Oznacz wszystkie jako przeczytane" (when
@@ -968,7 +968,9 @@ pub(super) fn mark_all_menu(resp: &egui::Response, unread: usize) -> bool {
     chosen
 }
 
-pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, on: bool, indent: f32) -> egui::Response {
+/// `unread`: the count is of unread mail (blue and bold); otherwise a plain grey number.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, unread: bool, on: bool, indent: f32) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
     let p = ui.painter();
     if on {
@@ -978,7 +980,8 @@ pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &st
     }
     p.text(Pos2::new(r.left() + indent, r.center().y), Align2::CENTER_CENTER, icon, FontId::proportional(15.0), icon_col);
     let count_txt = if count > 0 { count.to_string() } else { String::new() };
-    p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, &count_txt, semibold(12.5), ACCENT());
+    let (count_font, count_col) = if unread { (semibold(12.5), ACCENT()) } else { (FontId::proportional(12.0), MUTED()) };
+    p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, &count_txt, count_font, count_col);
     line(p, Pos2::new(r.left() + indent + 16.0, r.center().y - 10.0), name, 14.0, TEXT(), r.width() - indent - 56.0);
     resp
 }
