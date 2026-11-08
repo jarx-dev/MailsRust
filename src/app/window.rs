@@ -225,11 +225,40 @@ impl MailApp {
         }
     }
 
+    /// Minimized, or closed into the tray (hidden): the app is in the background.
+    pub(super) fn in_background(&self, ctx: &egui::Context) -> bool {
+        self.hidden || ctx.input(|i| i.viewport().minimized.unwrap_or(false))
+    }
+
+    /// Closing the window (its button, Alt+F4, the taskbar) puts the app into the tray, off the
+    /// taskbar; it keeps receiving mail. Without a tray icon it is only minimized (or there
+    /// would be no way back).
+    pub(super) fn close_to_tray(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|i| i.viewport().close_requested()) || self.quitting {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        if self._tray.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.hidden = true;
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
+    /// The window back in front (from the tray, a note about new mail, another start).
+    pub(super) fn show_window(&mut self, ctx: &egui::Context) {
+        self.hidden = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
     /// Minimized (or in the tray) the app is in the background: it and its email view hand back
     /// the memory they can; back in front, it works normally again. The email view stays open
     /// (about 170 MB), so the email is there at once when the window comes back.
     pub(super) fn background_memory(&mut self, ctx: &egui::Context) {
-        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let minimized = self.in_background(ctx);
         if self.loading.is_some() {
             return;
         }
@@ -515,6 +544,48 @@ pub(super) enum TrayMsg {
 }
 
 /// The icon next to the clock: a click brings the window back, its menu shows or quits.
+/// Another start of the program asked to see this one (see `another_copy_shown`).
+pub(super) static SHOW_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The window's context, so the thread waiting for another start can wake the app.
+pub(super) static APP_CTX: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+/// One copy of the program: true when one already runs (it has been told to show itself, and
+/// this one ends); otherwise a thread waits for later starts. Each data folder (the real one, a
+/// test copy's) has its own sign.
+#[cfg(windows)]
+pub fn another_copy_shown() -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    let folder: String = std::env::var("POCZTA_DATA_DIR").unwrap_or_default().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let name: Vec<u16> = format!("Local\\Poczta.show{folder}").encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let h = CreateEventW(std::ptr::null(), 0, 0, name.as_ptr());
+        if h.is_null() {
+            return false;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            // the running copy may bring its window to the front
+            AllowSetForegroundWindow(ASFW_ANY);
+            SetEvent(h);
+            CloseHandle(h);
+            crate::diag::log("startup: the program already runs, its window shown instead");
+            return true;
+        }
+        // (the handle stays open as long as the program runs; passed on as a number)
+        let h = h as usize;
+        std::thread::spawn(move || {
+            while WaitForSingleObject(h as _, INFINITE) == WAIT_OBJECT_0 {
+                SHOW_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Some(c) = APP_CTX.get() {
+                    c.request_repaint();
+                }
+            }
+        });
+    }
+    false
+}
+
 pub(super) fn make_tray(ctx: &egui::Context) -> (Option<tray_icon::TrayIcon>, Receiver<TrayMsg>) {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};

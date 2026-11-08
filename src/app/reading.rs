@@ -90,7 +90,7 @@ impl MailApp {
     pub(super) fn read_after_a_while(&mut self, ctx: &egui::Context) {
         const AFTER: f64 = 1.0;
         let now = self.clock();
-        let shown = self.selected.filter(|_| self.module == Module::Mail && self.shot.is_none() && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)));
+        let shown = self.selected.filter(|_| self.module == Module::Mail && self.shot.is_none() && !self.in_background(ctx));
         let Some(id) = shown else {
             // not on screen: counting starts again when it is
             self.read_timer = None;
