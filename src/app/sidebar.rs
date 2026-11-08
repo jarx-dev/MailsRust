@@ -319,7 +319,7 @@ impl MailApp {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                 if window_button(ui, WinButton::Close).on_hover_text("Zamknij (program działa dalej w zasobniku)").clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    self.send_to_tray(ui.ctx());
                 }
                 let max_kind = if maximized { WinButton::Restore } else { WinButton::Maximize };
                 if window_button(ui, max_kind)

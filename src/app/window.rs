@@ -231,13 +231,18 @@ impl MailApp {
     }
 
     /// Closing the window (its button, Alt+F4, the taskbar) puts the app into the tray, off the
-    /// taskbar; it keeps receiving mail. Without a tray icon it is only minimized (or there
-    /// would be no way back).
+    /// taskbar; it keeps receiving mail.
     pub(super) fn close_to_tray(&mut self, ctx: &egui::Context) {
         if !ctx.input(|i| i.viewport().close_requested()) || self.quitting {
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        self.send_to_tray(ctx);
+    }
+
+    /// Into the tray (the window's X, closing it); without a tray icon only minimized (or there
+    /// would be no way back).
+    pub(super) fn send_to_tray(&mut self, ctx: &egui::Context) {
         if self._tray.is_some() {
             self.hide_window(ctx);
         } else {
