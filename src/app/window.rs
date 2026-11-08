@@ -239,16 +239,26 @@ impl MailApp {
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         if self._tray.is_some() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            self.hidden = true;
+            self.hide_window(ctx);
         } else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
     }
 
+    /// Into the tray: minimized first, then hidden. Only hidden, the window would still be drawn
+    /// in full (winit never tells eframe it is covered); minimizing it after hiding shows it again.
+    pub(super) fn hide_window(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.hidden = true;
+    }
+
     /// The window back in front (from the tray, a note about new mail, another start).
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
         self.hidden = false;
+        self.start_hidden = false;
+        // (Windows skips the focus while the window is still minimized: asked again once it isn't)
+        self.focus_pending = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);

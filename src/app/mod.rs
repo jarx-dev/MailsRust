@@ -383,6 +383,10 @@ pub struct MailApp {
     quitting: bool,
     /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
     hidden: bool,
+    /// started into the tray (`--tray`): the window to be hidden after its first frame
+    start_hidden: bool,
+    /// shown again: the keyboard to come once the window is no longer minimized
+    focus_pending: bool,
     /// the password that `password_saved` holds encrypted
     protected_pw: Option<String>,
     /// messages may have changed since the last save
@@ -562,6 +566,8 @@ impl MailApp {
             gcal_push: None,
             quitting: false,
             hidden: false,
+            start_hidden: false,
+            focus_pending: false,
             db_dirty: true,
             touched: true,
             input_last: false,
@@ -627,6 +633,7 @@ impl MailApp {
         if std::env::args().any(|a| a == "--tray") {
             if app._tray.is_some() {
                 app.hidden = true;
+                app.start_hidden = true;
             } else {
                 cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -1477,9 +1484,15 @@ impl eframe::App for MailApp {
         if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
             self.show_window(ctx);
         }
-        // (eframe shows the window after its first frames: started into the tray, hidden again)
-        if self.hidden && self.drawn <= 3 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        // (eframe shows the window after its first frame: started into the tray, hidden then,
+        // once — unless it was asked to show meanwhile)
+        if self.start_hidden && self.drawn >= 1 {
+            self.start_hidden = false;
+            self.hide_window(ctx);
+        }
+        if self.focus_pending && !ctx.input(|i| i.viewport().minimized.unwrap_or(true)) {
+            self.focus_pending = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         while let Ok(t) = self.tray_rx.try_recv() {
             match t {

@@ -65,9 +65,12 @@ fn main() -> eframe::Result<()> {
     }
 
     // one copy of the program: started again, it brings the running one to the front and ends
-    // (a test copy with its own data folder counts as a program of its own)
+    // (a test copy with its own data folder counts as a program of its own). A new build that
+    // finds a copy started meanwhile (during the swap) still reports itself ready, or the update
+    // guard would take the good build back.
     #[cfg(windows)]
     if shot.is_none() && app::another_copy_shown() {
+        update::startup_complete(true);
         return Ok(());
     }
 
