@@ -54,7 +54,7 @@ themed! {
     /// faint text (the start of a message in the list)
     FAINT = 0x8A8A8A, 0x8C929A;
     /// the "important" label
-    IMPORTANT = 0xFFD52E, 0x5C4812;
+    IMPORTANT = 0xFFE38A, 0x5C4812;
     /// behind company logos (most are made for a white page)
     LOGO_BG = 0xFFFFFF, 0xC9CDD3;
 }
@@ -93,6 +93,27 @@ pub mod ic {
     pub const STAR: &str = "\u{E734}";
     pub const SETTINGS: &str = "\u{E713}";
     pub const LIST: &str = "\u{E8FD}";
+    pub const FORWARD: &str = "\u{EE35}";
+    /// (no such icon in the set: `paint_icon` draws two reply arrows)
+    pub const REPLY_ALL: &str = "\u{E97A}\u{E97A}";
+    pub const LINK: &str = "\u{E71B}";
+    pub const MORE: &str = "\u{E712}";
+    pub const TRANSLATE: &str = "\u{F2B7}";
+    pub const OPEN: &str = "\u{E8A7}";
+}
+
+/// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.
+pub fn paint_icon(p: &Painter, at: Pos2, glyph: &str, size: f32, col: Color32) {
+    if glyph != ic::REPLY_ALL {
+        p.text(at, Align2::CENTER_CENTER, glyph, FontId::proportional(size), col);
+        return;
+    }
+    let shift = size * 0.15;
+    let front = p.text(at + Vec2::new(shift, 0.0), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(size), col);
+    // the same arrow further left, cut off just before the front arrow's head: only its head shows
+    let clip = egui::Rect::from_min_max(Pos2::new(front.left() - size, front.top()), Pos2::new(front.left() + size * 0.08, front.bottom()));
+    p.with_clip_rect(clip.intersect(p.clip_rect()))
+        .text(at + Vec2::new(shift - size * 0.3, 0.0), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(size), col);
 }
 
 /// Use the standard Windows UI fonts, with the Windows symbol fonts as a fallback for icons.

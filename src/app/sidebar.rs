@@ -676,7 +676,7 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Kalendarz").font(semibold(18.0)).color(TEXT()));
+            ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
@@ -727,7 +727,7 @@ impl MailApp {
             });
         Frame::new().inner_margin(Margin { left: 14, right: 10, top: 10, bottom: 0 }).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Kalendarz").font(semibold(18.0)).color(TEXT()));
+                ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if fold_button(ui, true).on_hover_text("Zwiń kalendarz na bok").clicked() {
                         self.show_side = false;

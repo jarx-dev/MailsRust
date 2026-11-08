@@ -483,9 +483,10 @@ impl MailApp {
             if m.flagged {
                 let txt = "Ważne  ✕";
                 let w = text_width(ui, txt, FontId::proportional(13.0)) + 18.0;
-                let chip = Rect::from_min_size(Pos2::new(right - w, hr.top() + 3.0), Vec2::new(w, 26.0));
+                // (the same height and corners as the tag chips and "+ Tag" beside it)
+                let chip = Rect::from_min_size(Pos2::new(right - w, hr.top() + 5.0), Vec2::new(w, 22.0));
                 let cr = ui.interact(chip, id(("chip", m.id)), Sense::click());
-                ui.painter().rect_filled(chip, CornerRadius::same(2), IMPORTANT());
+                ui.painter().rect_filled(chip, CornerRadius::same(4), IMPORTANT());
                 ui.painter().text(chip.center(), Align2::CENTER_CENTER, txt, FontId::proportional(13.0), if crate::theme::is_dark() { Color32::from_rgb(0xFF, 0xDF, 0x80) } else { Color32::from_rgb(0x22, 0x22, 0x22) });
                 if cr.on_hover_text("Usuń oznaczenie").clicked() {
                     self.actions.push(Action::ToggleFlag(m.id));
@@ -618,19 +619,16 @@ impl MailApp {
                         if k == 5 {
                             // a reply arrow, crossed out: no reply needed (coloured when marked)
                             let col = if marked { Color32::from_rgb(0x8E, 0x5B, 0xD0) } else { MUTED() };
-                            ui.painter().text(rr.center(), Align2::CENTER_CENTER, "↶", FontId::proportional(16.0), col);
+                            ui.painter().text(rr.center(), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(16.0), col);
                             ui.painter().line_segment([rr.center() + Vec2::new(-7.0, 7.0), rr.center() + Vec2::new(7.0, -7.0)], Stroke::new(1.6, col));
                         } else {
-                            // (the reply arrow is drawn thinner by the font: a size up, to match the others)
-                            let size = if k == 6 { 21.0 } else { 16.0 };
-                            let at = if k == 6 { rr.center() - Vec2::new(0.0, 3.0) } else { rr.center() };
-                            ui.painter().text(at, Align2::CENTER_CENTER, glyph, FontId::proportional(size), MUTED());
+                            paint_icon(ui.painter(), rr.center(), glyph, 16.0, MUTED());
                         }
                         // the hint goes above the button: below it the formatted email would cover it
                         hint_above(ui, &resp, tip);
                         resp
                     };
-                    let more = icon(ui, 0, "⋯", "Więcej");
+                    let more = icon(ui, 0, ic::MORE, "Więcej");
                     let (mid, read, flagged) = (m.id, m.read, m.flagged);
                     if std::env::var("POCZTA_START").as_deref() == Ok("menu") && self.clock() > 4.0 {
                         // test picture: the menu open over the email
@@ -641,23 +639,23 @@ impl MailApp {
                         }
                     }
                     egui::Popup::menu(&more).show(|ui| self.message_menu(ui, mid, read, flagged));
-                    if icon(ui, 3, "🔗", "Kopiuj link dla AI").clicked() {
+                    if icon(ui, 3, ic::LINK, "Kopiuj link dla AI").clicked() {
                         self.actions.push(Action::CopyForAi(m.id));
                     }
-                    if icon(ui, 4, "🌐", tr_tip).clicked() {
+                    if icon(ui, 4, ic::TRANSLATE, tr_tip).clicked() {
                         self.actions.push(Action::Translate(m.id));
                     }
                     if offer && icon(ui, 5, "", nr_tip).clicked() {
                         self.actions.push(Action::NoReplyNeeded(m.id, !marked));
                     }
-                    if icon(ui, 2, "➦", "Prześlij dalej").clicked() {
+                    if icon(ui, 2, ic::FORWARD, "Prześlij dalej").clicked() {
                         self.actions.push(Action::Forward(m.id));
                     }
-                    if icon(ui, 1, "⮪", "Odpowiedz wszystkim").clicked() {
+                    if icon(ui, 1, ic::REPLY_ALL, "Odpowiedz wszystkim").clicked() {
                         self.actions.push(Action::Reply(m.id, true));
                     }
                     // replying: a plain icon like the others, the first of the row
-                    let reply = icon(ui, 6, "↶", "Odpowiedz (Ctrl+R)");
+                    let reply = icon(ui, 6, ic::REPLY, "Odpowiedz (Ctrl+R)");
                     if reply.clicked() {
                         self.actions.push(Action::Reply(m.id, false));
                     }
@@ -1057,13 +1055,13 @@ impl MailApp {
                         line(p, Pos2::new(sr.left() + 56.0, sr.top() + 26.0), &format!("do {first}"), 13.0, MUTED(), sr.width() - 330.0);
                         p.text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(13.5), TEXT());
                         let mut x = sr.right() - 12.0;
-                        for (k, (icon, tip)) in [("🔗", "Kopiuj link dla AI"), ("➦", "Prześlij dalej"), ("⮪", "Odpowiedz wszystkim"), ("↶", "Odpowiedz")].iter().enumerate() {
+                        for (k, (icon, tip)) in [(ic::LINK, "Kopiuj link dla AI"), (ic::FORWARD, "Prześlij dalej"), (ic::REPLY_ALL, "Odpowiedz wszystkim"), (ic::REPLY, "Odpowiedz")].iter().enumerate() {
                             let rr = Rect::from_center_size(Pos2::new(x, sr.top() + 36.0), Vec2::splat(26.0));
                             let resp = ui.interact(rr, id(("reader-act", r.key, k)), Sense::click());
                             if resp.hovered() {
                                 ui.painter().rect_filled(rr, CornerRadius::same(4), HOVER());
                             }
-                            ui.painter().text(rr.center(), Align2::CENTER_CENTER, *icon, FontId::proportional(16.0), MUTED());
+                            paint_icon(ui.painter(), rr.center(), icon, 16.0, MUTED());
                             hint_above(ui, &resp, tip);
                             if resp.clicked() {
                                 self.actions.push(match k {
