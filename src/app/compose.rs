@@ -693,6 +693,17 @@ impl MailApp {
                                                 crate::diag::log(format!("aitest: {}", text.lines().take(3).collect::<Vec<_>>().join(" | ")));
                                             }
                                         }
+                                        if std::env::var("POCZTA_LINK_TEST").is_ok() {
+                                            use std::sync::atomic::{AtomicBool, Ordering};
+                                            static PASTED: AtomicBool = AtomicBool::new(false);
+                                            if !PASTED.swap(true, Ordering::Relaxed) {
+                                                // test: an address pasted as from the clipboard
+                                                v.run_js("(()=>{const ed=document.getElementById('pz-ed');ed.focus();const dt=new DataTransfer();dt.setData('text/plain','https://pl.wikipedia.org/wiki/Rust_(j%C4%99zyk_programowania)');ed.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}))})()");
+                                            }
+                                            if let Some(i) = html.find("<a ") {
+                                                crate::diag::log(format!("linktest: {}", html[i..].chars().take(160).collect::<String>()));
+                                            }
+                                        }
                                         if std::env::var("POCZTA_START").as_deref() == Ok("webreply") {
                                             use std::sync::atomic::{AtomicBool, Ordering};
                                             static FILLED: AtomicBool = AtomicBool::new(false);
@@ -736,6 +747,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                                         }
                                     }
                                     crate::compose_view::Msg::Md { text } => v.insert_html(&crate::rich::to_html(&text)),
+                                    crate::compose_view::Msg::Title { n, title } => v.link_title(n, &title),
                                     crate::compose_view::Msg::Clicked => {
                                         // the text was clicked: it has the keyboard, the fields above let go
                                         c.editor_clicked = true;
