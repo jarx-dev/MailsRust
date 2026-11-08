@@ -71,6 +71,30 @@ pub const EVENT_COLORS: [Color32; 4] = [
 ];
 pub const EVENT_COLOR_NAMES: [&str; 4] = ["Niebieski", "Fioletowy", "Zielony", "Pomarańczowy"];
 
+/// Icons of Segoe Fluent Icons (private code points, so they never replace a letter).
+pub mod ic {
+    pub const MENU: &str = "\u{E700}";
+    pub const REFRESH: &str = "\u{E72C}";
+    pub const MAIL: &str = "\u{E715}";
+    pub const MAIL_OPEN: &str = "\u{E8C3}";
+    pub const FLAG: &str = "\u{E7C1}";
+    pub const ARCHIVE: &str = "\u{E7B8}";
+    pub const DELETE: &str = "\u{E74D}";
+    pub const MOON: &str = "\u{E708}";
+    pub const SUN: &str = "\u{E706}";
+    pub const CALENDAR: &str = "\u{E787}";
+    pub const PERSON: &str = "\u{E77B}";
+    pub const REPLY: &str = "\u{E97A}";
+    pub const INBOX: &str = "\u{E896}";
+    pub const OUTBOX: &str = "\u{E898}";
+    pub const SEND: &str = "\u{E724}";
+    pub const EDIT: &str = "\u{E70F}";
+    pub const BLOCKED: &str = "\u{E733}";
+    pub const STAR: &str = "\u{E734}";
+    pub const SETTINGS: &str = "\u{E713}";
+    pub const LIST: &str = "\u{E8FD}";
+}
+
 /// Use the standard Windows UI fonts, with the Windows symbol fonts as a fallback for icons.
 fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -81,7 +105,13 @@ fn load_fonts(ctx: &egui::Context) {
         ("semibold", "seguisb.ttf"),
         ("symbols", "seguisym.ttf"),
         ("emoji", "seguiemj.ttf"),
+        // one outline icon set (`ic`): Windows 11, else the same code points of Windows 10
+        ("icons", "SegoeIcons.ttf"),
+        ("icons", "segmdl2.ttf"),
     ] {
+        if have.iter().any(|h| h == name) {
+            continue;
+        }
         // used straight from the font files (Windows shares them; no private copy of 17 MB)
         let mapped = std::fs::File::open(format!("{dir}\\Fonts\\{file}")).ok().and_then(|f| unsafe { memmap2::Mmap::map(&f) }.ok());
         if let Some(map) = mapped {
@@ -96,7 +126,7 @@ fn load_fonts(ctx: &egui::Context) {
         .get(&FontFamily::Proportional)
         .cloned()
         .unwrap_or_default();
-    let fallbacks: Vec<String> = ["symbols", "emoji"]
+    let fallbacks: Vec<String> = ["icons", "symbols", "emoji"]
         .iter()
         .map(|s| s.to_string())
         .filter(|s| have.contains(s))

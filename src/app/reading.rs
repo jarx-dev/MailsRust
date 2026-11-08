@@ -588,7 +588,7 @@ impl MailApp {
             }
             self.avatar_or_logo(ui, Pos2::new(sr.left() + 24.0, sr.top() + 26.0), 24.0, &m.from_name, &m.from_addr);
             let when = if m.date.date() == today {
-                m.date.format("%H:%M:%S").to_string()
+                m.date.format("%H:%M").to_string()
             } else {
                 format!("{} {}", pl::short_day_month(m.date.date()), m.date.format("%H:%M"))
             };

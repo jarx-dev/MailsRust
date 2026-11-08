@@ -747,7 +747,8 @@ impl MailApp {
         let on = self.selected == Some(m.id);
         let p = ui.painter();
         if on {
-            p.rect_filled(r, CornerRadius::same(3), SELECTED());
+            // the open message in the accent's light tint (unread mail has its own dot)
+            p.rect_filled(r, CornerRadius::same(3), ACCENT_SOFT());
         } else if resp.hovered() {
             p.rect_filled(r, CornerRadius::same(3), HOVER());
         }
@@ -770,7 +771,7 @@ impl MailApp {
         let date = if by_meaning { format!("≈ znaczenie · {}", short_date(m.date, today)) } else { short_date(m.date, today) };
         let df = FontId::proportional(12.0);
         let dw = text_width(ui, &date, df.clone());
-        p.text(Pos2::new(r.right() - 10.0, r.top() + 8.0), Align2::RIGHT_TOP, &date, df, if m.read { MUTED() } else { ACCENT() });
+        p.text(Pos2::new(r.right() - 10.0, r.top() + 8.0), Align2::RIGHT_TOP, &date, df, if m.read { MUTED() } else { TEXT() });
         let name_font = if m.read { FontId::proportional(14.0) } else { semibold(14.0) };
         line_f(p, Pos2::new(x, r.top() + 6.0), &who, name_font, TEXT(), r.right() - x - dw - 20.0);
         let mut icons_w = 0.0;
@@ -797,12 +798,12 @@ impl MailApp {
             icons_w += 18.0;
         }
         let p = ui.painter();
-        let subj_col = if m.read { TEXT2() } else { ACCENT() };
+        let subj_col = if m.read { TEXT2() } else { TEXT() };
         let subj_font = if m.read { FontId::proportional(13.5) } else { semibold(13.5) };
         line_f(p, Pos2::new(x, r.top() + 27.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w);
         if !m.read {
-            // a small blue stripe on the left marks messages not opened yet
-            p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.top() + 6.0), Vec2::new(3.0, r.height() - 12.0)), CornerRadius::same(2), ACCENT());
+            // a small blue dot left of the picture marks messages not opened yet
+            p.circle_filled(Pos2::new(r.left() + 4.5, r.top() + 26.0), 3.5, ACCENT());
         }
         // Third line: the message's tags first, then the start of the text.
         let mut tx = x;

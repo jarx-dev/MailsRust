@@ -36,14 +36,15 @@ impl Folder {
     }
 
     pub fn icon(self) -> &'static str {
+        use crate::theme::ic;
         match self {
-            Folder::Inbox => "📥",
-            Folder::Drafts => "📝",
-            Folder::Outbox => "📤",
-            Folder::Sent => "➢",
-            Folder::Archive => "🗃",
-            Folder::Junk => "⊘",
-            Folder::Trash => "🗑",
+            Folder::Inbox => ic::INBOX,
+            Folder::Drafts => ic::EDIT,
+            Folder::Outbox => ic::OUTBOX,
+            Folder::Sent => ic::SEND,
+            Folder::Archive => ic::ARCHIVE,
+            Folder::Junk => ic::BLOCKED,
+            Folder::Trash => ic::DELETE,
         }
     }
 }
