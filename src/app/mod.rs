@@ -1480,6 +1480,15 @@ impl eframe::App for MailApp {
             }
             ctx.request_repaint_after(std::time::Duration::from_millis((ms.saturating_sub(self.opened.elapsed().as_millis()) as u64).clamp(50, 60_000)));
         }
+        // the window itself, once: the program's icon on it right away (see `set_window_icon`)
+        #[cfg(windows)]
+        if self.main_hwnd.is_none() {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(RawWindowHandle::Win32(h)) = frame.window_handle().map(|h| h.as_raw()) {
+                self.main_hwnd = Some(h.hwnd.get());
+                set_window_icon(h.hwnd.get());
+            }
+        }
         // the tray icon (or the program started again): show the window again, or quit for good
         if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
             self.show_window(ctx);
@@ -1493,10 +1502,15 @@ impl eframe::App for MailApp {
         if self.focus_pending && !ctx.input(|i| i.viewport().minimized.unwrap_or(true)) {
             self.focus_pending = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            if let Some(h) = self.main_hwnd {
+                bring_to_front(h);
+            }
         }
         while let Ok(t) = self.tray_rx.try_recv() {
             match t {
                 TrayMsg::Show => self.show_window(ctx),
+                TrayMsg::Toggle if !self.hidden && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) && self._tray.is_some() => self.hide_window(ctx),
+                TrayMsg::Toggle => self.show_window(ctx),
                 TrayMsg::Quit => self.quit(),
             }
         }

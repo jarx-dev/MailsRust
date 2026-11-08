@@ -548,12 +548,53 @@ pub(super) fn keyboard_to(h: isize) -> bool {
     false
 }
 
+/// Window `h` to the front, also when another program has it (a click on the tray icon goes to
+/// Explorer first, and Windows lets a window take the front only from the one that has it).
+pub(super) fn bring_to_front(h: isize) {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow};
+        let front = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+        let me = GetCurrentThreadId();
+        let attached = front != 0 && front != me && AttachThreadInput(me, front, 1) != 0;
+        BringWindowToTop(h as _);
+        SetForegroundWindow(h as _);
+        if attached {
+            AttachThreadInput(me, front, 0);
+        }
+    }
+    let _ = h;
+}
+
+/// The program's icon on window `h` at once. eframe sets it only once the window has been active,
+/// so a window started minimized or into the tray showed an empty icon on the taskbar until then.
+pub(super) fn set_window_icon(h: isize) {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, LoadImageW, SendMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, SM_CXICON, SM_CXSMICON, WM_SETICON};
+        let module = GetModuleHandleW(std::ptr::null());
+        for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+            let size = GetSystemMetrics(metric);
+            // (the icon group put into the program file by build.rs has the number 1)
+            let icon = LoadImageW(module, 1 as _, IMAGE_ICON, size, size, 0);
+            if !icon.is_null() {
+                SendMessageW(h as _, WM_SETICON, kind as usize, icon as isize);
+            }
+        }
+    }
+    let _ = h;
+}
+
 pub(super) enum TrayMsg {
     Show,
+    /// a left click on the icon: shown → into the tray, hidden or minimized → shown
+    Toggle,
     Quit,
 }
 
-/// The icon next to the clock: a click brings the window back, its menu shows or quits.
+/// The icon next to the clock: a left click shows or hides the window, its menu shows or quits.
 /// Another start of the program asked to see this one (see `another_copy_shown`).
 pub(super) static SHOW_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The window's context, so the thread waiting for another start can wake the app.
@@ -627,7 +668,7 @@ pub(super) fn make_tray(ctx: &egui::Context) -> (Option<tray_icon::TrayIcon>, Re
     let c3 = ctx.clone();
     TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
         if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-            let _ = tx.send(TrayMsg::Show);
+            let _ = tx.send(TrayMsg::Toggle);
             c3.request_repaint();
         }
     }));
