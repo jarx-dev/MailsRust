@@ -162,6 +162,73 @@ pub fn fetch_image(url: String, tx: Sender<(String, Option<std::sync::Arc<[u8]>>
     });
 }
 
+/// The title of a web page, for a link pasted into a message (None: no page, no title, or a
+/// sign-in page instead of the page itself).
+pub fn page_title(url: &str) -> Option<String> {
+    let tls = native_tls::TlsConnector::new().ok()?;
+    let agent = ureq::AgentBuilder::new()
+        .tls_connector(std::sync::Arc::new(tls))
+        .timeout(std::time::Duration::from_secs(8))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 Edg/130.0")
+        .build();
+    let mut buf = Vec::new();
+    use std::io::Read;
+    agent.get(url).call().ok()?.into_reader().take(512 * 1024).read_to_end(&mut buf).ok()?;
+    // shortcut: read as UTF-8 only (pages in windows-1250 lose Polish letters), add encoding_rs if seen
+    title_of(&String::from_utf8_lossy(&buf))
+}
+
+fn title_of(page: &str) -> Option<String> {
+    let lower = page.to_lowercase();
+    let start = lower.find("<title")?;
+    let start = start + lower[start..].find('>')? + 1;
+    let end = start + lower[start..].find("</title")?;
+    let raw = page.get(start..end)?;
+    let mut t = String::new();
+    let mut rest = raw;
+    // the few character codes titles use (&amp;, &#39;, &#x2013; …)
+    while let Some(i) = rest.find('&') {
+        t.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(j) = rest.find(';').filter(|j| *j <= 10) else {
+            t.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let code = &rest[1..j];
+        let c = match code {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "nbsp" => Some(' '),
+            _ => {
+                let n = match code.strip_prefix("#x").or_else(|| code.strip_prefix("#X")) {
+                    Some(h) => u32::from_str_radix(h, 16).ok(),
+                    None => code.strip_prefix('#').and_then(|d| d.parse().ok()),
+                };
+                n.and_then(char::from_u32)
+            }
+        };
+        match c {
+            Some(c) => {
+                t.push(c);
+                rest = &rest[j + 1..];
+            }
+            None => {
+                t.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    t.push_str(rest);
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let l = t.to_lowercase();
+    const NOT_THE_PAGE: [&str; 9] = ["sign in", "log in", "login", "zaloguj", "logowanie", "just a moment", "access denied", "not found", "403"];
+    (!t.is_empty() && !NOT_THE_PAGE.iter().any(|w| l.contains(w))).then_some(t)
+}
+
 fn oauth_token(acc: &Account) -> Result<String, String> {
     crate::oauth::access_token(&acc.oauth_client_id, &acc.oauth_client_secret, &acc.oauth_refresh_token)
 }
@@ -1431,5 +1498,13 @@ mod tests {
         let raw = b"From: A <a@x.pl>\r\nTo: b@x.pl\r\nCc: \"Lis, Ewa\" <c@x.pl>,\r\n =?UTF-8?Q?D=C5=BA?= <d@x.pl>\r\nSubject: s\r\n\r\nbody\r\n";
         let m = super::parse(raw, false, false).unwrap();
         assert_eq!((m.to.as_str(), m.cc.as_str()), ("b@x.pl", "Lis Ewa <c@x.pl>, Dź <d@x.pl>"));
+    }
+
+    #[test]
+    fn page_titles_are_read() {
+        let t = super::title_of("<html><head><TITLE data-x=1>\n  Cena &amp; RDA &#8211; Farmaster &#x2014; x&y  </TITLE>");
+        assert_eq!(t.as_deref(), Some("Cena & RDA – Farmaster — x&y"));
+        assert_eq!(super::title_of("<title>Zaloguj się – Asana</title>"), None);
+        assert_eq!(super::title_of("<p>no title</p>"), None);
     }
 }

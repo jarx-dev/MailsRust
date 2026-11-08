@@ -23,6 +23,8 @@ pub enum Msg {
     Md { text: String },
     /// „Popraw z AI”: the written part (pictures as [[obrazek-N]]) to correct in a style
     Ai { style: String, html: String },
+    /// the title of a pasted link's page (empty: none), for link `n`
+    Title { n: u64, title: String },
     /// files dropped on the field (pictures go into the text, other files are attached)
     Dropped(Vec<String>),
     /// files being dragged over the field (true) or not any more
@@ -286,6 +288,15 @@ impl ComposeView {
                     Some("img") => Msg::Img { data: s("data") },
                     Some("md") => Msg::Md { text: s("text") },
                     Some("ai") => Msg::Ai { style: s("style"), html: s("html") },
+                    // a pasted link: its page's title is fetched meanwhile
+                    Some("link") => {
+                        let (url, n, tx, ctx) = (s("url"), v["n"].as_u64().unwrap_or(0), tx.clone(), ctx.clone());
+                        std::thread::spawn(move || {
+                            let _ = tx.send(Msg::Title { n, title: crate::net::page_title(&url).unwrap_or_default() });
+                            ctx.request_repaint();
+                        });
+                        continue;
+                    }
                     _ => continue,
                 };
                 let _ = tx.send(msg);
@@ -355,6 +366,11 @@ impl ComposeView {
     /// Runs a piece of the page's script (tests).
     pub fn run_js(&self, js: &str) {
         let _ = self.view.evaluate_script(js);
+    }
+
+    /// A pasted link gets its page's title (or keeps the short address when `title` is empty).
+    pub fn link_title(&self, n: u64, title: &str) {
+        let _ = self.view.evaluate_script(&format!("window.pzTitle({n},{})", serde_json::to_string(title).unwrap_or_default()));
     }
 
     /// A picture of the writing field (PNG) into `out` (shown under a question asked over it).
@@ -623,12 +639,24 @@ undo.addEventListener('click',()=>{{if(aiBefore!==null){{setOwn(aiBefore);aiBefo
 ed.addEventListener('input',()=>{{if(!aiBusy){{undo.style.display='none';aiBefore=null;}}}});
 function looksMd(s){{return /(^|\n)\s{{0,3}}(#{{1,6}}\s|[-*+]\s|\d+\.\s|>\s|```)|\*\*[^*\n]+\*\*|__[^_\n]+__|\[[^\]\n]+\]\([^)\n]+\)|\|\s*:?-{{3,}}/.test(s);}}
 function readImg(f){{const r=new FileReader();r.onload=()=>{{post({{t:'img',data:r.result}});}};r.readAsDataURL(f);}}
+let linkN=0;
+function shortUrl(u){{try{{const x=new URL(u);let p=x.pathname.replace(/\/$/,'');try{{p=decodeURI(p);}}catch(e){{}}const s=x.host.replace(/^www\./,'')+p;return s.length>50?s.slice(0,49)+'…':s;}}catch(e){{return u;}}}}
+// the page's title in place of the short address (unless the person changed the link's words)
+window.pzTitle=function(n,t){{const a=ed.querySelector('a[data-pz-t="'+n+'"]');if(!a)return;a.removeAttribute('data-pz-t');
+ if(t&&a.textContent===shortUrl(a.getAttribute('href')))a.textContent=t;sync();}};
 ed.addEventListener('paste',e=>{{
  const cd=e.clipboardData;if(!cd)return;saveSel();
  const imgs=[...cd.items].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
  if(imgs.length){{e.preventDefault();imgs.forEach(i=>readImg(i.getAsFile()));return;}}
  if(cd.getData('text/html'))return;
  const t=cd.getData('text/plain');
+ // a pasted address becomes a short link (the page's title once it comes, as in Edge); over
+ // selected words, those words become the link
+ const u=t&&t.trim();
+ if(u&&/^https?:\/\/\S+$/i.test(u)){{e.preventDefault();
+  if(!getSelection().isCollapsed){{document.execCommand('createLink',false,u);return;}}
+  const n=++linkN,a=document.createElement('a');a.href=u;a.dataset.pzT=n;a.textContent=shortUrl(u);
+  document.execCommand('insertHTML',false,a.outerHTML+'&nbsp;');post({{t:'link',url:u,n:n}});return;}}
  if(t&&looksMd(t)){{e.preventDefault();post({{t:'md',text:t}});return;}}
  if(t){{e.preventDefault();document.execCommand('insertText',false,t);}}
 }});
