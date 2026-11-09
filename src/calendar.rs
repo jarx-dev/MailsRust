@@ -218,6 +218,14 @@ fn hour_columns(
                     .width();
                 p.text(Pos2::new(area.left() + 8.0 + w, y + 3.0), Align2::LEFT_TOP, "00", FontId::proportional(10.0), MUTED());
             }
+            // the "now" line first: the events lie over it, so it never crosses their text
+            if today >= start && today < start + Duration::days(days) {
+                let now = chrono::Local::now().time();
+                let y = area.top() + (now.hour() as f32 + now.minute() as f32 / 60.0) * hour_h;
+                let x = area.left() + gutter + cw * (today - start).num_days() as f32;
+                p.hline(x..=x + cw, y, Stroke::new(1.5, FLAG));
+                p.circle_filled(Pos2::new(x, y), 3.5, FLAG);
+            }
             for i in 0..days {
                 let day = start + Duration::days(i);
                 let x = area.left() + gutter + cw * i as f32;
@@ -241,6 +249,7 @@ fn hour_columns(
                     let r = Rect::from_min_size(Pos2::new(x + 3.0, y0 + 1.0), Vec2::new(cw - 6.0, h - 2.0));
                     let er = ui.interact(r, id((salt, "ev", e.id)), Sense::click());
                     let c = chip_color(e);
+                    p.rect_filled(r, CornerRadius::same(3), BG());
                     p.rect_filled(r, CornerRadius::same(3), c.gamma_multiply(if er.hovered() { 0.22 } else { 0.12 }));
                     p.rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, r.height())), CornerRadius::same(1), c);
                     let end = e.start + Duration::minutes(e.minutes);
@@ -257,13 +266,6 @@ fn hour_columns(
                         action = Some(CalAction::Edit(e.id));
                     }
                 }
-            }
-            if today >= start && today < start + Duration::days(days) {
-                let now = chrono::Local::now().time();
-                let y = area.top() + (now.hour() as f32 + now.minute() as f32 / 60.0) * hour_h;
-                let x = area.left() + gutter + cw * (today - start).num_days() as f32;
-                p.hline(x..=x + cw, y, Stroke::new(1.5, FLAG));
-                p.circle_filled(Pos2::new(x, y), 3.5, FLAG);
             }
         });
     action

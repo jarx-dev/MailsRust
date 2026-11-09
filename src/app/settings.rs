@@ -681,17 +681,20 @@ impl MailApp {
                 let sign_in_error = self.sign_in_error.clone();
                 let show_setup = self.oauth_setup;
                 let a = &mut self.store.account;
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(egui::Button::new(RichText::new("  G   Użyj Gmaila  ").color(Color32::WHITE)).fill(PRIMARY))
-                        .on_hover_text("Wpisz ustawienia serwerów Gmaila i logowanie przez Google")
-                        .clicked()
-                    {
-                        a.use_gmail();
-                    }
-                    ui.label(RichText::new("lub wpisz ustawienia swojego dostawcy").small().color(MUTED()));
-                });
-                ui.add_space(8.0);
+                // (an account already on Gmail needs no Gmail preset: only "Zaloguj przez Google" stays)
+                if a.imap_host != "imap.gmail.com" {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(egui::Button::new(RichText::new("  G   Użyj Gmaila  ").color(Color32::WHITE)).fill(PRIMARY))
+                            .on_hover_text("Wpisz ustawienia serwerów Gmaila i logowanie przez Google")
+                            .clicked()
+                        {
+                            a.use_gmail();
+                        }
+                        ui.label(RichText::new("lub wpisz ustawienia swojego dostawcy").small().color(MUTED()));
+                    });
+                    ui.add_space(8.0);
+                }
                 egui::Grid::new("accgrid-top").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label("Imię i nazwisko");
                     ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(300.0));
@@ -704,8 +707,8 @@ impl MailApp {
                     ui.end_row();
                     ui.label("Logowanie");
                     ui.horizontal(|ui| {
-                        ui.radio_value(&mut a.use_oauth, true, "Konto Google");
-                        ui.radio_value(&mut a.use_oauth, false, "Hasło");
+                        ui.selectable_value(&mut a.use_oauth, true, "Konto Google");
+                        ui.selectable_value(&mut a.use_oauth, false, "Hasło");
                     });
                     ui.end_row();
                 });
@@ -785,7 +788,7 @@ impl MailApp {
                                 });
                             });
                     }
-                    egui::CollapsingHeader::new(RichText::new("Zaawansowane").color(MUTED()))
+                    egui::CollapsingHeader::new("Zaawansowane")
                         .id_salt("oauth-advanced")
                         .show(ui, |ui| {
                             egui::Grid::new("accgrid-oauth").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -880,12 +883,14 @@ impl MailApp {
                     ui.label(RichText::new("Podpis jest brany z Twoich wiadomości wysłanych przez Gmaila, razem z wyglądem i zdjęciem.").small().color(MUTED()));
                 }
                 ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new("Zapisz i sprawdź pocztę").color(Color32::WHITE)).fill(ACCENT())).clicked() {
-                        save_and_check = true;
-                    }
-                    if ui.button("Zamknij").clicked() {
+                ui.separator();
+                // the footer as in Windows dialogs: on the right, the main action first
+                ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(egui::Button::new("Zamknij").min_size(Vec2::new(0.0, 30.0))).clicked() {
                         self.account_open = false;
+                    }
+                    if ui.add(egui::Button::new(RichText::new("Zapisz i sprawdź pocztę").color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                        save_and_check = true;
                     }
                 });
             });

@@ -803,14 +803,17 @@ impl MailApp {
             // a small blue dot left of the picture marks messages not opened yet
             p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + 24.0), 3.0, ACCENT());
         }
-        // Third line: the message's tags first, then the start of the text.
+        // Third line: the first tag (and how many more), then the start of the text.
         let mut tx = x;
-        for l in m.labels.iter().take(3) {
+        if let Some(l) = m.labels.first() {
             let room = r.right() - tx - 60.0;
-            if room < 40.0 {
-                break;
+            if room >= 40.0 {
+                tx += tag_chip(p, Pos2::new(tx, r.top() + 43.0), &display_label(l), 11.5, room.min(130.0)) + 4.0;
+                if m.labels.len() > 1 {
+                    let more = format!("+{}", m.labels.len() - 1);
+                    tx += p.text(Pos2::new(tx, r.top() + 43.0), Align2::LEFT_TOP, more, FontId::proportional(12.0), MUTED()).width() + 6.0;
+                }
             }
-            tx += tag_chip(p, Pos2::new(tx, r.top() + 43.0), &display_label(l), 11.5, room.min(130.0)) + 4.0;
         }
         line(p, Pos2::new(tx + if tx > x { 2.0 } else { 0.0 }, r.top() + 43.0), &m.preview(), 13.0, FAINT(), r.right() - tx - 10.0);
 

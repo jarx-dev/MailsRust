@@ -684,11 +684,11 @@ impl MailApp {
             let room = (buttons_left - (sr.left() + 60.0) - 12.0).max(40.0);
             let to_line = fit_names(ui, "do ", &to_people, room);
             let cc_line = fit_names(ui, "DW: ", &cc_people, room);
-            line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0), &to_line, 13.5, ACCENT(), room);
+            line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0), &to_line, 13.5, MUTED(), room);
             let mut rows = vec![(sr.top() + 26.0, &to_line, &to_people)];
             let mut next_y = sr.top() + 50.0;
             if !cc_people.is_empty() {
-                line(ui.painter(), Pos2::new(sr.left() + 60.0, next_y), &cc_line, 13.5, ACCENT(), room);
+                line(ui.painter(), Pos2::new(sr.left() + 60.0, next_y), &cc_line, 13.5, MUTED(), room);
                 rows.push((next_y - 2.0, &cc_line, &cc_people));
                 next_y += 22.0;
             }
