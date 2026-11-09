@@ -1,5 +1,19 @@
+# build output
 /target/
-/shots/
-shots_err.txt
+# Windows build tools for build.rs (windres), fetched locally
 /.setup/
+# pictures made with --screenshot
+/shots/
 /.shots/
+
+# never commit a mailbox, its log or this machine's settings (the repository is public)
+*.redb
+sync.log
+.env
+build.env
+
+# editors and the OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
