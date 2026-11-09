@@ -10,7 +10,8 @@
 //! remembers the failed build's SHA-256 so it is not installed again, and starts the old one.
 //!
 //! Plain HTTP is accepted only for loopback and Tailscale addresses (WireGuard authenticates and
-//! encrypts the peer); anything else must be HTTPS, and redirects are refused.
+//! encrypts the peer); anything else must be HTTPS. Redirects are followed only from HTTPS and
+//! only to HTTPS (GitHub's `releases/latest/download/latest.json` redirects twice).
 //! `POCZTA_UPDATE_URL` points elsewhere; `POCZTA_UPDATE_URL=off` switches updates off.
 
 use serde::Deserialize;
@@ -166,14 +167,16 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
-fn agent() -> Result<ureq::Agent, String> {
+fn agent(https: bool) -> Result<ureq::Agent, String> {
     let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
     Ok(ureq::AgentBuilder::new()
         .tls_connector(std::sync::Arc::new(tls))
         .timeout_connect(Duration::from_secs(10))
         .timeout(Duration::from_secs(180))
-        // a redirect could lead from the tailnet to plain HTTP on the internet
-        .redirects(0)
+        // from the tailnet a redirect could lead to plain HTTP on the internet; from HTTPS
+        // every hop must stay HTTPS (ureq checks https_only on each one)
+        .https_only(https)
+        .redirects(if https { 5 } else { 0 })
         .user_agent(concat!("Poczta/", env!("CARGO_PKG_VERSION")))
         .build())
 }
@@ -259,7 +262,7 @@ pub fn start() -> Option<Receiver<PathBuf>> {
 
 /// The path of a verified, staged EXE when a newer build exists.
 fn check_and_download(url: &Url) -> Result<Option<PathBuf>, String> {
-    let agent = agent()?;
+    let agent = agent(url.scheme() == "https")?;
     let m = parse_manifest(&get(&agent, url, 64 * 1024)?)?;
     if !m.is_newer_than(BUILD, built_at()) {
         return Ok(None);
@@ -569,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn redirects_are_refused() {
+    fn redirects_are_refused_from_http() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
@@ -580,7 +583,14 @@ mod tests {
             let _ = s.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://example.com/latest.json\r\nContent-Length: 0\r\n\r\n");
         });
         let url = validate_url(&format!("http://{addr}/latest.json")).unwrap();
-        let err = get(&agent().unwrap(), &url, 1024).unwrap_err();
+        let err = get(&agent(false).unwrap(), &url, 1024).unwrap_err();
         assert!(err.contains("302"), "{err}");
+    }
+
+    #[test]
+    fn https_agent_never_goes_plain_http() {
+        // the same check stops a redirect hop from HTTPS to HTTP
+        let err = get(&agent(true).unwrap(), &Url::parse("http://127.0.0.1:9/latest.json").unwrap(), 1024).unwrap_err();
+        assert!(err.contains("https_only"), "{err}");
     }
 }
