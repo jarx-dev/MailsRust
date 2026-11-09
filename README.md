@@ -123,8 +123,9 @@ Opcjonalne zmienne przy budowaniu (wpisywane do EXE):
 
 Skrypty `scripts/publish.sh` i `scripts/auto-publish.sh` budują i publikują wydanie po każdym
 scaleniu do `main`. Swoje ustawienia czytają z `~/.config/poczta/build.env`.
-`scripts/release-github.sh` wydaje `main` na GitHubie (EXE i `latest.json`, z aktualizacjami
-z najnowszego wydania).
+Wydania na GitHubie buduje GitHub Actions (workflow „Wydanie”, uruchamiany ręcznie z `main`):
+EXE, `latest.json` dla aktualizacji i atestacja pochodzenia pliku. Każdy PR przechodzi build
+i testy na Windows (workflow „CI”).
 
 ## Struktura
 
