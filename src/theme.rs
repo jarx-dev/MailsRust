@@ -337,14 +337,35 @@ pub fn avatar(painter: &Painter, center: Pos2, r: f32, name: &str) {
 
 /// Single line of text, cut with "…" when wider than `max_w`. Returns the width used.
 pub fn line_f(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: Color32, max_w: f32) -> f32 {
-    let mut job = LayoutJob::single_section(
-        text.to_string(),
-        TextFormat {
-            font_id: font,
-            color,
-            ..Default::default()
-        },
-    );
+    line_mark(painter, pos, text, font, color, max_w, "")
+}
+
+/// Where `needle` first occurs in `text`, ignoring case (byte range in `text`).
+fn find_ci(text: &str, needle: &str) -> Option<(usize, usize)> {
+    let n: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+    if n.is_empty() {
+        return None;
+    }
+    let cs: Vec<(usize, char)> = text.char_indices().collect();
+    (0..cs.len()).find_map(|i| {
+        let mut it = cs[i..].iter().flat_map(|(_, c)| c.to_lowercase());
+        let hit = n.iter().all(|c| it.next() == Some(*c));
+        hit.then(|| (cs[i].0, cs.get(i + needle.chars().count()).map_or(text.len(), |x| x.0)))
+    })
+}
+
+/// One line of text cut to `max_w`, with the first `needle` (the search) marked as with a highlighter.
+pub fn line_mark(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: Color32, max_w: f32, needle: &str) -> f32 {
+    let mut job = LayoutJob::default();
+    let fmt = TextFormat { font_id: font, color, ..Default::default() };
+    match find_ci(text, needle.trim()) {
+        Some((a, b)) => {
+            job.append(&text[..a], 0.0, fmt.clone());
+            job.append(&text[a..b], 0.0, TextFormat { background: IMPORTANT(), ..fmt.clone() });
+            job.append(&text[b..], 0.0, fmt);
+        }
+        None => job.append(text, 0.0, fmt),
+    }
     job.wrap = TextWrapping::truncate_at_width(max_w.max(1.0));
     let galley = painter.layout_job(job);
     let w = galley.size().x;
@@ -429,7 +450,7 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, open: &
     let modal_id = egui::Id::new(("dialog", id));
     let shown = egui::Modal::new(modal_id)
         .frame(frame)
-        .backdrop_color(Color32::from_black_alpha(if is_dark() { 120 } else { 70 }))
+        .backdrop_color(Color32::from_black_alpha(if is_dark() { 150 } else { 100 }))
         .show(ctx, |ui| {
             ui.set_width(width);
             let mut close = false;
@@ -477,4 +498,15 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, open: &
         *open = false;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn search_is_found_without_minding_case() {
+        assert_eq!(super::find_ci("Re: Zdjęcia z weekendu", "Weekend"), Some((15, 22)));
+        assert_eq!(super::find_ci("ŻÓŁW żółw", "żółw"), Some((0, 7)));
+        assert_eq!(super::find_ci("abc", "abcd"), None);
+        assert_eq!(super::find_ci("abc", ""), None);
+    }
 }

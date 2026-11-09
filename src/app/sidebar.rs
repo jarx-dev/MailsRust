@@ -104,7 +104,7 @@ impl MailApp {
     /// whole group); `level` 1 is indented under its group.
     pub(super) fn tag_row(&mut self, ui: &mut Ui, key: String, shown: String, count: usize, level: usize, dot: bool) {
         let on = self.view == MailView::Label && self.label_filter == key && self.search.is_empty();
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
         let p = ui.painter();
         if on {
             p.rect_filled(r, CornerRadius::same(4), SELECTED());
@@ -445,8 +445,8 @@ impl MailApp {
             ui.label(RichText::new("Poczta").font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
-        // dense rows, as in eM Client: one row every 30 px
-        ui.spacing_mut().item_spacing.y = 2.0;
+        // dense rows, as in eM Client: one row every 27 px
+        ui.spacing_mut().item_spacing.y = 1.0;
         let counts = self.counts();
         let (unread_all, flagged) = (counts.unread_all, counts.flagged);
         for (v, icon, n) in [(MailView::Unread, ic::MAIL, unread_all), (MailView::Flagged, ic::FLAG, flagged)] {
@@ -490,7 +490,7 @@ impl MailApp {
         // Account group
         let acc_name = self.store.account.display_name.clone();
         let online = self.can_connect();
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
         }
@@ -543,7 +543,7 @@ impl MailApp {
             let acct = k as u32 + 1;
             let x = self.store.extra[k].account.clone();
             ui.add_space(4.0);
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
             if resp.hovered() {
                 ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
             }
@@ -599,7 +599,7 @@ impl MailApp {
         let mut tags = counts.tags.clone();
         tags.remove(FAVOURITES);
         if !tags.is_empty() {
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
             if resp.hovered() {
                 ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
             }
@@ -645,7 +645,7 @@ impl MailApp {
                     let row_top = ui.cursor().top();
                     self.tag_row(ui, format!("{parent}/"), display_label(&parent), total, 0, false);
                     // a small arrow in front of the group folds or unfolds its tags
-                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 14.0), Vec2::splat(20.0));
+                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 13.0), Vec2::splat(20.0));
                     let ar = ui.interact(arrow, id(("fold-group", parent.as_str())), Sense::click());
                     if ar.hovered() {
                         ui.painter().rect_filled(arrow, CornerRadius::same(4), HOVER());
@@ -952,7 +952,7 @@ pub(super) fn mark_all_menu(resp: &egui::Response, unread: usize) -> bool {
 /// `unread`: the count is of unread mail (blue and bold); otherwise a plain grey number.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, unread: bool, on: bool, indent: f32) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
     let p = ui.painter();
     if on {
         p.rect_filled(r, CornerRadius::same(4), SELECTED());

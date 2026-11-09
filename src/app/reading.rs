@@ -467,7 +467,6 @@ impl MailApp {
             });
             return;
         };
-        let today = Local::now().date_naive();
         if self.thread_for != Some(m.id) {
             // another message opened: its conversation starts folded, the message itself open
             self.thread_for = Some(m.id);
@@ -588,11 +587,8 @@ impl MailApp {
                 }
             }
             self.avatar_or_logo(ui, Pos2::new(sr.left() + 24.0, sr.top() + 26.0), 24.0, &m.from_name, &m.from_addr);
-            let when = if m.date.date() == today {
-                m.date.format("%H:%M").to_string()
-            } else {
-                format!("{} {}", pl::short_day_month(m.date.date()), m.date.format("%H:%M"))
-            };
+            // one way of writing it, whatever the day: "niedz. 8 lis, 19:46"
+            let when = format!("{} {}, {}", pl::wd_short(m.date.date()), pl::short_day_month(m.date.date()), m.date.format("%H:%M"));
             let tw = text_width(ui, &when, FontId::proportional(15.0));
             ui.painter().text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(15.0), TEXT());
             let text_w = sr.width() - 70.0 - tw - 12.0;
@@ -653,11 +649,15 @@ impl MailApp {
                     if icon(ui, 10, g, t).clicked() {
                         self.actions.push(Action::SetRead(mid, !read));
                     }
-                    ui.add_space(10.0);
                     // (link for AI and translation: in "more", so the row never changes with the width)
                     if offer && icon(ui, 5, "", nr_tip).clicked() {
                         self.actions.push(Action::NoReplyNeeded(m.id, !marked));
                     }
+                    // answering apart from the rest, so a quick reply never hits "delete"
+                    ui.add_space(6.0);
+                    let (sep, _) = ui.allocate_exact_size(Vec2::new(1.0, 18.0), Sense::hover());
+                    ui.painter().vline(sep.center().x, sep.y_range(), Stroke::new(1.0, BORDER()));
+                    ui.add_space(6.0);
                     if icon(ui, 2, ic::FORWARD, "Prześlij dalej").clicked() {
                         self.actions.push(Action::Forward(m.id));
                     }
@@ -862,8 +862,8 @@ impl MailApp {
                 Frame::new()
                     .inner_margin(Margin { left: 4, right: 4, top: 14, bottom: 18 })
                     .show(ui, |ui| {
-                        // lines of about 80 characters, easy to read on a wide pane
-                        ui.set_width(ui.available_width().min(720.0));
+                        // lines of about 75 characters, easy to read on a wide pane
+                        ui.set_width(ui.available_width().min(600.0));
                         match &blocks {
                             Some(b) if !b.is_empty() => self.render_html(ui, &m, b),
                             _ => {
@@ -1000,7 +1000,6 @@ impl MailApp {
         }
         let mut readers = std::mem::take(&mut self.readers);
         let main_pos = ctx.input(|inp| inp.viewport().outer_rect).map(|r| r.min);
-        let today = Local::now().date_naive();
         let mut closed: Vec<u64> = vec![];
         for (i, r) in readers.iter_mut().enumerate() {
             let m = r.msg.clone();
@@ -1055,7 +1054,7 @@ impl MailApp {
                         let (sr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 10.0, 50.0), Sense::hover());
                         self.avatar_or_logo(ui, Pos2::new(sr.left() + 22.0, sr.center().y), 22.0, &m.from_name, &m.from_addr);
                         let who = if m.from_name.is_empty() { m.from_addr.clone() } else { format!("{} <{}>", m.from_name, m.from_addr) };
-                        let when = if m.date.date() == today { m.date.format("%H:%M").to_string() } else { format!("{} {}", pl::short_day_month(m.date.date()), m.date.format("%H:%M")) };
+                        let when = format!("{} {}, {}", pl::wd_short(m.date.date()), pl::short_day_month(m.date.date()), m.date.format("%H:%M"));
                         let p = ui.painter();
                         line_f(p, Pos2::new(sr.left() + 56.0, sr.top() + 4.0), &who, semibold(14.5), ACCENT(), sr.width() - 330.0);
                         let first = people_in(&m.to).into_iter().next().map(|x| x.0).unwrap_or_else(|| "—".into());

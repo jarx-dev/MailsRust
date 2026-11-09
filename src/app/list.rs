@@ -798,7 +798,9 @@ impl MailApp {
         let p = ui.painter();
         let subj_col = if m.read { TEXT2() } else { TEXT() };
         let subj_font = if m.read { FontId::proportional(13.5) } else { semibold(13.5) };
-        line_f(p, Pos2::new(x, r.top() + 24.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w);
+        // the search, marked in the subject and the start of the text (not for "od:"-style filters)
+        let needle = if self.search.contains(':') { "" } else { self.search.as_str() };
+        line_mark(p, Pos2::new(x, r.top() + 24.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w, needle);
         if !m.read {
             // a small blue dot left of the picture marks messages not opened yet
             p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + 24.0), 3.0, ACCENT());
@@ -815,7 +817,7 @@ impl MailApp {
                 }
             }
         }
-        line(p, Pos2::new(tx + if tx > x { 2.0 } else { 0.0 }, r.top() + 43.0), &m.preview(), 13.0, FAINT(), r.right() - tx - 10.0);
+        line_mark(p, Pos2::new(tx + if tx > x { 2.0 } else { 0.0 }, r.top() + 43.0), &m.preview(), FontId::proportional(13.0), FAINT(), r.right() - tx - 10.0, needle);
 
         if resp.clicked() {
             self.actions.push(Action::Select(m.id));
