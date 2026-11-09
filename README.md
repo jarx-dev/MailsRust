@@ -90,6 +90,13 @@ Szczegóły i metoda pomiarów: [PERF.md](PERF.md).
 | Hasła | szyfrowane kluczem konta Windows (DPAPI) |
 | Aktualizacje | własny mechanizm z weryfikacją SHA-256 i powrotem do poprzedniej wersji |
 
+## Pobierz
+
+Gotowy plik EXE jest w [wydaniach](https://github.com/jarx-dev/MailsRust/releases/latest). Wystarczy go
+pobrać i uruchomić, bez instalacji (Windows 10 lub 11). Kolejne wydania program pobiera sam.
+Plik nie jest podpisany, więc za pierwszym razem Windows może ostrzec przed nieznanym wydawcą:
+„Więcej informacji” → „Uruchom mimo to”.
+
 ## Budowanie
 
 Na Windows:
@@ -116,6 +123,8 @@ Opcjonalne zmienne przy budowaniu (wpisywane do EXE):
 
 Skrypty `scripts/publish.sh` i `scripts/auto-publish.sh` budują i publikują wydanie po każdym
 scaleniu do `main`. Swoje ustawienia czytają z `~/.config/poczta/build.env`.
+`scripts/release-github.sh` wydaje `main` na GitHubie (EXE i `latest.json`, z aktualizacjami
+z najnowszego wydania).
 
 ## Struktura
 
