@@ -951,10 +951,8 @@ pub(super) fn short_date(dt: NaiveDateTime, today: NaiveDate) -> String {
         dt.format("%H:%M").to_string()
     } else if days < 7 {
         format!("{} {}", pl::wd_short(d), dt.format("%H:%M"))
-    } else if d.year() == today.year() {
-        pl::short_day_month(d)
     } else {
-        dt.format("%d.%m.%Y").to_string()
+        dt.format("%d-%m-%Y").to_string()
     }
 }
 

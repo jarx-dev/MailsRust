@@ -1045,6 +1045,13 @@ tel.: 600-100-200".into();
 }
 
 impl eframe::App for MailApp {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // test pictures: a mouse resting over the window must not leave a hover on them
+        if self.shot.is_some() {
+            raw.events.retain(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_) | egui::Event::PointerButton { .. }));
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let _timer = FrameTimer { start: std::time::Instant::now(), first: self.drawn == 0, opened: self.opened };

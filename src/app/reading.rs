@@ -587,8 +587,8 @@ impl MailApp {
                 }
             }
             self.avatar_or_logo(ui, Pos2::new(sr.left() + 24.0, sr.top() + 26.0), 24.0, &m.from_name, &m.from_addr);
-            // one way of writing it, whatever the day: "niedz. 8 lis, 19:46"
-            let when = format!("{} {}, {}", pl::wd_short(m.date.date()), pl::short_day_month(m.date.date()), m.date.format("%H:%M"));
+            // one way of writing it, whatever the day: "09-11-2026 19:46" (as the owner wants)
+            let when = m.date.format("%d-%m-%Y %H:%M").to_string();
             let tw = text_width(ui, &when, FontId::proportional(15.0));
             ui.painter().text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(15.0), TEXT());
             let text_w = sr.width() - 70.0 - tw - 12.0;
@@ -1054,7 +1054,7 @@ impl MailApp {
                         let (sr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 10.0, 50.0), Sense::hover());
                         self.avatar_or_logo(ui, Pos2::new(sr.left() + 22.0, sr.center().y), 22.0, &m.from_name, &m.from_addr);
                         let who = if m.from_name.is_empty() { m.from_addr.clone() } else { format!("{} <{}>", m.from_name, m.from_addr) };
-                        let when = format!("{} {}, {}", pl::wd_short(m.date.date()), pl::short_day_month(m.date.date()), m.date.format("%H:%M"));
+                        let when = m.date.format("%d-%m-%Y %H:%M").to_string();
                         let p = ui.painter();
                         line_f(p, Pos2::new(sr.left() + 56.0, sr.top() + 4.0), &who, semibold(14.5), ACCENT(), sr.width() - 330.0);
                         let first = people_in(&m.to).into_iter().next().map(|x| x.0).unwrap_or_else(|| "—".into());
