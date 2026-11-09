@@ -606,9 +606,7 @@ impl MailApp {
             // the smaller tools as icons on the right.
             let marked = self.prefs.no_reply_needed.contains(&m.id);
             let offer = marked || self.waits_for_reply(&m);
-            let tr_tip = if self.show_translated.contains(&m.id) { "Pokaż oryginał" } else { "Przetłumacz na polski (AI)" };
             let nr_tip = if marked { "Oznaczono: nie wymaga odpowiedzi — kliknij, aby cofnąć" } else { "Nie wymaga odpowiedzi (ukryj na liście „Bez odpowiedzi”)" };
-            let wide = sr.width() > 640.0;
             let icon_rect = Rect::from_min_max(Pos2::new(sr.right() - 420.0, sr.top() + 26.0), Pos2::new(sr.right() + 6.0, sr.top() + 56.0));
             let buttons = ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect).layout(Layout::right_to_left(Align::Center)), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -656,13 +654,7 @@ impl MailApp {
                         self.actions.push(Action::SetRead(mid, !read));
                     }
                     ui.add_space(10.0);
-                    // a narrow pane keeps room for the address: these two stay in "more"
-                    if wide && icon(ui, 3, ic::LINK, "Kopiuj link dla AI").clicked() {
-                        self.actions.push(Action::CopyForAi(m.id));
-                    }
-                    if wide && icon(ui, 4, ic::TRANSLATE, tr_tip).clicked() {
-                        self.actions.push(Action::Translate(m.id));
-                    }
+                    // (link for AI and translation: in "more", so the row never changes with the width)
                     if offer && icon(ui, 5, "", nr_tip).clicked() {
                         self.actions.push(Action::NoReplyNeeded(m.id, !marked));
                     }
@@ -870,7 +862,8 @@ impl MailApp {
                 Frame::new()
                     .inner_margin(Margin { left: 4, right: 4, top: 14, bottom: 18 })
                     .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
+                        // lines of about 80 characters, easy to read on a wide pane
+                        ui.set_width(ui.available_width().min(720.0));
                         match &blocks {
                             Some(b) if !b.is_empty() => self.render_html(ui, &m, b),
                             _ => {

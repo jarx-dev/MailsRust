@@ -78,6 +78,8 @@ pub mod ic {
     pub const MAIL: &str = "\u{E715}";
     pub const MAIL_OPEN: &str = "\u{E8C3}";
     pub const FLAG: &str = "\u{E7C1}";
+    pub const PREV: &str = "\u{E76B}";
+    pub const NEXT: &str = "\u{E76C}";
     pub const ARCHIVE: &str = "\u{E7B8}";
     pub const DELETE: &str = "\u{E74D}";
     pub const MOON: &str = "\u{E708}";
@@ -99,7 +101,6 @@ pub mod ic {
     pub const REPLY_ALL: &str = "\u{E97A}\u{E97A}";
     pub const LINK: &str = "\u{E71B}";
     pub const MORE: &str = "\u{E712}";
-    pub const TRANSLATE: &str = "\u{F2B7}";
     pub const OPEN: &str = "\u{E8A7}";
     pub const SEARCH: &str = "\u{E721}";
     pub const CLEAR: &str = "\u{E711}";

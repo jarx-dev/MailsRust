@@ -275,11 +275,11 @@ impl MailApp {
                         self.cal_day = Local::now().date_naive();
                         self.mini_shown = self.cal_day;
                     }
-                    if tool_button(ui, "‹", "", true) {
+                    if tool_button(ui, ic::PREV, "", true) {
                         self.cal_day = calendar::shift(self.cal_day, self.cal_view, -1);
                         self.mini_shown = self.cal_day;
                     }
-                    if tool_button(ui, "›", "", true) {
+                    if tool_button(ui, ic::NEXT, "", true) {
                         self.cal_day = calendar::shift(self.cal_day, self.cal_view, 1);
                         self.mini_shown = self.cal_day;
                     }
@@ -683,10 +683,10 @@ impl MailApp {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(pl::month_year(self.mini_shown)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new("›").frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(ic::NEXT).size(12.0)).frame(false)).clicked() {
                         self.mini_shown = calendar::shift(self.mini_shown, CalView::Month, 1);
                     }
-                    if ui.add(egui::Button::new("‹").frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(ic::PREV).size(12.0)).frame(false)).clicked() {
                         self.mini_shown = calendar::shift(self.mini_shown, CalView::Month, -1);
                     }
                 });
@@ -738,10 +738,10 @@ impl MailApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
-                if ui.add(egui::Button::new(RichText::new("‹").size(18.0)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(ic::PREV).size(13.0)).frame(false)).clicked() {
                     self.side_day -= Duration::days(1);
                 }
-                if ui.add(egui::Button::new(RichText::new("›").size(18.0)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(ic::NEXT).size(13.0)).frame(false)).clicked() {
                     self.side_day += Duration::days(1);
                 }
                 ui.add_space(6.0);

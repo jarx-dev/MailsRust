@@ -425,14 +425,14 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                 ui.end_row();
                 ui.label("Data");
                 ui.horizontal(|ui| {
-                    if ui.small_button("‹").clicked() {
+                    if ui.small_button(ic::PREV).clicked() {
                         ed.date -= Duration::days(1);
                     }
                     if ui.button(format!("📅 {} {}", pl::wd_short(ed.date), pl::day_month(ed.date))).clicked() {
                         ed.picking = !ed.picking;
                         ed.shown = ed.date;
                     }
-                    if ui.small_button("›").clicked() {
+                    if ui.small_button(ic::NEXT).clicked() {
                         ed.date += Duration::days(1);
                     }
                 });
@@ -442,11 +442,11 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                     ui.vertical(|ui| {
                         ui.set_width(220.0);
                         ui.horizontal(|ui| {
-                            if ui.small_button("‹").clicked() {
+                            if ui.small_button(ic::PREV).clicked() {
                                 ed.shown = shift(ed.shown, CalView::Month, -1);
                             }
                             ui.label(pl::month_year(ed.shown));
-                            if ui.small_button("›").clicked() {
+                            if ui.small_button(ic::NEXT).clicked() {
                                 ed.shown = shift(ed.shown, CalView::Month, 1);
                             }
                         });
