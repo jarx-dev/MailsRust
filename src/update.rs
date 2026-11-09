@@ -22,8 +22,9 @@ use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 use url::{Host, Url};
 
-/// The update server on the NUC (the same file server as HyperRust's, its own folder).
-const DEFAULT_URL: &str = "http://100.100.1.2:8790/mailrust/latest.json";
+/// Where updates come from, set when the build is made (scripts/publish.sh, from a settings file
+/// outside the repository); without it a build does not update itself.
+const DEFAULT_URL: Option<&str> = option_env!("POCZTA_DEFAULT_UPDATE_URL");
 /// This build, embedded by build.rs (the publish script sets it, so EXE and manifest agree).
 const BUILD: &str = env!("POCZTA_BUILD");
 /// Only builds made by scripts/publish.sh update themselves: a local build's identity can be
@@ -217,7 +218,8 @@ fn failed_path(exe: &Path) -> PathBuf {
 /// Starts the background checks; a verified newer EXE, ready to swap in, comes out of the
 /// receiver (once). None when updates are off.
 pub fn start() -> Option<Receiver<PathBuf>> {
-    let raw = std::env::var("POCZTA_UPDATE_URL").unwrap_or_else(|_| DEFAULT_URL.into());
+    // (no address at all: a build not made for updating)
+    let raw = std::env::var("POCZTA_UPDATE_URL").ok().or(DEFAULT_URL.map(String::from))?;
     // a separate test data folder means a test run; the swap and rollback need a *.exe name
     let exe_named = std::env::current_exe().is_ok_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")));
     if raw.trim().eq_ignore_ascii_case("off") || !cfg!(windows) || !PUBLISHED || !exe_named || std::env::var("POCZTA_DATA_DIR").is_ok() {
@@ -531,7 +533,7 @@ mod tests {
 
     #[test]
     fn http_only_inside_the_tailnet() {
-        for ok in [DEFAULT_URL, "http://100.127.255.1/latest.json", "http://nuc.example.ts.net:8790/x.json", "http://127.0.0.1/x", "http://[fd7a:115c:a1e0::1]/x", "https://example.com/x"] {
+        for ok in ["http://100.100.1.2:8790/mailrust/latest.json", "http://100.127.255.1/latest.json", "http://nuc.example.ts.net:8790/x.json", "http://127.0.0.1/x", "http://[fd7a:115c:a1e0::1]/x", "https://example.com/x"] {
             assert!(validate_url(ok).is_ok(), "{ok}");
         }
         for bad in ["http://example.com/x", "http://100.128.0.1/x", "http://100.63.255.255/x", "http://192.168.1.10/x", "http://evil.ts.net.example.com/x", "ftp://100.100.1.2/x", "file:///C:/x", "nonsense"] {
@@ -541,7 +543,7 @@ mod tests {
 
     #[test]
     fn exe_url_is_resolved_and_validated() {
-        let base = validate_url(DEFAULT_URL).unwrap();
+        let base = validate_url("http://100.100.1.2:8790/mailrust/latest.json").unwrap();
         let mut m = manifest(b"MZ");
         assert_eq!(download_url(&base, &m).unwrap().as_str(), "http://100.100.1.2:8790/mailrust/Poczta-abc1234-1760000100.exe");
         m.url = "http://example.com/x.exe".into();

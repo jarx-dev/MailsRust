@@ -421,7 +421,7 @@ impl MailApp {
         ui.add_space(4.0);
         egui::Grid::new("accgrid-ai").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label("Adres CLIProxy");
-            changed |= ui.add(egui::TextEdit::singleline(&mut s.url).hint_text("http://100.100.1.2:8317").desired_width(290.0)).changed();
+            changed |= ui.add(egui::TextEdit::singleline(&mut s.url).hint_text("https://api.anthropic.com").desired_width(290.0)).changed();
             ui.end_row();
             ui.label("Klucz");
             changed |= ui.add(egui::TextEdit::singleline(&mut s.key).password(true).hint_text("sk-…").desired_width(290.0)).changed();

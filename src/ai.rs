@@ -28,7 +28,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            url: "http://100.100.1.2:8317".into(),
+            // the owner's builds carry their proxy (scripts/publish.sh); others type their own
+            url: option_env!("POCZTA_DEFAULT_AI_URL").unwrap_or("").into(),
             key: String::new(),
             key_saved: String::new(),
             model: "claude-sonnet-5-5".into(),

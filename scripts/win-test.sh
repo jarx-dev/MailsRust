@@ -10,13 +10,16 @@
 #   scripts/win-test.sh run <ms> [VAR=value]  # one run, closed after <ms>; extra variables for the app
 #                                             # (POCZTA_ARGS=--minimized: arguments for the EXE)
 #
-# Results: ~/mailrust-tests/<time>/ (sync.log of the run, cpu-mem.csv). Env: WIN (default
-# jarek@100.100.1.3), WDIR (default C:\Users\user\poczta-test).
+# Results: ~/mailrust-tests/<time>/ (sync.log of the run, cpu-mem.csv). Env: WIN (the
+# user@address of the laptop), WDIR (the test folder there, e.g. C:\Users\<name>\poczta-test); both
+# usually in ~/.config/poczta/build.env (see scripts/publish.sh).
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-win=${WIN:-jarek@100.100.1.3}
-wdir=${WDIR:-'C:\Users\user\poczta-test'}
+conf=${POCZTA_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/poczta/build.env}
+if [[ -f $conf ]]; then set -a; . "$conf"; set +a; fi
+win=${WIN:?brak WIN (plik $conf)}
+wdir=${WDIR:?brak WDIR (plik $conf)}
 wdir_scp=${wdir//\\//}
 target=x86_64-pc-windows-msvc
 ps() { ssh -o BatchMode=yes "$win" "powershell -NoProfile -Command \"\$ErrorActionPreference = 'Stop'; $1\""; }

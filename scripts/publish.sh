@@ -11,6 +11,11 @@
 # only for a build outside main.
 #
 # Env: POCZTA_UPDATE_DIR (default ~/hyperrust-updates/mailrust), KEEP (default 5 builds).
+# Settings that are this machine's own (addresses in the private network) live outside the
+# repository, in ~/.config/poczta/build.env (shell variables; POCZTA_CONF points elsewhere):
+#   POCZTA_DEFAULT_UPDATE_URL  where published builds look for updates (built into the EXE)
+#   POCZTA_DEFAULT_AI_URL      the AI proxy a new installation starts with (built into the EXE)
+#   WIN, WDIR                  the test laptop (scripts/win-test.sh)
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,6 +24,10 @@ keep=${KEEP:-5}
 target=x86_64-pc-windows-msvc
 
 cd "$repo"
+conf=${POCZTA_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/poczta/build.env}
+if [[ -f $conf ]]; then set -a; . "$conf"; set +a; fi
+# a published build without it would never update itself again
+: "${POCZTA_DEFAULT_UPDATE_URL:?brak POCZTA_DEFAULT_UPDATE_URL (plik $conf)}"
 built_at=$(date +%s)
 sha=$(git rev-parse --short HEAD)
 git diff --quiet HEAD || sha="$sha-dirty"
@@ -45,4 +54,4 @@ mv "$out/latest.json.part" "$out/latest.json"
 # keep the newest $keep builds
 ls -1t "$out"/Poczta-*.exe 2>/dev/null | tail -n +"$((keep + 1))" | while read -r old; do rm -f -- "$old"; done
 
-echo "opublikowano $name ($((size / 1024)) KiB) → http://100.100.1.2:8790/mailrust/latest.json"
+echo "opublikowano $name ($((size / 1024)) KiB) → $POCZTA_DEFAULT_UPDATE_URL"
