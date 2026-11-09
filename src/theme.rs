@@ -356,9 +356,10 @@ fn find_ci(text: &str, needle: &str) -> Option<(usize, usize)> {
                     return None;
                 }
                 k += 1;
-            }
-            if k == n.len() {
-                return Some((cs[i].0, cs.get(i + j + 1).map_or(text.len(), |x| x.0)));
+                // (the needle may end inside a letter that lowercases to two, as "İ")
+                if k == n.len() {
+                    return Some((cs[i].0, cs.get(i + j + 1).map_or(text.len(), |x| x.0)));
+                }
             }
         }
         None
@@ -520,5 +521,6 @@ mod tests {
         assert_eq!(super::find_ci("abc", "abcd"), None);
         assert_eq!(super::find_ci("abc", ""), None);
         assert_eq!(super::find_ci("İx", "i\u{307}"), Some((0, 2)));
+        assert_eq!(super::find_ci("İx", "i"), Some((0, 2)));
     }
 }
