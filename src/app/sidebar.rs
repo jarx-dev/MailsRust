@@ -242,6 +242,10 @@ impl MailApp {
                     self.diag_open = true;
                     ui.close();
                 }
+                if ui.button("ℹ  O programie…").clicked() {
+                    self.about_open = true;
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button("Zakończ").on_hover_text("Kończy działanie programu (zamknięcie okna tylko je minimalizuje)").clicked() {
                     self.quit();

@@ -524,6 +524,29 @@ impl MailApp {
 
     /// The AI settings and the Google Calendar each in a window of their own.
     pub(super) fn side_settings_ui(&mut self, ctx: &egui::Context) {
+        if self.about_open {
+            let mut open = true;
+            crate::theme::dialog(ctx, "about", "O programie", 420.0, &mut open, |ui| {
+                ui.label(RichText::new("Poczta").font(semibold(20.0)).color(TEXT()));
+                ui.label(RichText::new("Klient poczty dla Windows, napisany w Rust.").color(MUTED()));
+                let (version, build) = crate::update::version();
+                ui.label(RichText::new(format!("Wersja {version}")).color(MUTED())).on_hover_text(format!("Build {build}"));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label("Autor: Jarosław Hartwich,");
+                    ui.hyperlink_to("github.com/jarx-dev", "https://github.com/jarx-dev");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Kod źródłowy:");
+                    ui.hyperlink_to("github.com/jarx-dev/MailsRust", "https://github.com/jarx-dev/MailsRust");
+                });
+                ui.label(RichText::new("Licencja MIT").color(MUTED()));
+                ui.add_space(4.0);
+            });
+            if !open {
+                self.about_open = false;
+            }
+        }
         if self.ai_open {
             let mut open = true;
             crate::theme::dialog(ctx, "ai", "Ustawienia AI", 600.0, &mut open, |ui| self.ai_settings_ui(ui));
