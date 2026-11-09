@@ -43,7 +43,7 @@ themed! {
     HOVER = 0xF4F4F4, 0x2B2E33;
     BORDER = 0xE4E4E4, 0x3A3D44;
     TEXT = 0x222222, 0xE4E6EA;
-    MUTED = 0x767676, 0x9AA0A8;
+    MUTED = 0x666666, 0x9AA0A8;
     ICON = 0x444444, 0xC4C8CE;
     /// the background of the window and its panels
     BG = 0xFFFFFF, 0x1E1F22;
@@ -52,9 +52,9 @@ themed! {
     /// second-line text (subjects of read mail and the like)
     TEXT2 = 0x555555, 0xB9BDC4;
     /// faint text (the start of a message in the list)
-    FAINT = 0x8A8A8A, 0x8C929A;
+    FAINT = 0x767676, 0x8C929A;
     /// the "important" label
-    IMPORTANT = 0xFFD52E, 0x5C4812;
+    IMPORTANT = 0xFFE38A, 0x5C4812;
     /// behind company logos (most are made for a white page)
     LOGO_BG = 0xFFFFFF, 0xC9CDD3;
 }
@@ -71,6 +71,57 @@ pub const EVENT_COLORS: [Color32; 4] = [
 ];
 pub const EVENT_COLOR_NAMES: [&str; 4] = ["Niebieski", "Fioletowy", "Zielony", "Pomarańczowy"];
 
+/// Icons of Segoe Fluent Icons (private code points, so they never replace a letter).
+pub mod ic {
+    pub const MENU: &str = "\u{E700}";
+    pub const REFRESH: &str = "\u{E72C}";
+    pub const MAIL: &str = "\u{E715}";
+    pub const MAIL_OPEN: &str = "\u{E8C3}";
+    pub const FLAG: &str = "\u{E7C1}";
+    pub const PREV: &str = "\u{E76B}";
+    pub const NEXT: &str = "\u{E76C}";
+    pub const ARCHIVE: &str = "\u{E7B8}";
+    pub const DELETE: &str = "\u{E74D}";
+    pub const MOON: &str = "\u{E708}";
+    pub const SUN: &str = "\u{E706}";
+    pub const CALENDAR: &str = "\u{E787}";
+    pub const PERSON: &str = "\u{E77B}";
+    pub const PEOPLE: &str = "\u{E716}";
+    pub const REPLY: &str = "\u{E97A}";
+    pub const INBOX: &str = "\u{E896}";
+    pub const OUTBOX: &str = "\u{E898}";
+    pub const SEND: &str = "\u{E724}";
+    pub const EDIT: &str = "\u{E70F}";
+    pub const BLOCKED: &str = "\u{E733}";
+    pub const STAR: &str = "\u{E734}";
+    pub const SETTINGS: &str = "\u{E713}";
+    pub const LIST: &str = "\u{E8FD}";
+    pub const FORWARD: &str = "\u{EE35}";
+    /// (no such icon in the set: `paint_icon` draws two reply arrows)
+    pub const REPLY_ALL: &str = "\u{E97A}\u{E97A}";
+    pub const LINK: &str = "\u{E71B}";
+    pub const MORE: &str = "\u{E712}";
+    pub const OPEN: &str = "\u{E8A7}";
+    pub const SEARCH: &str = "\u{E721}";
+    pub const CLEAR: &str = "\u{E711}";
+    pub const CHECK: &str = "\u{E8FB}";
+    pub const DOWNLOAD: &str = "\u{E896}";
+}
+
+/// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.
+pub fn paint_icon(p: &Painter, at: Pos2, glyph: &str, size: f32, col: Color32) {
+    if glyph != ic::REPLY_ALL {
+        p.text(at, Align2::CENTER_CENTER, glyph, FontId::proportional(size), col);
+        return;
+    }
+    let shift = size * 0.15;
+    let front = p.text(at + Vec2::new(shift, 0.0), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(size), col);
+    // the same arrow further left, cut off just before the front arrow's head: only its head shows
+    let clip = egui::Rect::from_min_max(Pos2::new(front.left() - size, front.top()), Pos2::new(front.left() + size * 0.08, front.bottom()));
+    p.with_clip_rect(clip.intersect(p.clip_rect()))
+        .text(at + Vec2::new(shift - size * 0.3, 0.0), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(size), col);
+}
+
 /// Use the standard Windows UI fonts, with the Windows symbol fonts as a fallback for icons.
 fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -81,7 +132,13 @@ fn load_fonts(ctx: &egui::Context) {
         ("semibold", "seguisb.ttf"),
         ("symbols", "seguisym.ttf"),
         ("emoji", "seguiemj.ttf"),
+        // one outline icon set (`ic`): Windows 11, else the same code points of Windows 10
+        ("icons", "SegoeIcons.ttf"),
+        ("icons", "segmdl2.ttf"),
     ] {
+        if have.iter().any(|h| h == name) {
+            continue;
+        }
         // used straight from the font files (Windows shares them; no private copy of 17 MB)
         let mapped = std::fs::File::open(format!("{dir}\\Fonts\\{file}")).ok().and_then(|f| unsafe { memmap2::Mmap::map(&f) }.ok());
         if let Some(map) = mapped {
@@ -96,7 +153,7 @@ fn load_fonts(ctx: &egui::Context) {
         .get(&FontFamily::Proportional)
         .cloned()
         .unwrap_or_default();
-    let fallbacks: Vec<String> = ["symbols", "emoji"]
+    let fallbacks: Vec<String> = ["icons", "symbols", "emoji"]
         .iter()
         .map(|s| s.to_string())
         .filter(|s| have.contains(s))
@@ -280,14 +337,47 @@ pub fn avatar(painter: &Painter, center: Pos2, r: f32, name: &str) {
 
 /// Single line of text, cut with "…" when wider than `max_w`. Returns the width used.
 pub fn line_f(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: Color32, max_w: f32) -> f32 {
-    let mut job = LayoutJob::single_section(
-        text.to_string(),
-        TextFormat {
-            font_id: font,
-            color,
-            ..Default::default()
-        },
-    );
+    line_mark(painter, pos, text, font, color, max_w, "")
+}
+
+/// Where `needle` first occurs in `text`, ignoring case (byte range in `text`).
+fn find_ci(text: &str, needle: &str) -> Option<(usize, usize)> {
+    let n: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+    if n.is_empty() {
+        return None;
+    }
+    let cs: Vec<(usize, char)> = text.char_indices().collect();
+    (0..cs.len()).find_map(|i| {
+        // the end is where the text's own letters ran out, not the needle's length
+        let mut k = 0;
+        for (j, (_, c)) in cs[i..].iter().enumerate() {
+            for lc in c.to_lowercase() {
+                if n.get(k) != Some(&lc) {
+                    return None;
+                }
+                k += 1;
+                // (the needle may end inside a letter that lowercases to two, as "İ")
+                if k == n.len() {
+                    return Some((cs[i].0, cs.get(i + j + 1).map_or(text.len(), |x| x.0)));
+                }
+            }
+        }
+        None
+    })
+}
+
+/// One line of text cut to `max_w`, with the first `needle` (the search) marked as with a highlighter.
+pub fn line_mark(painter: &Painter, pos: Pos2, text: &str, font: FontId, color: Color32, max_w: f32, needle: &str) -> f32 {
+    let mut job = LayoutJob::default();
+    let fmt = TextFormat { font_id: font, color, ..Default::default() };
+    match find_ci(text, needle.trim()) {
+        Some((a, b)) => {
+            job.append(&text[..a], 0.0, fmt.clone());
+            job.append(&text[a..b], 0.0, TextFormat { background: IMPORTANT(), ..fmt.clone() });
+            job.append(&text[b..], 0.0, fmt);
+        }
+        None => job.append(text, 0.0, fmt),
+    }
     job.wrap = TextWrapping::truncate_at_width(max_w.max(1.0));
     let galley = painter.layout_job(job);
     let w = galley.size().x;
@@ -372,7 +462,7 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, open: &
     let modal_id = egui::Id::new(("dialog", id));
     let shown = egui::Modal::new(modal_id)
         .frame(frame)
-        .backdrop_color(Color32::from_black_alpha(if is_dark() { 120 } else { 70 }))
+        .backdrop_color(Color32::from_black_alpha(if is_dark() { 150 } else { 100 }))
         .show(ctx, |ui| {
             ui.set_width(width);
             let mut close = false;
@@ -420,4 +510,17 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, open: &
         *open = false;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn search_is_found_without_minding_case() {
+        assert_eq!(super::find_ci("Re: Zdjęcia z weekendu", "Weekend"), Some((15, 22)));
+        assert_eq!(super::find_ci("ŻÓŁW żółw", "żółw"), Some((0, 7)));
+        assert_eq!(super::find_ci("abc", "abcd"), None);
+        assert_eq!(super::find_ci("abc", ""), None);
+        assert_eq!(super::find_ci("İx", "i\u{307}"), Some((0, 2)));
+        assert_eq!(super::find_ci("İx", "i"), Some((0, 2)));
+    }
 }

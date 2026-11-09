@@ -138,11 +138,11 @@ impl MailApp {
         });
         ui.add_space(6.0);
         let everyone = self.book.people().count();
-        if folder_row(ui, "👤", MUTED(), "Wszystkie kontakty", everyone, self.book_group.is_none(), 28.0) {
+        if folder_row(ui, ic::PERSON, MUTED(), "Wszystkie kontakty", everyone, self.book_group.is_none(), 28.0) {
             self.book_group = None;
         }
         let from_mail = self.mail_people().len();
-        if folder_row(ui, "✉", MUTED(), "Z poczty", from_mail, self.book_group.as_deref() == Some(MAIL_PEOPLE), 28.0) {
+        if folder_row(ui, ic::MAIL, MUTED(), "Z poczty", from_mail, self.book_group.as_deref() == Some(MAIL_PEOPLE), 28.0) {
             self.book_group = Some(MAIL_PEOPLE.into());
         }
         ui.add_space(8.0);
@@ -183,7 +183,7 @@ impl MailApp {
         }
         let groups: Vec<(String, String, usize)> = self.book.groups().iter().map(|g| (g.id.clone(), g.name.clone(), self.book.members(&g.id).len())).collect();
         for (id, name, n) in groups {
-            if folder_row(ui, "👥", MUTED(), &name, n, self.book_group.as_deref() == Some(id.as_str()), 28.0) {
+            if folder_row(ui, ic::PEOPLE, MUTED(), &name, n, self.book_group.as_deref() == Some(id.as_str()), 28.0) {
                 self.book_group = Some(id);
             }
         }

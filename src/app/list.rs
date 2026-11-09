@@ -19,7 +19,7 @@ pub(super) enum Row {
     Msg(u64),
 }
 
-pub(super) const ROW_H: f32 = 72.0;
+pub(super) const ROW_H: f32 = 66.0;
 
 pub(super) const GROUP_H: f32 = 32.0;
 
@@ -252,8 +252,7 @@ impl MailApp {
     /// One message of a conversation as a card: folded to one line, or unfolded with its text.
     /// Returns true when its header was clicked (to fold or unfold it).
     pub(super) fn thread_card(&mut self, ui: &mut Ui, x: &Message, unfolded: bool) -> bool {
-        let today = Local::now().date_naive();
-        let when = if x.date.date() == today { x.date.format("%H:%M").to_string() } else { format!("{} {}", pl::short_day_month(x.date.date()), x.date.format("%H:%M")) };
+        let when = x.date.format("%d-%m-%Y %H:%M").to_string();
         let who = if x.from_name.is_empty() { x.from_addr.clone() } else { x.from_name.clone() };
         let card = SURFACE();
         let hot = SELECTED();
@@ -299,7 +298,7 @@ impl MailApp {
                 }
                 clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
                 // what to do with this message, under its time (as on the open message)
-                let tools = [("⤢", "Otwórz"), ("➦", "Prześlij dalej"), ("⮪", "Odpowiedz wszystkim"), ("↶", "Odpowiedz"), ("🔗", "Kopiuj link dla AI"), ("⋯", "Więcej")];
+                let tools = [(ic::OPEN, "Otwórz"), (ic::FORWARD, "Prześlij dalej"), (ic::REPLY_ALL, "Odpowiedz wszystkim"), (ic::REPLY, "Odpowiedz"), (ic::LINK, "Kopiuj link dla AI"), (ic::MORE, "Więcej")];
                 for (k, (glyph, tip)) in tools.iter().enumerate() {
                     // (the reply buttons and Otwórz on the right, the AI link and the menu before them)
                     let slot = if k >= 4 { k + 1 } else { k };
@@ -308,9 +307,7 @@ impl MailApp {
                     if br.hovered() {
                         ui.painter().rect_filled(b, CornerRadius::same(5), HOVER());
                     }
-                    // (the reply arrow is drawn thinner by the font: a size up, as on the open message)
-                    let (size, at) = if *glyph == "↶" { (19.0, b.center() - Vec2::new(0.0, 2.0)) } else { (15.0, b.center()) };
-                    ui.painter().text(at, Align2::CENTER_CENTER, *glyph, FontId::proportional(size), MUTED());
+                    paint_icon(ui.painter(), b.center(), glyph, 15.0, MUTED());
                     hint_above(ui, &br, tip);
                     if k == 5 {
                         let (id, read, flagged) = (x.id, x.read, x.flagged);
@@ -742,12 +739,13 @@ impl MailApp {
 
     pub(super) fn message_row(&mut self, ui: &mut Ui, m: &Message, today: NaiveDate) {
         let w = ui.available_width();
-        let (outer, resp) = ui.allocate_exact_size(Vec2::new(w, 72.0), Sense::click());
+        let (outer, resp) = ui.allocate_exact_size(Vec2::new(w, ROW_H), Sense::click());
         let r = outer.shrink2(Vec2::new(4.0, 1.0));
         let on = self.selected == Some(m.id);
         let p = ui.painter();
         if on {
-            p.rect_filled(r, CornerRadius::same(3), SELECTED());
+            // the open message in the accent's light tint (unread mail has its own dot)
+            p.rect_filled(r, CornerRadius::same(3), ACCENT_SOFT());
         } else if resp.hovered() {
             p.rect_filled(r, CornerRadius::same(3), HOVER());
         }
@@ -762,7 +760,7 @@ impl MailApp {
             m.from_name.clone()
         };
         let email = if outgoing { split_address(m.to.split(',').next().unwrap_or("")).1 } else { m.from_addr.clone() };
-        self.avatar_or_logo(ui, Pos2::new(r.left() + 28.0, r.top() + 26.0), 19.0, who.trim_start_matches("Do: "), &email);
+        self.avatar_or_logo(ui, Pos2::new(r.left() + 28.0, r.top() + 24.0), 17.0, who.trim_start_matches("Do: "), &email);
         let p = ui.painter();
         let x = r.left() + 56.0;
         // a search result found by meaning rather than by its words gets a small "≈"
@@ -770,50 +768,55 @@ impl MailApp {
         let date = if by_meaning { format!("≈ znaczenie · {}", short_date(m.date, today)) } else { short_date(m.date, today) };
         let df = FontId::proportional(12.0);
         let dw = text_width(ui, &date, df.clone());
-        p.text(Pos2::new(r.right() - 10.0, r.top() + 8.0), Align2::RIGHT_TOP, &date, df, if m.read { MUTED() } else { ACCENT() });
+        p.text(Pos2::new(r.right() - 10.0, r.top() + 7.0), Align2::RIGHT_TOP, &date, df, if m.read { MUTED() } else { TEXT() });
         let name_font = if m.read { FontId::proportional(14.0) } else { semibold(14.0) };
-        line_f(p, Pos2::new(x, r.top() + 6.0), &who, name_font, TEXT(), r.right() - x - dw - 20.0);
+        line_f(p, Pos2::new(x, r.top() + 5.0), &who, name_font, TEXT(), r.right() - x - dw - 20.0);
         let mut icons_w = 0.0;
         if m.flagged {
-            p.text(Pos2::new(r.right() - 10.0, r.top() + 28.0), Align2::RIGHT_TOP, "⚑", FontId::proportional(13.0), FLAG);
+            p.text(Pos2::new(r.right() - 10.0, r.top() + 25.0), Align2::RIGHT_TOP, "⚑", FontId::proportional(13.0), FLAG);
             icons_w += 16.0;
         }
         if !m.attachments.is_empty() {
-            p.text(Pos2::new(r.right() - 10.0 - icons_w, r.top() + 28.0), Align2::RIGHT_TOP, "📎", FontId::proportional(13.0), MUTED());
+            p.text(Pos2::new(r.right() - 10.0 - icons_w, r.top() + 25.0), Align2::RIGHT_TOP, "📎", FontId::proportional(13.0), MUTED());
             icons_w += 18.0;
         }
         if let Some(f) = self.forwarded.get(&m.id).and_then(|f| self.msg(*f)) {
-            let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 27.0), Vec2::new(18.0, 18.0));
-            ui.painter().text(ar.center(), Align2::CENTER_CENTER, "➦", FontId::proportional(13.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
+            let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 24.0), Vec2::new(18.0, 18.0));
+            ui.painter().text(ar.center(), Align2::CENTER_CENTER, ic::FORWARD, FontId::proportional(13.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
             let tip = format!("Przekazano dalej {} {} do: {}", pl::short_day_month(f.date.date()), f.date.format("%H:%M"), short_people(&f.to));
             ui.interact(ar, id(("forwarded", m.id)), Sense::hover()).on_hover_text(tip);
             icons_w += 18.0;
         }
         if let Some(when) = self.answered.1.get(&m.id) {
-            let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 27.0), Vec2::new(18.0, 18.0));
-            ui.painter().text(ar.center(), Align2::CENTER_CENTER, "↶", FontId::proportional(14.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
+            let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 24.0), Vec2::new(18.0, 18.0));
+            ui.painter().text(ar.center(), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(13.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
             let when = format!("Odpowiedziano {} {}", pl::short_day_month(when.date()), when.format("%H:%M"));
             ui.interact(ar, id(("answered", m.id)), Sense::hover()).on_hover_text(when);
             icons_w += 18.0;
         }
         let p = ui.painter();
-        let subj_col = if m.read { TEXT2() } else { ACCENT() };
+        let subj_col = if m.read { TEXT2() } else { TEXT() };
         let subj_font = if m.read { FontId::proportional(13.5) } else { semibold(13.5) };
-        line_f(p, Pos2::new(x, r.top() + 27.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w);
+        // the search, marked in the subject and the start of the text
+        let needle = self.search.as_str();
+        line_mark(p, Pos2::new(x, r.top() + 24.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w, needle);
         if !m.read {
-            // a small blue stripe on the left marks messages not opened yet
-            p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.top() + 6.0), Vec2::new(3.0, r.height() - 12.0)), CornerRadius::same(2), ACCENT());
+            // a small blue dot left of the picture marks messages not opened yet
+            p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + 24.0), 3.0, ACCENT());
         }
-        // Third line: the message's tags first, then the start of the text.
+        // Third line: the first tag (and how many more), then the start of the text.
         let mut tx = x;
-        for l in m.labels.iter().take(3) {
+        if let Some(l) = m.labels.first() {
             let room = r.right() - tx - 60.0;
-            if room < 40.0 {
-                break;
+            if room >= 40.0 {
+                tx += tag_chip(p, Pos2::new(tx, r.top() + 43.0), &display_label(l), 11.5, room.min(130.0)) + 4.0;
+                if m.labels.len() > 1 {
+                    let more = format!("+{}", m.labels.len() - 1);
+                    tx += p.text(Pos2::new(tx, r.top() + 43.0), Align2::LEFT_TOP, more, FontId::proportional(12.0), MUTED()).width() + 6.0;
+                }
             }
-            tx += tag_chip(p, Pos2::new(tx, r.top() + 47.0), &display_label(l), 11.5, room.min(130.0)) + 4.0;
         }
-        line(p, Pos2::new(tx + if tx > x { 2.0 } else { 0.0 }, r.top() + 47.0), &m.preview(), 13.0, FAINT(), r.right() - tx - 10.0);
+        line_mark(p, Pos2::new(tx + if tx > x { 2.0 } else { 0.0 }, r.top() + 43.0), &m.preview(), FontId::proportional(13.0), FAINT(), r.right() - tx - 10.0, needle);
 
         if resp.clicked() {
             self.actions.push(Action::Select(m.id));
@@ -947,10 +950,8 @@ pub(super) fn short_date(dt: NaiveDateTime, today: NaiveDate) -> String {
         dt.format("%H:%M").to_string()
     } else if days < 7 {
         format!("{} {}", pl::wd_short(d), dt.format("%H:%M"))
-    } else if d.year() == today.year() {
-        pl::short_day_month(d)
     } else {
-        dt.format("%d.%m.%Y").to_string()
+        dt.format("%d-%m-%Y").to_string()
     }
 }
 

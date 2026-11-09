@@ -104,7 +104,7 @@ impl MailApp {
     /// whole group); `level` 1 is indented under its group.
     pub(super) fn tag_row(&mut self, ui: &mut Ui, key: String, shown: String, count: usize, level: usize, dot: bool) {
         let on = self.view == MailView::Label && self.label_filter == key && self.search.is_empty();
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
         let p = ui.painter();
         if on {
             p.rect_filled(r, CornerRadius::same(4), SELECTED());
@@ -121,7 +121,7 @@ impl MailApp {
         p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, count.to_string(), FontId::proportional(12.0), MUTED());
         // the name stops before the number on the right
         let count_w = text_width(ui, &count.to_string(), FontId::proportional(12.0));
-        line(p, Pos2::new(x + 14.0, r.center().y - 10.0), &shown, 14.0, TEXT(), r.right() - x - 36.0 - count_w);
+        line(p, Pos2::new(x + 16.0, r.center().y - 10.0), &shown, 14.0, TEXT(), r.right() - x - 38.0 - count_w);
         if resp.clicked() {
             self.label_filter = key.clone();
             self.view = MailView::Label;
@@ -177,7 +177,7 @@ impl MailApp {
         }
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            ui.menu_button(RichText::new("☰").size(18.0), |ui| {
+            ui.menu_button(RichText::new(ic::MENU).size(16.0), |ui| {
                 if ui.button("✉  Nowa wiadomość").clicked() {
                     self.actions.push(Action::NewMessage);
                     ui.close();
@@ -264,33 +264,10 @@ impl MailApp {
             let l = |s: &'static str| if compact { "" } else { s };
             match self.module {
                 Module::Mail => {
-                    let sel = self.selected.filter(|id| self.msg(*id).is_some());
-                    let has = sel.is_some();
-                    if tool_button(ui, "⟳", l("Odśwież"), true) {
+                    if tool_button(ui, ic::REFRESH, l("Odśwież"), true) {
                         self.actions.push(Action::SendReceive);
                     }
-                    if tool_button(ui, "↶", l("Odpowiedz"), has) {
-                        self.actions.push(Action::Reply(sel.unwrap(), false));
-                    }
-                    if tool_button(ui, "⮪", l("Odpowiedz wszystkim"), has) {
-                        self.actions.push(Action::Reply(sel.unwrap(), true));
-                    }
-                    if tool_button(ui, "➦", l("Prześlij dalej"), has) {
-                        self.actions.push(Action::Forward(sel.unwrap()));
-                    }
-                    let sel_read = sel.and_then(|id| self.msg(id)).map(|m| m.read).unwrap_or(true);
-                    if tool_button(ui, if sel_read { "✉" } else { "✔" }, l(if sel_read { "Nieprzeczytana" } else { "Przeczytana" }), has) {
-                        self.actions.push(Action::SetRead(sel.unwrap(), !sel_read));
-                    }
-                    if tool_button(ui, "⚐", l("Oznacz"), has) {
-                        self.actions.push(Action::ToggleFlag(sel.unwrap()));
-                    }
-                    if tool_button(ui, "🗃", l("Archiwum"), has) {
-                        self.actions.push(Action::Move(sel.unwrap(), Folder::Archive));
-                    }
-                    if tool_button(ui, "🗑", l("Usuń"), has) {
-                        self.actions.push(Action::Delete(sel.unwrap()));
-                    }
+                    // (what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}
                 Module::Calendar => {
@@ -298,11 +275,11 @@ impl MailApp {
                         self.cal_day = Local::now().date_naive();
                         self.mini_shown = self.cal_day;
                     }
-                    if tool_button(ui, "‹", "", true) {
+                    if tool_button(ui, ic::PREV, "", true) {
                         self.cal_day = calendar::shift(self.cal_day, self.cal_view, -1);
                         self.mini_shown = self.cal_day;
                     }
-                    if tool_button(ui, "›", "", true) {
+                    if tool_button(ui, ic::NEXT, "", true) {
                         self.cal_day = calendar::shift(self.cal_day, self.cal_view, 1);
                         self.mini_shown = self.cal_day;
                     }
@@ -333,7 +310,7 @@ impl MailApp {
                 }
                 ui.add_space(6.0);
                 // the theme switch: a moon in the light theme, a sun in the dark one
-                let (icon, tip) = if self.prefs.dark { ("☀", "Jasny motyw") } else { ("🌙", "Ciemny motyw") };
+                let (icon, tip) = if self.prefs.dark { (ic::SUN, "Jasny motyw") } else { (ic::MOON, "Ciemny motyw") };
                 let (tr, tresp) = ui.allocate_exact_size(Vec2::new(32.0, 30.0), Sense::click());
                 if tresp.hovered() {
                     ui.painter().rect_filled(tr, CornerRadius::same(4), HOVER());
@@ -350,19 +327,38 @@ impl MailApp {
                     let was_empty = self.search.trim().is_empty();
                     let hint = if !self.store.extra.is_empty() {
                         let a = self.account_ref(self.view_account);
-                        format!("🔍  Szukaj w: {}", if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() })
+                        format!("Szukaj w: {}", if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() })
                     } else if self.finder.meaning_ready() {
-                        "🔍  Szukaj — słowa lub znaczenie".to_string()
+                        "Szukaj — słowa lub znaczenie".to_string()
                     } else {
-                        "🔍  Szukaj".to_string()
+                        "Szukaj".to_string()
                     };
+                    // room on the left for the magnifier and on the right for the clearing ×
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.search)
                             .hint_text(RichText::new(hint).italics())
                             .desired_width(w)
-                            .margin(Margin::symmetric(10, 5)),
+                            .margin(Margin { left: 32, right: 30, top: 5, bottom: 5 }),
                     );
-                    if r.changed() {
+                    ui.painter().text(Pos2::new(r.rect.left() + 16.0, r.rect.center().y), Align2::CENTER_CENTER, ic::SEARCH, FontId::proportional(14.0), MUTED());
+                    let mut cleared = false;
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) && !self.search.is_empty() {
+                        self.search.clear();
+                        cleared = true;
+                    }
+                    if !self.search.is_empty() {
+                        let x = Rect::from_center_size(Pos2::new(r.rect.right() - 15.0, r.rect.center().y), Vec2::splat(22.0));
+                        let xr = ui.interact(x, id("search-clear"), Sense::click());
+                        if xr.hovered() {
+                            ui.painter().rect_filled(x, CornerRadius::same(4), HOVER());
+                        }
+                        ui.painter().text(x.center(), Align2::CENTER_CENTER, ic::CLEAR, FontId::proportional(11.0), MUTED());
+                        if xr.on_hover_text("Wyczyść wyszukiwanie (Esc)").clicked() {
+                            self.search.clear();
+                            cleared = true;
+                        }
+                    }
+                    if r.changed() || cleared {
                         if was_empty {
                             // a new search starts where the person is: in sent mail, received, or everywhere
                             self.scope = match self.view {
@@ -392,7 +388,7 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let unread = self.counts().inbox_unread_all;
-                    for (m, icon, tip) in [(Module::Mail, "✉", "Poczta"), (Module::Calendar, "📅", "Kalendarz"), (Module::Contacts, "👤", "Kontakty")] {
+                    for (m, icon, tip) in [(Module::Mail, ic::MAIL, "Poczta"), (Module::Calendar, ic::CALENDAR, "Kalendarz"), (Module::Contacts, ic::PERSON, "Kontakty")] {
                         let tip = if m == Module::Mail && unread > 0 { format!("{tip} — {}", crate::notify::unread_text(unread)) } else { tip.to_string() };
                         let resp = icon_tab(ui, icon, self.module == m, 64.0);
                         if m == Module::Mail && unread > 0 {
@@ -446,13 +442,15 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Poczta").font(semibold(18.0)).color(TEXT()));
+            ui.label(RichText::new("Poczta").font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
+        // dense rows, as in eM Client: one row every 27 px
+        ui.spacing_mut().item_spacing.y = 1.0;
         let counts = self.counts();
         let (unread_all, flagged) = (counts.unread_all, counts.flagged);
-        for (v, icon, n) in [(MailView::Unread, "◷", unread_all), (MailView::Flagged, "⚐", flagged)] {
-            let row = folder_row_r(ui, icon, MUTED(), v.title(), n, self.view == v && self.search.is_empty(), 28.0);
+        for (v, icon, n) in [(MailView::Unread, ic::MAIL, unread_all), (MailView::Flagged, ic::FLAG, flagged)] {
+            let row = folder_row_r(ui, icon, MUTED(), v.title(), n, v == MailView::Unread, self.view == v && self.search.is_empty(), 28.0);
             if v == MailView::Unread && mark_all_menu(&row, n) {
                 self.actions.push(Action::MarkAllRead(None, None));
             }
@@ -474,7 +472,7 @@ impl MailApp {
             self.noreply_count = (state, n);
         }
         let waiting = self.noreply_count.1;
-        if folder_row(ui, "↩", MUTED(), MailView::NoReply.title(), waiting, self.view == MailView::NoReply && self.search.is_empty(), 28.0) {
+        if folder_row(ui, ic::REPLY, MUTED(), MailView::NoReply.title(), waiting, self.view == MailView::NoReply && self.search.is_empty(), 28.0) {
             self.view = MailView::NoReply;
             self.view_account = 0;
             self.search.clear();
@@ -482,17 +480,126 @@ impl MailApp {
         }
         let favs = counts.tags.get(FAVOURITES).copied().unwrap_or(0);
         let on = self.view == MailView::Label && self.label_filter == FAVOURITES && self.search.is_empty();
-        if folder_row(ui, "☆", Color32::from_rgb(0xE0, 0xA1, 0x00), FAVOURITES, favs, on, 28.0) {
+        if folder_row(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), FAVOURITES, favs, on, 28.0) {
             self.label_filter = FAVOURITES.to_string();
             self.view = MailView::Label;
             self.search.clear();
             self.selected = self.visible_ids().first().copied();
         }
+        ui.add_space(8.0);
+        // Account group
+        let acc_name = self.store.account.display_name.clone();
+        let online = self.can_connect();
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+        if resp.hovered() {
+            ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
+        }
+        let p = ui.painter();
+        chevron(p, Pos2::new(r.left() + 14.0, r.center().y), self.account_expanded, MUTED());
+        avatar(p, Pos2::new(r.left() + 36.0, r.center().y), 11.0, &acc_name);
+        let w = line(p, Pos2::new(r.left() + 54.0, r.center().y - 9.0), &acc_name, 13.5, TEXT(), r.width() - 80.0);
+        p.circle_filled(
+            Pos2::new(r.left() + 62.0 + w, r.center().y),
+            3.5,
+            if online { Color32::from_rgb(0x2E, 0x9E, 0x5B) } else { BORDER() },
+        );
+        if resp.on_hover_text(if online { "Połączono" } else { "Offline — kliknij ⚙, aby się zalogować" }).clicked() {
+            self.account_expanded = !self.account_expanded;
+            self.save_now = true;
+        }
+        let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
+        let gr = ui.interact(gear, id("acc-gear"), Sense::click());
+        ui.painter().text(gear.center(), Align2::CENTER_CENTER, ic::SETTINGS, FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
+        if gr.on_hover_text("Ustawienia konta").clicked() {
+            self.account_open = true;
+        }
+        if self.account_expanded {
+            for f in Folder::ALL {
+                let n = if f == Folder::Drafts || f == Folder::Outbox { &counts.folder_count } else { &counts.folder_unread }.get(&f).copied().unwrap_or(0);
+                let col = match f {
+                    Folder::Inbox => ACCENT(),
+                    Folder::Junk => Color32::from_rgb(0xD9, 0x6B, 0x2B),
+                    _ => MUTED(),
+                };
+                let row = folder_row_r(ui, f.icon(), col, f.name(), n, !matches!(f, Folder::Drafts | Folder::Outbox), self.view == MailView::Folder(f) && self.view_account == 0 && self.search.is_empty(), 44.0);
+                let unread = counts.folder_unread.get(&f).copied().unwrap_or(0);
+                if mark_all_menu(&row, unread) {
+                    self.actions.push(Action::MarkAllRead(Some(0), Some(f)));
+                }
+                if row.clicked() {
+                    self.view = MailView::Folder(f);
+                    self.view_account = 0;
+                    self.search.clear();
+                    self.selected = self.visible_ids().first().copied();
+                    if let Some(id) = self.selected {
+                        // shown, but it stays unread until the person opens it
+                        self.actions.push(Action::Show(id));
+                    }
+                }
+            }
+        }
+        // further accounts: their own folders (their unread mail is also in "Nieprzeczytane")
+        for k in 0..self.store.extra.len() {
+            let acct = k as u32 + 1;
+            let x = self.store.extra[k].account.clone();
+            ui.add_space(4.0);
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+            if resp.hovered() {
+                ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
+            }
+            let open = !self.extra_folded.contains(&k);
+            let shown = if x.display_name.trim().is_empty() { x.email.clone() } else { x.display_name.clone() };
+            let p = ui.painter();
+            chevron(p, Pos2::new(r.left() + 14.0, r.center().y), open, MUTED());
+            avatar(p, Pos2::new(r.left() + 36.0, r.center().y), 11.0, &shown);
+            let w = line(p, Pos2::new(r.left() + 54.0, r.center().y - 9.0), &shown, 13.5, TEXT(), r.width() - 80.0);
+            let online = x.can_connect();
+            p.circle_filled(Pos2::new(r.left() + 62.0 + w, r.center().y), 3.5, if online { Color32::from_rgb(0x2E, 0x9E, 0x5B) } else { BORDER() });
+            if resp.on_hover_text(&x.email).clicked() {
+                if open {
+                    self.extra_folded.insert(k);
+                } else {
+                    self.extra_folded.remove(&k);
+                }
+            }
+            let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
+            let gr = ui.interact(gear, id(("extra-gear", k)), Sense::click());
+            ui.painter().text(gear.center(), Align2::CENTER_CENTER, ic::SETTINGS, FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
+            if gr.on_hover_text("Ustawienia tego konta").clicked() {
+                self.extra_edit = Some((Some(k), x.clone()));
+            }
+            if open {
+                for f in [Folder::Inbox, Folder::Drafts, Folder::Outbox, Folder::Sent, Folder::Junk, Folder::Trash] {
+                    let n = if f == Folder::Drafts || f == Folder::Outbox { &counts.acct_count } else { &counts.acct_unread }.get(&(acct, f)).copied().unwrap_or(0);
+                    let col = match f {
+                        Folder::Inbox => ACCENT(),
+                        Folder::Junk => Color32::from_rgb(0xD9, 0x6B, 0x2B),
+                        _ => MUTED(),
+                    };
+                    let on = self.view == MailView::Folder(f) && self.view_account == acct && self.search.is_empty();
+                    let row = folder_row_r(ui, f.icon(), col, f.name(), n, !matches!(f, Folder::Drafts | Folder::Outbox), on, 44.0);
+                    let unread = counts.acct_unread.get(&(acct, f)).copied().unwrap_or(0);
+                    if mark_all_menu(&row, unread) {
+                        self.actions.push(Action::MarkAllRead(Some(acct), Some(f)));
+                    }
+                    if row.clicked() {
+                        self.view = MailView::Folder(f);
+                        self.view_account = acct;
+                        self.search.clear();
+                        self.selected = self.visible_ids().first().copied();
+                        if let Some(id) = self.selected {
+                            self.actions.push(Action::Show(id));
+                        }
+                    }
+                }
+            }
+        }
+        ui.add_space(8.0);
         // Tags (Gmail labels), with how many messages carry each (favourites have their own row).
         let mut tags = counts.tags.clone();
         tags.remove(FAVOURITES);
         if !tags.is_empty() {
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
             if resp.hovered() {
                 ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
             }
@@ -538,7 +645,7 @@ impl MailApp {
                     let row_top = ui.cursor().top();
                     self.tag_row(ui, format!("{parent}/"), display_label(&parent), total, 0, false);
                     // a small arrow in front of the group folds or unfolds its tags
-                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 14.0), Vec2::splat(20.0));
+                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 13.0), Vec2::splat(20.0));
                     let ar = ui.interact(arrow, id(("fold-group", parent.as_str())), Sense::click());
                     if ar.hovered() {
                         ui.painter().rect_filled(arrow, CornerRadius::same(4), HOVER());
@@ -562,114 +669,6 @@ impl MailApp {
                 }
             }
         }
-        ui.add_space(8.0);
-        // Account group
-        let acc_name = self.store.account.display_name.clone();
-        let online = self.can_connect();
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
-        if resp.hovered() {
-            ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
-        }
-        let p = ui.painter();
-        chevron(p, Pos2::new(r.left() + 14.0, r.center().y), self.account_expanded, MUTED());
-        avatar(p, Pos2::new(r.left() + 36.0, r.center().y), 11.0, &acc_name);
-        let w = line(p, Pos2::new(r.left() + 54.0, r.center().y - 9.0), &acc_name, 13.5, TEXT(), r.width() - 80.0);
-        p.circle_filled(
-            Pos2::new(r.left() + 62.0 + w, r.center().y),
-            3.5,
-            if online { Color32::from_rgb(0x2E, 0x9E, 0x5B) } else { BORDER() },
-        );
-        if resp.on_hover_text(if online { "Połączono" } else { "Offline — kliknij ⚙, aby się zalogować" }).clicked() {
-            self.account_expanded = !self.account_expanded;
-            self.save_now = true;
-        }
-        let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
-        let gr = ui.interact(gear, id("acc-gear"), Sense::click());
-        ui.painter().text(gear.center(), Align2::CENTER_CENTER, "⚙", FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
-        if gr.on_hover_text("Ustawienia konta").clicked() {
-            self.account_open = true;
-        }
-        if self.account_expanded {
-            for f in Folder::ALL {
-                let n = if f == Folder::Drafts || f == Folder::Outbox { &counts.folder_count } else { &counts.folder_unread }.get(&f).copied().unwrap_or(0);
-                let col = match f {
-                    Folder::Inbox => ACCENT(),
-                    Folder::Junk => Color32::from_rgb(0xD9, 0x6B, 0x2B),
-                    _ => MUTED(),
-                };
-                let row = folder_row_r(ui, f.icon(), col, f.name(), n, self.view == MailView::Folder(f) && self.view_account == 0 && self.search.is_empty(), 44.0);
-                let unread = counts.folder_unread.get(&f).copied().unwrap_or(0);
-                if mark_all_menu(&row, unread) {
-                    self.actions.push(Action::MarkAllRead(Some(0), Some(f)));
-                }
-                if row.clicked() {
-                    self.view = MailView::Folder(f);
-                    self.view_account = 0;
-                    self.search.clear();
-                    self.selected = self.visible_ids().first().copied();
-                    if let Some(id) = self.selected {
-                        // shown, but it stays unread until the person opens it
-                        self.actions.push(Action::Show(id));
-                    }
-                }
-            }
-        }
-        // further accounts: their own folders (their unread mail is also in "Nieprzeczytane")
-        for k in 0..self.store.extra.len() {
-            let acct = k as u32 + 1;
-            let x = self.store.extra[k].account.clone();
-            ui.add_space(4.0);
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
-            }
-            let open = !self.extra_folded.contains(&k);
-            let shown = if x.display_name.trim().is_empty() { x.email.clone() } else { x.display_name.clone() };
-            let p = ui.painter();
-            chevron(p, Pos2::new(r.left() + 14.0, r.center().y), open, MUTED());
-            avatar(p, Pos2::new(r.left() + 36.0, r.center().y), 11.0, &shown);
-            let w = line(p, Pos2::new(r.left() + 54.0, r.center().y - 9.0), &shown, 13.5, TEXT(), r.width() - 80.0);
-            let online = x.can_connect();
-            p.circle_filled(Pos2::new(r.left() + 62.0 + w, r.center().y), 3.5, if online { Color32::from_rgb(0x2E, 0x9E, 0x5B) } else { BORDER() });
-            if resp.on_hover_text(&x.email).clicked() {
-                if open {
-                    self.extra_folded.insert(k);
-                } else {
-                    self.extra_folded.remove(&k);
-                }
-            }
-            let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
-            let gr = ui.interact(gear, id(("extra-gear", k)), Sense::click());
-            ui.painter().text(gear.center(), Align2::CENTER_CENTER, "⚙", FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
-            if gr.on_hover_text("Ustawienia tego konta").clicked() {
-                self.extra_edit = Some((Some(k), x.clone()));
-            }
-            if open {
-                for f in [Folder::Inbox, Folder::Drafts, Folder::Outbox, Folder::Sent, Folder::Junk, Folder::Trash] {
-                    let n = if f == Folder::Drafts || f == Folder::Outbox { &counts.acct_count } else { &counts.acct_unread }.get(&(acct, f)).copied().unwrap_or(0);
-                    let col = match f {
-                        Folder::Inbox => ACCENT(),
-                        Folder::Junk => Color32::from_rgb(0xD9, 0x6B, 0x2B),
-                        _ => MUTED(),
-                    };
-                    let on = self.view == MailView::Folder(f) && self.view_account == acct && self.search.is_empty();
-                    let row = folder_row_r(ui, f.icon(), col, f.name(), n, on, 44.0);
-                    let unread = counts.acct_unread.get(&(acct, f)).copied().unwrap_or(0);
-                    if mark_all_menu(&row, unread) {
-                        self.actions.push(Action::MarkAllRead(Some(acct), Some(f)));
-                    }
-                    if row.clicked() {
-                        self.view = MailView::Folder(f);
-                        self.view_account = acct;
-                        self.search.clear();
-                        self.selected = self.visible_ids().first().copied();
-                        if let Some(id) = self.selected {
-                            self.actions.push(Action::Show(id));
-                        }
-                    }
-                }
-            }
-        }
     }
 
     pub(super) fn calendar_side(&mut self, ui: &mut Ui) {
@@ -677,17 +676,17 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Kalendarz").font(semibold(18.0)).color(TEXT()));
+            ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(pl::month_year(self.mini_shown)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new("›").frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(ic::NEXT).size(12.0)).frame(false)).clicked() {
                         self.mini_shown = calendar::shift(self.mini_shown, CalView::Month, 1);
                     }
-                    if ui.add(egui::Button::new("‹").frame(false)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(ic::PREV).size(12.0)).frame(false)).clicked() {
                         self.mini_shown = calendar::shift(self.mini_shown, CalView::Month, -1);
                     }
                 });
@@ -718,17 +717,17 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let w = ui.available_width() / 2.0;
-                    if icon_tab(ui, "📅", self.side_mode == SideMode::Day, w).on_hover_text("Dzień").clicked() {
+                    if icon_tab(ui, ic::CALENDAR, self.side_mode == SideMode::Day, w).on_hover_text("Dzień").clicked() {
                         self.side_mode = SideMode::Day;
                     }
-                    if icon_tab(ui, "☰", self.side_mode == SideMode::Agenda, w).on_hover_text("Nadchodzące").clicked() {
+                    if icon_tab(ui, ic::LIST, self.side_mode == SideMode::Agenda, w).on_hover_text("Nadchodzące").clicked() {
                         self.side_mode = SideMode::Agenda;
                     }
                 });
             });
         Frame::new().inner_margin(Margin { left: 14, right: 10, top: 10, bottom: 0 }).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Kalendarz").font(semibold(18.0)).color(TEXT()));
+                ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if fold_button(ui, true).on_hover_text("Zwiń kalendarz na bok").clicked() {
                         self.show_side = false;
@@ -739,10 +738,10 @@ impl MailApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
-                if ui.add(egui::Button::new(RichText::new("‹").size(18.0)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(ic::PREV).size(13.0)).frame(false)).clicked() {
                     self.side_day -= Duration::days(1);
                 }
-                if ui.add(egui::Button::new(RichText::new("›").size(18.0)).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(ic::NEXT).size(13.0)).frame(false)).clicked() {
                     self.side_day += Duration::days(1);
                 }
                 ui.add_space(6.0);
@@ -932,9 +931,9 @@ impl MailApp {
     }
 }
 
-/// One folder line: icon, name, count on the right.
+/// One folder line: icon, name, count on the right (a plain number, not unread mail).
 pub(super) fn folder_row(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, on: bool, indent: f32) -> bool {
-    folder_row_r(ui, icon, icon_col, name, count, on, indent).clicked()
+    folder_row_r(ui, icon, icon_col, name, count, false, on, indent).clicked()
 }
 
 /// A row of the left bar with a right-click menu: "Oznacz wszystkie jako przeczytane" (when
@@ -950,8 +949,10 @@ pub(super) fn mark_all_menu(resp: &egui::Response, unread: usize) -> bool {
     chosen
 }
 
-pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, on: bool, indent: f32) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+/// `unread`: the count is of unread mail (blue and bold); otherwise a plain grey number.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str, count: usize, unread: bool, on: bool, indent: f32) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
     let p = ui.painter();
     if on {
         p.rect_filled(r, CornerRadius::same(4), SELECTED());
@@ -960,7 +961,8 @@ pub(super) fn folder_row_r(ui: &mut Ui, icon: &str, icon_col: Color32, name: &st
     }
     p.text(Pos2::new(r.left() + indent, r.center().y), Align2::CENTER_CENTER, icon, FontId::proportional(15.0), icon_col);
     let count_txt = if count > 0 { count.to_string() } else { String::new() };
-    p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, &count_txt, semibold(12.5), ACCENT());
+    let (count_font, count_col) = if unread { (semibold(12.5), ACCENT()) } else { (FontId::proportional(12.0), MUTED()) };
+    p.text(Pos2::new(r.right() - 12.0, r.center().y), Align2::RIGHT_CENTER, &count_txt, count_font, count_col);
     line(p, Pos2::new(r.left() + indent + 16.0, r.center().y - 10.0), name, 14.0, TEXT(), r.width() - indent - 56.0);
     resp
 }
