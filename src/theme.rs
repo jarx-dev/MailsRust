@@ -348,9 +348,20 @@ fn find_ci(text: &str, needle: &str) -> Option<(usize, usize)> {
     }
     let cs: Vec<(usize, char)> = text.char_indices().collect();
     (0..cs.len()).find_map(|i| {
-        let mut it = cs[i..].iter().flat_map(|(_, c)| c.to_lowercase());
-        let hit = n.iter().all(|c| it.next() == Some(*c));
-        hit.then(|| (cs[i].0, cs.get(i + needle.chars().count()).map_or(text.len(), |x| x.0)))
+        // the end is where the text's own letters ran out, not the needle's length
+        let mut k = 0;
+        for (j, (_, c)) in cs[i..].iter().enumerate() {
+            for lc in c.to_lowercase() {
+                if n.get(k) != Some(&lc) {
+                    return None;
+                }
+                k += 1;
+            }
+            if k == n.len() {
+                return Some((cs[i].0, cs.get(i + j + 1).map_or(text.len(), |x| x.0)));
+            }
+        }
+        None
     })
 }
 
@@ -508,5 +519,6 @@ mod tests {
         assert_eq!(super::find_ci("ŻÓŁW żółw", "żółw"), Some((0, 7)));
         assert_eq!(super::find_ci("abc", "abcd"), None);
         assert_eq!(super::find_ci("abc", ""), None);
+        assert_eq!(super::find_ci("İx", "i\u{307}"), Some((0, 2)));
     }
 }

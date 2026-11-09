@@ -252,8 +252,7 @@ impl MailApp {
     /// One message of a conversation as a card: folded to one line, or unfolded with its text.
     /// Returns true when its header was clicked (to fold or unfold it).
     pub(super) fn thread_card(&mut self, ui: &mut Ui, x: &Message, unfolded: bool) -> bool {
-        let today = Local::now().date_naive();
-        let when = if x.date.date() == today { x.date.format("%H:%M").to_string() } else { format!("{} {}", pl::short_day_month(x.date.date()), x.date.format("%H:%M")) };
+        let when = x.date.format("%d-%m-%Y %H:%M").to_string();
         let who = if x.from_name.is_empty() { x.from_addr.clone() } else { x.from_name.clone() };
         let card = SURFACE();
         let hot = SELECTED();
@@ -798,8 +797,8 @@ impl MailApp {
         let p = ui.painter();
         let subj_col = if m.read { TEXT2() } else { TEXT() };
         let subj_font = if m.read { FontId::proportional(13.5) } else { semibold(13.5) };
-        // the search, marked in the subject and the start of the text (not for "od:"-style filters)
-        let needle = if self.search.contains(':') { "" } else { self.search.as_str() };
+        // the search, marked in the subject and the start of the text
+        let needle = self.search.as_str();
         line_mark(p, Pos2::new(x, r.top() + 24.0), &m.subject, subj_font, subj_col, r.right() - x - 14.0 - icons_w, needle);
         if !m.read {
             // a small blue dot left of the picture marks messages not opened yet

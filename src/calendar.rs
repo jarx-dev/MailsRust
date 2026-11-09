@@ -218,7 +218,12 @@ fn hour_columns(
                     .width();
                 p.text(Pos2::new(area.left() + 8.0 + w, y + 3.0), Align2::LEFT_TOP, "00", FontId::proportional(10.0), MUTED());
             }
-            // the "now" line first: the events lie over it, so it never crosses their text
+            // day borders, then the "now" line over them: the events lie over both, so it never crosses their text
+            if days > 1 {
+                for i in 0..days {
+                    p.vline(area.left() + gutter + cw * i as f32, area.y_range(), Stroke::new(1.0, BORDER()));
+                }
+            }
             if today >= start && today < start + Duration::days(days) {
                 let now = chrono::Local::now().time();
                 let y = area.top() + (now.hour() as f32 + now.minute() as f32 / 60.0) * hour_h;
@@ -230,9 +235,6 @@ fn hour_columns(
                 let day = start + Duration::days(i);
                 let x = area.left() + gutter + cw * i as f32;
                 let col_rect = Rect::from_min_size(Pos2::new(x, area.top()), Vec2::new(cw, total));
-                if days > 1 {
-                    p.vline(x, area.y_range(), Stroke::new(1.0, BORDER()));
-                }
                 let resp = ui.interact(col_rect, id((salt, "col", day)), Sense::click());
                 if resp.double_clicked() {
                     if let Some(pos) = resp.interact_pointer_pos() {

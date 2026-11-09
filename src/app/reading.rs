@@ -563,7 +563,10 @@ impl MailApp {
             let to_people = people_in(&m.to);
             let cc_people = people_in(&m.cc);
             let has_notes = answered_at.is_some() || forward_note.is_some();
-            let head_h = 54.0 + if cc_people.is_empty() { 0.0 } else { 22.0 } + if has_notes { 22.0 } else { 0.0 };
+            // a narrow pane: the icon row (~285 px) leaves too little room, the address goes under it
+            let narrow = ui.available_width() - 72.0 - 285.0 < 80.0;
+            let addr_dy = if narrow { 30.0 } else { 0.0 };
+            let head_h = 54.0 + addr_dy + if cc_people.is_empty() { 0.0 } else { 22.0 } + if has_notes { 22.0 } else { 0.0 };
             let (sr, sender_resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), head_h), Sense::click());
             // a double click on the sender line opens the message in a window of its own
             if sender_resp.double_clicked() {
@@ -671,14 +674,16 @@ impl MailApp {
                     }
                     reply.rect.left()
                 });
+            // the icon row put the cursor under itself: what follows goes under the whole header
+            ui.advance_cursor_after_rect(sr.union(buttons.response.rect));
             // the address line (and when you answered) up to the buttons, never under them
             let buttons_left = buttons.inner.min(buttons.response.rect.left());
-            let room = (buttons_left - (sr.left() + 60.0) - 12.0).max(40.0);
+            let room = if narrow { sr.right() - (sr.left() + 60.0) } else { (buttons_left - (sr.left() + 60.0) - 12.0).max(40.0) };
             let to_line = fit_names(ui, "do ", &to_people, room);
             let cc_line = fit_names(ui, "DW: ", &cc_people, room);
-            line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0), &to_line, 13.5, MUTED(), room);
-            let mut rows = vec![(sr.top() + 26.0, &to_line, &to_people)];
-            let mut next_y = sr.top() + 50.0;
+            line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0 + addr_dy), &to_line, 13.5, MUTED(), room);
+            let mut rows = vec![(sr.top() + 26.0 + addr_dy, &to_line, &to_people)];
+            let mut next_y = sr.top() + 50.0 + addr_dy;
             if !cc_people.is_empty() {
                 line(ui.painter(), Pos2::new(sr.left() + 60.0, next_y), &cc_line, 13.5, MUTED(), room);
                 rows.push((next_y - 2.0, &cc_line, &cc_people));
