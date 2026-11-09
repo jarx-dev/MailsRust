@@ -253,6 +253,11 @@ impl MailApp {
     /// Into the tray: minimized first, then hidden. Only hidden, the window would still be drawn
     /// in full (winit never tells eframe it is covered); minimizing it after hiding shows it again.
     pub(super) fn hide_window(&mut self, ctx: &egui::Context) {
+        if self.shown_by_mail {
+            // winit still thinks it hidden: told otherwise first, so "hide" below is carried out
+            self.shown_by_mail = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         self.hidden = true;
@@ -260,6 +265,7 @@ impl MailApp {
 
     /// The window back in front (from the tray, a note about new mail, another start).
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
+        self.shown_by_mail = false;
         self.hidden = false;
         self.start_hidden = false;
         // (Windows skips the focus while the window is still minimized: asked again once it isn't)
@@ -555,6 +561,17 @@ pub(super) fn keyboard_to(h: isize) -> bool {
 
 /// Window `h` to the front, also when another program has it (a click on the tray icon goes to
 /// Explorer first, and Windows lets a window take the front only from the one that has it).
+/// The window on the taskbar as a minimized button, without taking the keyboard from whatever
+/// the person is doing (winit's own "show" would make it the active window).
+pub(super) fn show_minimized(h: isize) {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
+        ShowWindow(h as _, SW_SHOWMINNOACTIVE);
+    }
+    let _ = h;
+}
+
 pub(super) fn bring_to_front(h: isize) {
     #[cfg(windows)]
     unsafe {

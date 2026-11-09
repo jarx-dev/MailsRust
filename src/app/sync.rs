@@ -211,7 +211,8 @@ specjalista ds. Informatyki".into();
     }
 
     /// New unread mail came: a sound, the taskbar button blinks, and (when the window is not in
-    /// front) a note in the corner of the screen.
+    /// front) a note in the corner of the screen. In the tray, the window comes back onto the
+    /// taskbar minimized (without taking the keyboard), so the new mail shows there.
     pub(super) fn new_mail(&mut self, ids: Vec<u64>) {
         crate::diag::log(format!("new mail: {} unread", ids.len()));
         if !self.prefs.notify || ids.is_empty() {
@@ -221,6 +222,14 @@ specjalista ds. Informatyki".into();
         let (focused, minimized) = self.ctx.input(|i| (i.viewport().focused.unwrap_or(false), i.viewport().minimized.unwrap_or(false)));
         if focused && !minimized && !self.hidden && std::env::var("POCZTA_NOTIFY_TEST").is_err() {
             return;
+        }
+        if self.hidden {
+            if let Some(h) = self.main_hwnd {
+                self.hidden = false;
+                self.start_hidden = false;
+                self.shown_by_mail = true;
+                show_minimized(h);
+            }
         }
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         let newest = ids.iter().filter_map(|id| self.msg(*id)).max_by_key(|m| m.date);
