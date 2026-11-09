@@ -145,6 +145,8 @@ src/
 Pocztę napisał **Jarosław Hartwich** ([github.com/jarx-dev](https://github.com/jarx-dev)).
 To samo znajdziesz w programie: menu ☰ → „O programie”.
 
+Jeśli Poczta Ci się przydaje, możesz [postawić mi kawę](https://buymeacoffee.com/jarx) ☕
+
 <img src="docs/screenshots/about.png" width="640" alt="Okno O programie">
 
 ## Licencja
