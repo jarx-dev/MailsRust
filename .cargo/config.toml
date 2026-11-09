@@ -1,0 +1,4 @@
+# The Visual C++ runtime built into the EXE: it starts on a Windows without the
+# "Microsoft Visual C++ Redistributable" (otherwise: "VCRUNTIME140.dll was not found").
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
