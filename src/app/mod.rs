@@ -385,6 +385,9 @@ pub struct MailApp {
     hidden: bool,
     /// started into the tray (`--tray`): the window to be hidden after its first frame
     start_hidden: bool,
+    /// put on the taskbar by new mail behind winit's back (`show_minimized`): once opened from
+    /// there, winit is told the window is visible, or its next change would hide it again
+    shown_by_mail: bool,
     /// shown again: the keyboard to come once the window is no longer minimized
     focus_pending: bool,
     /// the password that `password_saved` holds encrypted
@@ -567,6 +570,7 @@ impl MailApp {
             quitting: false,
             hidden: false,
             start_hidden: false,
+            shown_by_mail: false,
             focus_pending: false,
             db_dirty: true,
             touched: true,
@@ -1505,6 +1509,10 @@ impl eframe::App for MailApp {
         if self.start_hidden && self.drawn >= 1 {
             self.start_hidden = false;
             self.hide_window(ctx);
+        }
+        if self.shown_by_mail && !ctx.input(|i| i.viewport().minimized.unwrap_or(true)) {
+            self.shown_by_mail = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         }
         if self.focus_pending && !ctx.input(|i| i.viewport().minimized.unwrap_or(true)) {
             self.focus_pending = false;
