@@ -608,11 +608,12 @@ impl MailApp {
             let offer = marked || self.waits_for_reply(&m);
             let tr_tip = if self.show_translated.contains(&m.id) { "Pokaż oryginał" } else { "Przetłumacz na polski (AI)" };
             let nr_tip = if marked { "Oznaczono: nie wymaga odpowiedzi — kliknij, aby cofnąć" } else { "Nie wymaga odpowiedzi (ukryj na liście „Bez odpowiedzi”)" };
-            let icon_rect = Rect::from_min_max(Pos2::new(sr.right() - 380.0, sr.top() + 26.0), Pos2::new(sr.right() + 6.0, sr.top() + 56.0));
+            let wide = sr.width() > 640.0;
+            let icon_rect = Rect::from_min_max(Pos2::new(sr.right() - 420.0, sr.top() + 26.0), Pos2::new(sr.right() + 6.0, sr.top() + 56.0));
             let buttons = ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect).layout(Layout::right_to_left(Align::Center)), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    let mut icon = |ui: &mut Ui, k: usize, glyph: &str, tip: &str| -> egui::Response {
-                        let (rr, resp) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
+                    let icon = |ui: &mut Ui, k: usize, glyph: &str, tip: &str| -> egui::Response {
+                        let (rr, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
                         if resp.hovered() {
                             ui.painter().rect_filled(rr, CornerRadius::same(5), HOVER());
                         }
@@ -620,6 +621,8 @@ impl MailApp {
                             // a tick: no reply needed (coloured when marked)
                             let col = if marked { Color32::from_rgb(0x8E, 0x5B, 0xD0) } else { MUTED() };
                             ui.painter().text(rr.center(), Align2::CENTER_CENTER, ic::CHECK, FontId::proportional(16.0), col);
+                        } else if k == 7 && m.flagged {
+                            paint_icon(ui.painter(), rr.center(), glyph, 16.0, FLAG);
                         } else {
                             paint_icon(ui.painter(), rr.center(), glyph, 16.0, MUTED());
                         }
@@ -638,10 +641,26 @@ impl MailApp {
                         }
                     }
                     egui::Popup::menu(&more).show(|ui| self.message_menu(ui, mid, read, flagged));
-                    if icon(ui, 3, ic::LINK, "Kopiuj link dla AI").clicked() {
+                    // what to do with the message (once on the top bar), next to "more"
+                    if icon(ui, 8, ic::DELETE, "Usuń (Delete)").clicked() {
+                        self.actions.push(Action::Delete(mid));
+                    }
+                    if icon(ui, 9, ic::ARCHIVE, "Archiwum").clicked() {
+                        self.actions.push(Action::Move(mid, Folder::Archive));
+                    }
+                    if icon(ui, 7, ic::FLAG, if flagged { "Usuń oznaczenie" } else { "Oznacz" }).clicked() {
+                        self.actions.push(Action::ToggleFlag(mid));
+                    }
+                    let (g, t) = if read { (ic::MAIL, "Oznacz jako nieprzeczytaną") } else { (ic::MAIL_OPEN, "Oznacz jako przeczytaną") };
+                    if icon(ui, 10, g, t).clicked() {
+                        self.actions.push(Action::SetRead(mid, !read));
+                    }
+                    ui.add_space(10.0);
+                    // a narrow pane keeps room for the address: these two stay in "more"
+                    if wide && icon(ui, 3, ic::LINK, "Kopiuj link dla AI").clicked() {
                         self.actions.push(Action::CopyForAi(m.id));
                     }
-                    if icon(ui, 4, ic::TRANSLATE, tr_tip).clicked() {
+                    if wide && icon(ui, 4, ic::TRANSLATE, tr_tip).clicked() {
                         self.actions.push(Action::Translate(m.id));
                     }
                     if offer && icon(ui, 5, "", nr_tip).clicked() {
@@ -820,7 +839,6 @@ impl MailApp {
                 let mut rect = ui.available_rect_before_wrap();
                 rect.min.x = pane_x.min;
                 rect.max.x = pane_x.max;
-                ui.painter().rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
                 ui.allocate_rect(rect, Sense::hover());
                 self.email_view(ui, &m, rect.shrink(2.0));
                 return;
@@ -834,7 +852,6 @@ impl MailApp {
                 // the newer messages of the conversation below it (never under the email view)
                 let below = self.later_height(m.id);
                 rect.max.y = (rect.max.y - below).max(rect.min.y + 120.0);
-                ui.painter().rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
                 ui.allocate_rect(rect, Sense::hover());
                 self.web_target = Some((m.id, rect.shrink(2.0)));
                 // a menu is open: the email is shown as a picture (the menu lies over it)
@@ -851,9 +868,7 @@ impl MailApp {
             let blocks = self.html_blocks(&m);
             egui::ScrollArea::vertical().id_salt(("body", m.id)).auto_shrink([false, false]).show(ui, |ui| {
                 Frame::new()
-                    .stroke(Stroke::new(1.0, BORDER()))
-                    .corner_radius(CornerRadius::same(6))
-                    .inner_margin(Margin::symmetric(26, 22))
+                    .inner_margin(Margin { left: 4, right: 4, top: 14, bottom: 18 })
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         match &blocks {

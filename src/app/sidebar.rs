@@ -264,30 +264,10 @@ impl MailApp {
             let l = |s: &'static str| if compact { "" } else { s };
             match self.module {
                 Module::Mail => {
-                    let sel = self.selected.filter(|id| self.msg(*id).is_some());
-                    let has = sel.is_some();
                     if tool_button(ui, ic::REFRESH, l("Odśwież"), true) {
                         self.actions.push(Action::SendReceive);
                     }
-                    // (reply, reply all and forward sit on the open message itself)
-                    tool_sep(ui);
-                    let sel_read = sel.and_then(|id| self.msg(id)).map(|m| m.read).unwrap_or(true);
-                    // as wide as its longer label, so the buttons after it never move
-                    let x0 = ui.cursor().left();
-                    if tool_button(ui, if sel_read { ic::MAIL } else { ic::MAIL_OPEN }, l(if sel_read { "Nieprzeczytana" } else { "Przeczytana" }), has) {
-                        self.actions.push(Action::SetRead(sel.unwrap(), !sel_read));
-                    }
-                    let full = text_width(ui, ic::MAIL, FontId::proportional(16.0)) + text_width(ui, l("Nieprzeczytana"), FontId::proportional(13.5)) + 20.0;
-                    ui.add_space((x0 + full - ui.cursor().left()).max(0.0));
-                    if tool_button(ui, ic::FLAG, l("Oznacz"), has) {
-                        self.actions.push(Action::ToggleFlag(sel.unwrap()));
-                    }
-                    if tool_button(ui, ic::ARCHIVE, l("Archiwum"), has) {
-                        self.actions.push(Action::Move(sel.unwrap(), Folder::Archive));
-                    }
-                    if tool_button(ui, ic::DELETE, l("Usuń"), has) {
-                        self.actions.push(Action::Delete(sel.unwrap()));
-                    }
+                    // (what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}
                 Module::Calendar => {
@@ -506,80 +486,6 @@ impl MailApp {
             self.search.clear();
             self.selected = self.visible_ids().first().copied();
         }
-        // Tags (Gmail labels), with how many messages carry each (favourites have their own row).
-        let mut tags = counts.tags.clone();
-        tags.remove(FAVOURITES);
-        if !tags.is_empty() {
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
-            }
-            let p = ui.painter();
-            chevron(p, Pos2::new(r.left() + 14.0, r.center().y), self.tags_open, MUTED());
-            draw_tag_icon(p, Pos2::new(r.left() + 33.0, r.center().y), MUTED());
-            let tr = p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, "Tagi", FontId::proportional(14.0), TEXT());
-            if !self.store.extra.is_empty() {
-                // several accounts: whose tags these are
-                let a = self.account_ref(self.view_account);
-                let who = if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() };
-                let room = r.right() - tr.right() - 16.0;
-                line(p, Pos2::new(tr.right() + 6.0, r.center().y - 8.0), &format!("· {}", who), 12.5, MUTED(), room);
-            }
-            if resp.clicked() {
-                self.tags_open = !self.tags_open;
-                self.save_now = true;
-            }
-            if self.tags_open {
-                // Nested tags ("n8n/Support") are grouped under their parent ("n8n").
-                let mut top: std::collections::BTreeMap<String, (Option<usize>, Vec<(String, usize)>)> = Default::default();
-                for (name, n) in tags {
-                    match name.split_once('/') {
-                        Some((parent, _)) => top.entry(parent.to_string()).or_default().1.push((name, n)),
-                        None => top.entry(name.clone()).or_default().0 = Some(n),
-                    }
-                }
-                // groups (folders of tags) first, then single tags; each alphabetically, without
-                // minding capital letters or Polish letters
-                let mut top: Vec<(String, (Option<usize>, Vec<(String, usize)>))> = top.into_iter().collect();
-                top.sort_by_cached_key(|(name, (_, children))| (children.is_empty(), sort_key(&display_label(name))));
-                for (_, (_, children)) in top.iter_mut() {
-                    children.sort_by_cached_key(|(name, _)| sort_key(&display_label(name)));
-                }
-                for (parent, (own, children)) in top {
-                    if children.is_empty() {
-                        self.tag_row(ui, parent.clone(), display_label(&parent), own.unwrap_or(0), 0, true);
-                        continue;
-                    }
-                    // the group's own row shows every message with any tag inside it
-                    let total = counts.group_total.get(&parent).copied().unwrap_or(0);
-                    let folded = self.prefs.folded_groups.contains(&parent);
-                    let row_top = ui.cursor().top();
-                    self.tag_row(ui, format!("{parent}/"), display_label(&parent), total, 0, false);
-                    // a small arrow in front of the group folds or unfolds its tags
-                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 14.0), Vec2::splat(20.0));
-                    let ar = ui.interact(arrow, id(("fold-group", parent.as_str())), Sense::click());
-                    if ar.hovered() {
-                        ui.painter().rect_filled(arrow, CornerRadius::same(4), HOVER());
-                    }
-                    chevron(ui.painter(), arrow.center(), !folded, if ar.hovered() { ACCENT() } else { MUTED() });
-                    if ar.on_hover_text(if folded { "Rozwiń" } else { "Zwiń" }).clicked() {
-                        if folded {
-                            self.prefs.folded_groups.retain(|g| *g != parent);
-                        } else {
-                            self.prefs.folded_groups.push(parent.clone());
-                        }
-                        self.save_now = true;
-                    }
-                    if folded {
-                        continue;
-                    }
-                    for (name, n) in children {
-                        let shown = display_label(&name);
-                        self.tag_row(ui, name, shown, n, 1, true);
-                    }
-                }
-            }
-        }
         ui.add_space(8.0);
         // Account group
         let acc_name = self.store.account.display_name.clone();
@@ -684,6 +590,81 @@ impl MailApp {
                         if let Some(id) = self.selected {
                             self.actions.push(Action::Show(id));
                         }
+                    }
+                }
+            }
+        }
+        ui.add_space(8.0);
+        // Tags (Gmail labels), with how many messages carry each (favourites have their own row).
+        let mut tags = counts.tags.clone();
+        tags.remove(FAVOURITES);
+        if !tags.is_empty() {
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            if resp.hovered() {
+                ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
+            }
+            let p = ui.painter();
+            chevron(p, Pos2::new(r.left() + 14.0, r.center().y), self.tags_open, MUTED());
+            draw_tag_icon(p, Pos2::new(r.left() + 33.0, r.center().y), MUTED());
+            let tr = p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, "Tagi", FontId::proportional(14.0), TEXT());
+            if !self.store.extra.is_empty() {
+                // several accounts: whose tags these are
+                let a = self.account_ref(self.view_account);
+                let who = if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() };
+                let room = r.right() - tr.right() - 16.0;
+                line(p, Pos2::new(tr.right() + 6.0, r.center().y - 8.0), &format!("· {}", who), 12.5, MUTED(), room);
+            }
+            if resp.clicked() {
+                self.tags_open = !self.tags_open;
+                self.save_now = true;
+            }
+            if self.tags_open {
+                // Nested tags ("n8n/Support") are grouped under their parent ("n8n").
+                let mut top: std::collections::BTreeMap<String, (Option<usize>, Vec<(String, usize)>)> = Default::default();
+                for (name, n) in tags {
+                    match name.split_once('/') {
+                        Some((parent, _)) => top.entry(parent.to_string()).or_default().1.push((name, n)),
+                        None => top.entry(name.clone()).or_default().0 = Some(n),
+                    }
+                }
+                // groups (folders of tags) first, then single tags; each alphabetically, without
+                // minding capital letters or Polish letters
+                let mut top: Vec<(String, (Option<usize>, Vec<(String, usize)>))> = top.into_iter().collect();
+                top.sort_by_cached_key(|(name, (_, children))| (children.is_empty(), sort_key(&display_label(name))));
+                for (_, (_, children)) in top.iter_mut() {
+                    children.sort_by_cached_key(|(name, _)| sort_key(&display_label(name)));
+                }
+                for (parent, (own, children)) in top {
+                    if children.is_empty() {
+                        self.tag_row(ui, parent.clone(), display_label(&parent), own.unwrap_or(0), 0, true);
+                        continue;
+                    }
+                    // the group's own row shows every message with any tag inside it
+                    let total = counts.group_total.get(&parent).copied().unwrap_or(0);
+                    let folded = self.prefs.folded_groups.contains(&parent);
+                    let row_top = ui.cursor().top();
+                    self.tag_row(ui, format!("{parent}/"), display_label(&parent), total, 0, false);
+                    // a small arrow in front of the group folds or unfolds its tags
+                    let arrow = Rect::from_center_size(Pos2::new(ui.max_rect().left() + 28.0, row_top + 14.0), Vec2::splat(20.0));
+                    let ar = ui.interact(arrow, id(("fold-group", parent.as_str())), Sense::click());
+                    if ar.hovered() {
+                        ui.painter().rect_filled(arrow, CornerRadius::same(4), HOVER());
+                    }
+                    chevron(ui.painter(), arrow.center(), !folded, if ar.hovered() { ACCENT() } else { MUTED() });
+                    if ar.on_hover_text(if folded { "Rozwiń" } else { "Zwiń" }).clicked() {
+                        if folded {
+                            self.prefs.folded_groups.retain(|g| *g != parent);
+                        } else {
+                            self.prefs.folded_groups.push(parent.clone());
+                        }
+                        self.save_now = true;
+                    }
+                    if folded {
+                        continue;
+                    }
+                    for (name, n) in children {
+                        let shown = display_label(&name);
+                        self.tag_row(ui, name, shown, n, 1, true);
                     }
                 }
             }
