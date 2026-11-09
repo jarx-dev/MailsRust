@@ -390,6 +390,9 @@ pub struct MailApp {
     /// put on the taskbar by new mail behind winit's back (`show_minimized`): once opened from
     /// there, winit is told the window is visible, or its next change would hide it again
     shown_by_mail: bool,
+    /// the window's place, size and maximized state as eframe last stored them while it was on
+    /// screen (see `save_to`)
+    last_window: Option<String>,
     /// shown again: the keyboard to come once the window is no longer minimized
     focus_pending: bool,
     /// the password that `password_saved` holds encrypted
@@ -574,6 +577,7 @@ impl MailApp {
             hidden: false,
             start_hidden: false,
             shown_by_mail: false,
+            last_window: cc.storage.and_then(|s| s.get_string("window")),
             focus_pending: false,
             db_dirty: true,
             touched: true,
@@ -1003,6 +1007,17 @@ tel.: 600-100-200".into();
 
     /// Writes the mailbox and account to disk; the password only in its Windows-encrypted form.
     fn save_to(&mut self, storage: &mut dyn eframe::Storage) {
+        // eframe has just stored the window as Windows reports it. Minimized or in the tray that
+        // is no place, no size and "not maximized", so after a restart (an update comes while the
+        // app is in the background) the window came back small, elsewhere and not maximized; the
+        // last state from the screen is kept instead
+        // shortcut: eframe stores the window every 30 s, so a change in the last 30 s before the
+        // window left the screen is not kept; store it on minimize/hide if that turns out to matter
+        if self.main_hwnd.is_some_and(window_on_screen) {
+            self.last_window = storage.get_string("window");
+        } else if let Some(w) = &self.last_window {
+            storage.set_string("window", w.clone());
+        }
         // nothing to save before the mailbox has been read (it would overwrite it with nothing),
         // nor from a second window of the app
         if self.shot.is_some() || self.loading.is_some() || self.read_only {

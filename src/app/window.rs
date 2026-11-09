@@ -572,6 +572,21 @@ pub(super) fn show_minimized(h: isize) {
     let _ = h;
 }
 
+/// Window `h` on screen: visible and not minimized (Windows' own answer, which winit's flags
+/// don't always match, see `shown_by_mail`).
+pub(super) fn window_on_screen(h: isize) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
+        return IsWindowVisible(h as _) != 0 && IsIconic(h as _) == 0;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = h;
+        true
+    }
+}
+
 pub(super) fn bring_to_front(h: isize) {
     #[cfg(windows)]
     unsafe {
