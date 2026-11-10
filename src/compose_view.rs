@@ -224,7 +224,8 @@ impl ComposeView {
                     nav_ctx.request_repaint();
                     return false;
                 }
-                if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+                // (not in a test run: a quoted mail can navigate by itself)
+                if !crate::unseen() && (url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:")) {
                     let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
                 }
                 false

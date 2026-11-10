@@ -61,8 +61,19 @@ fn main() -> eframe::Result<()> {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
+    // a test, often on a machine someone is using, is unseen unless POCZTA_VISIBLE=1; a timed run only
+    // with its own data folder, or an unseen copy on the real mailbox would swallow every later start
+    let timed = std::env::var("POCZTA_CLOSE_AFTER_MS").ok().and_then(|v| v.parse::<u128>().ok()).is_some();
+    let test_run = shot.is_some() || (timed && std::env::var_os("POCZTA_DATA_DIR").is_some());
+    let unseen = test_run && std::env::var("POCZTA_VISIBLE").as_deref() != Ok("1");
+    // (set before the command-line checks: one of them signs in through the browser)
+    UNSEEN.store(unseen, std::sync::atomic::Ordering::Relaxed);
     if cli::run(&args) {
         return Ok(());
+    }
+    #[cfg(windows)]
+    if unseen {
+        keep_windows_unseen();
     }
 
     // one copy of the program: started again, it brings the running one to the front and ends
@@ -94,16 +105,24 @@ fn main() -> eframe::Result<()> {
     let t = std::time::Instant::now();
     let icon = icon::icon_data();
     diag::took("startup: window icon", t, "");
+    // a picture never restores the saved window: a window maximized after its first frames was
+    // pictured at its old size (the drawable did not follow), so it opens at its final size
+    let shot_settings = shot.as_ref().map(|_| std::env::temp_dir().join("poczta-screenshot-app.ron"));
+    if let Some(p) = &shot_settings {
+        let _ = std::fs::remove_file(p);
+    }
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1376.0, 720.0])
             .with_min_inner_size([960.0, 560.0])
             .with_title("Poczta")
             .with_decorations(false)
+            .with_active(!unseen)
+            .with_taskbar(!unseen)
             .with_icon(icon),
         persist_window: shot.is_none(),
         // Tests can use a separate data folder so the person's own settings stay untouched.
-        persistence_path: std::env::var("POCZTA_DATA_DIR").ok().map(|d| PathBuf::from(d).join("app.ron")),
+        persistence_path: shot_settings.or_else(|| std::env::var("POCZTA_DATA_DIR").ok().map(|d| PathBuf::from(d).join("app.ron"))),
         ..Default::default()
     };
     diag::took("startup: program ready to open its window", launched, "");
@@ -119,6 +138,54 @@ fn main() -> eframe::Result<()> {
     );
     diag::log("closing: app finished");
     r
+}
+
+static UNSEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A test run that nobody may see: no window on screen, no tray icon, no sound or note.
+pub fn unseen() -> bool {
+    UNSEEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Every top-level window of this (the UI) thread is DWM-cloaked before it shows, so it is drawn as
+/// usual but never seen, and is never activated. Hooks, because eframe makes the extra windows itself.
+#[cfg(windows)]
+fn keep_windows_unseen() {
+    use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, GetWindowLongW, SetWindowsHookExW, CWPSTRUCT, GWL_STYLE, HCBT_ACTIVATE, WH_CALLWNDPROC, WH_CBT, WM_CREATE, WM_SHOWWINDOW, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WS_CHILD,
+    };
+    unsafe extern "system" fn on_message(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if code >= 0 {
+            let m = unsafe { &*(l as *const CWPSTRUCT) };
+            // again before every show, move or resize: egui-winit takes the cloak off itself after restoring a saved maximized window
+            let showing = matches!(m.message, WM_CREATE | WM_SHOWWINDOW | WM_WINDOWPOSCHANGING | WM_WINDOWPOSCHANGED);
+            if showing && unsafe { GetWindowLongW(m.hwnd, GWL_STYLE) } as u32 & WS_CHILD == 0 {
+                let on: i32 = 1;
+                unsafe { DwmSetWindowAttribute(m.hwnd, DWMWA_CLOAK as _, &on as *const i32 as *const _, 4) };
+            }
+        }
+        unsafe { CallNextHookEx(std::ptr::null_mut(), code, w, l) }
+    }
+    unsafe extern "system" fn on_cbt(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        // nonzero refuses the activation: the person's own window keeps the front and the keyboard
+        if code == HCBT_ACTIVATE as i32 {
+            return 1;
+        }
+        unsafe { CallNextHookEx(std::ptr::null_mut(), code, w, l) }
+    }
+    unsafe {
+        let me = GetCurrentThreadId();
+        let calls = SetWindowsHookExW(WH_CALLWNDPROC, Some(on_message), std::ptr::null_mut(), me);
+        let cbt = SetWindowsHookExW(WH_CBT, Some(on_cbt), std::ptr::null_mut(), me);
+        // without a hook the test windows would show and take the front: the run ends instead
+        if calls.is_null() || cbt.is_null() {
+            diag::log("ERROR startup: hiding the test windows failed (SetWindowsHookExW), test run not started");
+            std::process::exit(3);
+        }
+    }
 }
 
 /// The settings without their "window" entry when the saved window is too small to use.

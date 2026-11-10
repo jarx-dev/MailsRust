@@ -150,6 +150,10 @@ pub fn open_url(url: &str) {
 }
 
 fn open_browser(url: &str) -> Result<(), String> {
+    // a test run never opens a browser on the screen of whoever uses the machine
+    if crate::unseen() {
+        return Err("przebieg testowy nie otwiera przeglądarki (POCZTA_VISIBLE=1)".into());
+    }
     // rundll32 hands the address to the default browser without going through a shell,
     // so the "&" characters in it are safe.
     std::process::Command::new("rundll32")

@@ -109,6 +109,10 @@ fn bounds(r: egui::Rect) -> wry::Rect {
 }
 
 fn open_outside(url: &str) {
+    // a test run never opens a browser on the screen of whoever uses the machine
+    if crate::unseen() {
+        return;
+    }
     let _ = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();

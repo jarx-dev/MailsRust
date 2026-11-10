@@ -11,7 +11,7 @@ A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, r
 ## Commands
 
 - Build on Linux: `cargo xwin build --release --target x86_64-pc-windows-msvc`. Nothing runs on Linux, including `cargo test`; verify on Windows.
-- Test on the Windows laptop: `scripts/win-test.sh build`, then `scripts/win-test.sh run <ms> [VAR=value…]` (offline copy of the mailbox, log and CPU/RAM trace come back). Machine-specific values live in `~/.config/poczta/build.env`, never in the repo.
+- Test on the Windows laptop (the owner's working machine) only after loading the skill `win-laptop-test`; `scripts/win-test.sh`'s header has the modes. Runs are invisible by default and must stay so. After touching window creation, the hooks in `main.rs`, `win-run.cmd` or the task, `probe 300` must end with `WYNIK: NIEWIDOCZNY` and no `SESJA ZABLOKOWANA`.
 - Screenshots: `mailclient.exe --screenshot out.png` draws demo data (`Store::sample()`); `POCZTA_START=account|calendar|about|…` and `POCZTA_DARK=1` pick the state.
 - Lint: `cargo clippy --release --target x86_64-pc-windows-msvc --all-targets`. The bin has 42 known warnings; a change must not add any.
 
