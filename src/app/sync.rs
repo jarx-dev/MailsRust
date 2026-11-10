@@ -17,7 +17,7 @@ impl MailApp {
         // with no pointer over it either: the new build starts minimized
         let behind = !focused && !self.hidden && self.clock() - self.last_input > 120.0;
         let quiet = self.hidden || minimized || behind || self.clock() - self.last_input > 600.0;
-        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some();
+        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some() || self.chat_holds_text();
         // forms hold their text only in memory; reading windows get input the main window doesn't see
         let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
         if !quiet || working || open {
@@ -260,7 +260,7 @@ specjalista ds. Informatyki".into();
             self.popup_click.0.clone(),
             self.ctx.clone(),
         );
-        self.popup = Some(NewMail { ids });
+        self.popup = Some(NewMail { ids, chat: None });
         self.ctx.request_repaint();
     }
 
@@ -902,6 +902,11 @@ specjalista ds. Informatyki".into();
                     let a = &mut self.store.account;
                     a.oauth_refresh_token = r.refresh_token;
                     a.oauth_scopes = r.scopes;
+                    // without the id token the account kind stays as it was known
+                    if !r.sub.is_empty() {
+                        a.google_hd = Some(r.hd);
+                        a.google_sub = r.sub;
+                    }
                     // calendar and contacts read at once with the new permissions
                     self.gcal_last = -1e9;
                     self.book_last = -1e9;
