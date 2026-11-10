@@ -341,6 +341,9 @@ impl MailApp {
         let mut changed = false;
         changed |= ui.checkbox(&mut self.prefs.google_calendar, "Synchronizuj kalendarz z Google").changed();
         changed |= ui.checkbox(&mut self.prefs.google_contacts, "Synchronizuj kontakty i grupy z Google").changed();
+        if a.google_hd.as_deref().is_some_and(|d| !d.is_empty()) && ui.checkbox(&mut self.prefs.google_chat, "Czat Google w programie (konto Google Workspace)").changed() {
+            self.save_now = true;
+        }
         if changed {
             self.save_now = true;
             self.gcal_last = -1e9;

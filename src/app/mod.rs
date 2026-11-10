@@ -35,6 +35,9 @@ use actions::*;
 mod contacts_ui;
 use contacts_ui::*;
 
+mod chat_ui;
+use chat_ui::*;
+
 mod settings;
 
 mod window;
@@ -78,6 +81,8 @@ struct Prefs {
     /// the calendar and the contacts shared with Google (through the Google sign-in)
     google_calendar: bool,
     google_contacts: bool,
+    /// Google Chat in the app (Google Workspace accounts)
+    google_chat: bool,
 }
 
 impl Default for Prefs {
@@ -101,6 +106,7 @@ impl Default for Prefs {
             no_reply_needed: vec![],
             google_calendar: true,
             google_contacts: true,
+            google_chat: true,
         }
     }
 }
@@ -114,6 +120,7 @@ enum Module {
     Mail,
     Calendar,
     Contacts,
+    Chat,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,9 +129,11 @@ enum SideMode {
     Agenda,
 }
 
-/// New mail just received, told about in a note in the corner of the screen.
+/// New mail (or a chat message) just received, told about in a note in the corner of the screen.
 struct NewMail {
     ids: Vec<u64>,
+    /// the chat conversation the note is about
+    chat: Option<String>,
 }
 
 /// A small outlined folder symbol for a group of tags.
@@ -361,6 +370,8 @@ pub struct MailApp {
     badge_at: f64,
     /// the note about new mail in the corner of the screen
     popup: Option<NewMail>,
+    /// Google Chat (see chat_ui.rs)
+    chat: ChatState,
     /// a short, clearly visible note at the top of the window ("Skopiowano do schowka"): text,
     /// and when it appeared (the app's clock)
     flash: Option<(String, f64)>,
@@ -557,6 +568,7 @@ impl MailApp {
             main_hwnd: None,
             badge_at: 0.0,
             popup: None,
+            chat: ChatState::default(),
             flash: None,
             popup_click: {
                 let (tx, rx) = channel();
@@ -945,6 +957,20 @@ tel.: 600-100-200".into();
         if std::env::var("POCZTA_START").as_deref() == Ok("calendar") {
             app.module = Module::Calendar;
         }
+        // test pictures of the chat: made-up conversations, or the steps that switch it on
+        if std::env::var("POCZTA_START").as_deref() == Ok("chat") && app.shot.is_some() {
+            app.module = Module::Chat;
+            app.chat_demo();
+        }
+        if std::env::var("POCZTA_START").as_deref() == Ok("chat-setup") && app.shot.is_some() {
+            app.module = Module::Chat;
+            let a = &mut app.store.account;
+            a.use_oauth = true;
+            a.oauth_refresh_token = "test".into();
+            a.oauth_client_id = "test.apps.googleusercontent.com".into();
+            a.google_hd = Some("example.com".into());
+            a.oauth_scopes = "https://mail.google.com/ openid email profile".into();
+        }
         if app.selected.is_none() {
             app.selected = app.visible_ids().first().copied();
         }
@@ -1211,6 +1237,12 @@ impl eframe::App for MailApp {
                     .frame(Frame::new().fill(BG()).inner_margin(Margin::symmetric(14, 10)))
                     .show(ui, |ui| self.contacts_main(ui));
             }
+            Module::Chat => {
+                egui::CentralPanel::default().frame(Frame::new().fill(BG())).show(ui, |ui| {
+                    let _p = crate::prof::span("chat");
+                    self.chat_main(ui)
+                });
+            }
             Module::Calendar => {
                 egui::CentralPanel::default()
                     .frame(Frame::new().fill(BG()).inner_margin(Margin::symmetric(14, 10)))
@@ -1446,6 +1478,7 @@ impl eframe::App for MailApp {
         }
         self.gcal_tick();
         self.book_tick();
+        self.chat_tick();
         if std::env::var("POCZTA_NOTIFY_TEST").is_ok() {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
@@ -1475,11 +1508,16 @@ impl eframe::App for MailApp {
         if self.popup_click.1.try_iter().count() > 0 {
             if let Some(p) = self.popup.take() {
                 self.show_window(ctx);
-                self.module = Module::Mail;
-                self.view = MailView::Folder(Folder::Inbox);
-                self.search.clear();
-                if let Some(id) = p.ids.first() {
-                    self.actions.push(Action::Select(*id));
+                if let Some(space) = p.chat {
+                    self.module = Module::Chat;
+                    self.chat_open(space);
+                } else {
+                    self.module = Module::Mail;
+                    self.view = MailView::Folder(Folder::Inbox);
+                    self.search.clear();
+                    if let Some(id) = p.ids.first() {
+                        self.actions.push(Action::Select(*id));
+                    }
                 }
             }
         }
@@ -1566,6 +1604,10 @@ impl eframe::App for MailApp {
         let t = std::time::Instant::now();
         let closed = self.db.take().is_some_and(|d| d.close());
         crate::diag::took("closing: database closed", t, if closed { "" } else { "NOT closed (still in use)" });
+        let t = std::time::Instant::now();
+        if crate::chat::close() {
+            crate::diag::took("closing: chat database closed", t, "");
+        }
         crate::diag::log("closing: saved, ending the app");
         std::process::exit(0);
     }

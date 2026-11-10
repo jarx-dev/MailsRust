@@ -4,6 +4,74 @@ use crate::*;
 
 /// Runs the command-line check named in `args`; `true` when one ran (no window is opened then).
 pub fn run(args: &[String]) -> bool {
+    if args.iter().any(|a| a == "--chat-check") {
+        // A live check of the chat: a browser sign-in adding the chat scopes (the token stays in
+        // memory), one round, then the first conversation opened. Sends nothing, marks nothing
+        // read, touches no mail, and logs counts only. The chat cache (chat.redb) is written.
+        let Some(mut store) = db::Db::open().ok().and_then(|mut d| d.load()) else {
+            println!("no saved mailbox");
+            return true;
+        };
+        let a = &mut store.account;
+        let scopes = format!("{} {}", oauth::SCOPES, chat::SCOPES);
+        match oauth::login_scopes(&a.oauth_client_id, &a.oauth_client_secret, &scopes) {
+            Ok(r) if r.email.eq_ignore_ascii_case(&a.email) => {
+                diag::log(format!("chat check: signed in, Workspace domain {:?}, chat allowed: {}", r.hd, r.scopes.contains(chat::SCOPE_READ)));
+                a.oauth_refresh_token.clone_from(&r.refresh_token);
+                a.oauth_scopes = r.scopes;
+                if !r.sub.is_empty() {
+                    a.google_hd = Some(r.hd);
+                    a.google_sub = r.sub;
+                }
+            }
+            Ok(r) => {
+                diag::log(format!("chat check: another Google account was picked ({})", r.email));
+                return true;
+            }
+            Err(e) => {
+                diag::log(format!("chat check: sign-in failed: {e}"));
+                return true;
+            }
+        }
+        let (tx, rx) = chat::start(store.account.clone(), eframe::egui::Context::default());
+        let _ = tx.send(chat::Cmd::Pace(chat::Pace::Background));
+        // the list comes before the round's end: the newest one is kept while waiting
+        let mut rows: Vec<chat::Row> = vec![];
+        let wait = |what: &str, done: &dyn Fn(&chat::Update) -> bool, rows: &mut Vec<chat::Row>| -> Option<chat::Update> {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(180);
+            while let Ok(u) = rx.recv_timeout(until.saturating_duration_since(std::time::Instant::now())) {
+                if done(&u) {
+                    return Some(u);
+                }
+                if let chat::Update::Rows(r) = u {
+                    *rows = r;
+                }
+            }
+            diag::log(format!("chat check: no {what} in time"));
+            None
+        };
+        if let Some(chat::Update::Done(r)) = wait("round", &|u| matches!(u, chat::Update::Done(_)), &mut rows) {
+            diag::log(format!("chat check: round {}", r.map(|_| "ok".to_string()).unwrap_or_else(|e| e)));
+        }
+        let first = rows.first().map(|r| r.name.clone());
+        let named = rows.iter().filter(|r| r.title != "Rozmowa").count();
+        diag::log(format!(
+            "chat check: {} conversations ({named} named, {} with people from outside), {} unread",
+            rows.len(),
+            rows.iter().filter(|r| r.external).count(),
+            rows.iter().map(|r| r.unread).sum::<usize>()
+        ));
+        if let Some(first) = first {
+            let t = std::time::Instant::now();
+            let _ = tx.send(chat::Cmd::Open(first));
+            if let Some(chat::Update::Messages(_, m)) = wait("messages", &|u| matches!(u, chat::Update::Messages(..)), &mut rows) {
+                diag::took("chat check: newest conversation opened", t, format!("{} messages", m.len()));
+            }
+        }
+        drop(tx);
+        chat::close();
+        return true;
+    }
     if args.iter().any(|a| a == "--sync-benchmark") {
         // Read-only speed test with the account saved in the app (see net::benchmark).
         let store = db::Db::open().ok().and_then(|mut d| d.load()).or_else(|| {

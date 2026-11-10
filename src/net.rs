@@ -141,6 +141,27 @@ pub fn google_sign_in(client_id: String, client_secret: String, tx: Sender<NetRe
     });
 }
 
+/// The same sign-in once more, adding the chat to what was allowed. It must be the same Google
+/// account as the mail's: another one would take the mailbox over.
+pub fn google_sign_in_chat(client_id: String, client_secret: String, email: String, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
+    std::thread::spawn(move || {
+        let scopes = format!("{} {}", crate::oauth::SCOPES, crate::chat::SCOPES);
+        let res = match crate::oauth::login_scopes(&client_id, &client_secret, &scopes) {
+            Ok(r) if !email.is_empty() && !r.email.eq_ignore_ascii_case(&email) => {
+                NetResult::SignInFailed(format!("wybrano w przeglądarce inne konto Google ({}) niż konto poczty ({email}) — zaloguj się kontem {email}", r.email))
+            }
+            // the new token replaces the mail one: without mail access (unticked on Google's page) it would cut the mail off
+            Ok(r) if !r.scopes.split_whitespace().any(|s| s == "https://mail.google.com/") => {
+                NetResult::SignInFailed("na stronie Google odznaczono dostęp do poczty — zaloguj się ponownie i zostaw wszystkie pola zaznaczone".into())
+            }
+            Ok(r) => NetResult::SignedIn(r),
+            Err(e) => NetResult::SignInFailed(e),
+        };
+        let _ = tx.send(res);
+        ctx.request_repaint();
+    });
+}
+
 /// Downloads a picture linked from an email (at most 8 MB).
 pub fn fetch_image(url: String, tx: Sender<(String, Option<std::sync::Arc<[u8]>>)>, ctx: eframe::egui::Context) {
     std::thread::spawn(move || {
