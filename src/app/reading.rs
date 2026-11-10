@@ -1014,6 +1014,8 @@ impl MailApp {
                 .with_inner_size([860.0, 720.0])
                 .with_min_inner_size([420.0, 300.0])
                 .with_decorations(false)
+                .with_active(!crate::unseen())
+                .with_taskbar(!crate::unseen())
                 .with_icon(self.icon.clone());
             if let Some(main) = main_pos {
                 builder = builder.with_position(main + Vec2::new(260.0 + 30.0 * i as f32, 40.0 + 30.0 * i as f32));
@@ -1179,6 +1181,8 @@ impl MailApp {
                 .with_inner_size([980.0, 760.0])
                 .with_min_inner_size([420.0, 300.0])
                 .with_decorations(false)
+                .with_active(!crate::unseen())
+                .with_taskbar(!crate::unseen())
                 .with_icon(self.icon.clone());
             if let Some(main) = main_pos {
                 builder = builder.with_position(main + Vec2::new(220.0 + 30.0 * i as f32, 30.0 + 30.0 * i as f32));

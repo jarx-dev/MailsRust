@@ -32,7 +32,7 @@ anyrender_vello_cpu = "0.7"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Memory", "Win32_System_Com", "Win32_Media_Audio", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Memory", "Win32_System_Com", "Win32_Media_Audio", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm","Win32_UI_HiDpi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"] }
 raw-window-handle = "0.6"
 wry = { version = "0.57", default-features = false }
 # (the same versions wry uses) a picture of the email view, shown under menus

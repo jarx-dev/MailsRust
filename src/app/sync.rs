@@ -215,7 +215,7 @@ specjalista ds. Informatyki".into();
     /// taskbar minimized (without taking the keyboard), so the new mail shows there.
     pub(super) fn new_mail(&mut self, ids: Vec<u64>) {
         crate::diag::log(format!("new mail: {} unread", ids.len()));
-        if !self.prefs.notify || ids.is_empty() {
+        if !self.prefs.notify || ids.is_empty() || crate::unseen() {
             return;
         }
         crate::notify::sound();

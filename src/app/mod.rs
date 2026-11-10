@@ -436,7 +436,7 @@ impl MailApp {
         };
         let (tx, rx) = channel();
         let (img_tx, img_rx) = channel();
-        let tray = if shot.is_none() { make_tray(&cc.egui_ctx) } else { (None, channel().1) };
+        let tray = if shot.is_none() && !crate::unseen() { make_tray(&cc.egui_ctx) } else { (None, channel().1) };
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let today = Local::now().date_naive();
         let mut app = Self {

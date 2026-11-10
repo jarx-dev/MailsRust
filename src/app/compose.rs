@@ -362,6 +362,8 @@ impl MailApp {
                 .with_inner_size([680.0, 660.0])
                 .with_min_inner_size([420.0, 300.0])
                 .with_decorations(false)
+                .with_active(!crate::unseen())
+                .with_taskbar(!crate::unseen())
                 .with_icon(self.icon.clone());
             if let Some(main) = main_pos {
                 builder = builder.with_position(main + Vec2::new(380.0 + 30.0 * i as f32, 60.0 + 30.0 * i as f32));
@@ -640,7 +642,7 @@ impl MailApp {
                                         // a reply starts in the text, unless a field above is already being typed in
                                         if !c.to.trim().is_empty() && ui.ctx().memory(|m| m.focused().is_none()) {
                                             c.editor_clicked = true;
-                                            v.focus();
+                                            if !crate::unseen() { v.focus(); } // a test run asks for no focus at all
                                         }
                                         c.web = Some(v);
                                     }
@@ -868,7 +870,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                                 if c.focus_editor && !covered {
                                     c.focus_editor = false;
                                     c.editor_clicked = true;
-                                    v.focus();
+                                    if !crate::unseen() { v.focus(); } // a test run asks for no focus at all
                                 }
                             }
                         }

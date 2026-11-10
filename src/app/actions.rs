@@ -85,8 +85,10 @@ impl MailApp {
                 }
                 Action::OpenWindow(id) => {
                     if let Some(r) = self.readers.iter().find(|r| r.msg.id == id) {
-                        // already open: brought to the front
-                        self.ctx.send_viewport_cmd_to(egui::ViewportId::from_hash_of(("reader", r.key)), egui::ViewportCommand::Focus);
+                        // already open: brought to the front (not in a test run, see show_window)
+                        if !crate::unseen() {
+                            self.ctx.send_viewport_cmd_to(egui::ViewportId::from_hash_of(("reader", r.key)), egui::ViewportCommand::Focus);
+                        }
                     } else {
                         self.ensure_body(id);
                         if let Some(m) = self.msg(id).cloned() {

@@ -268,10 +268,14 @@ impl MailApp {
         self.shown_by_mail = false;
         self.hidden = false;
         self.start_hidden = false;
-        // (Windows skips the focus while the window is still minimized: asked again once it isn't)
-        self.focus_pending = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        // winit's Focus presses Alt (SendInput) and asks for the foreground: never in a test run
+        if crate::unseen() {
+            return;
+        }
+        // (Windows skips the focus while the window is still minimized: asked again once it isn't)
+        self.focus_pending = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
@@ -588,6 +592,10 @@ pub(super) fn window_on_screen(h: isize) -> bool {
 }
 
 pub(super) fn bring_to_front(h: isize) {
+    // a test run never asks for the foreground
+    if crate::unseen() {
+        return;
+    }
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
