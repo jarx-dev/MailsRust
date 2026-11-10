@@ -61,15 +61,16 @@ fn main() -> eframe::Result<()> {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
-    if cli::run(&args) {
-        return Ok(());
-    }
     // a test, often on a machine someone is using, is unseen unless POCZTA_VISIBLE=1; a timed run only
     // with its own data folder, or an unseen copy on the real mailbox would swallow every later start
     let timed = std::env::var("POCZTA_CLOSE_AFTER_MS").ok().and_then(|v| v.parse::<u128>().ok()).is_some();
     let test_run = shot.is_some() || (timed && std::env::var_os("POCZTA_DATA_DIR").is_some());
     let unseen = test_run && std::env::var("POCZTA_VISIBLE").as_deref() != Ok("1");
+    // (set before the command-line checks: one of them signs in through the browser)
     UNSEEN.store(unseen, std::sync::atomic::Ordering::Relaxed);
+    if cli::run(&args) {
+        return Ok(());
+    }
     #[cfg(windows)]
     if unseen {
         keep_windows_unseen();
