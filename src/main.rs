@@ -159,7 +159,7 @@ fn keep_windows_unseen() {
     unsafe extern "system" fn on_message(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         if code >= 0 {
             let m = unsafe { &*(l as *const CWPSTRUCT) };
-            // again before every show, move or resize: hiding a window drops its cloak (winit shows and hides it to restore a saved state)
+            // again before every show, move or resize: egui-winit takes the cloak off itself after restoring a saved maximized window
             let showing = matches!(m.message, WM_CREATE | WM_SHOWWINDOW | WM_WINDOWPOSCHANGING | WM_WINDOWPOSCHANGED);
             if showing && unsafe { GetWindowLongW(m.hwnd, GWL_STYLE) } as u32 & WS_CHILD == 0 {
                 let on: i32 = 1;
