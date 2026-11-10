@@ -260,7 +260,7 @@ impl MailApp {
     /// New messages from others while the window is not in front: a sound and a note in the corner.
     fn chat_notify(&mut self, notes: Vec<crate::chat::Note>) {
         crate::diag::log(format!("chat: {} new messages", notes.len()));
-        if !self.prefs.notify {
+        if !self.prefs.notify || crate::unseen() {
             return;
         }
         let (focused, minimized) = self.ctx.input(|i| (i.viewport().focused.unwrap_or(false), i.viewport().minimized.unwrap_or(false)));
