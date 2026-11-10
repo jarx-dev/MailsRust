@@ -27,7 +27,14 @@ pub fn token(acc: &Account) -> Result<String, String> {
     crate::oauth::access_token(&acc.oauth_client_id, &acc.oauth_client_secret, &acc.oauth_refresh_token)
 }
 
-fn agent() -> Result<ureq::Agent, String> {
+/// For a sign-in made before the app kept it: the Google Workspace domain ("" for a personal
+/// account) and the account's id.
+pub fn userinfo(acc: &Account) -> Result<(String, String), String> {
+    let v = get(&token(acc)?, "https://openidconnect.googleapis.com/v1/userinfo", "konto")?;
+    Ok((v["hd"].as_str().unwrap_or("").to_string(), v["sub"].as_str().unwrap_or("").to_string()))
+}
+
+pub(crate) fn agent() -> Result<ureq::Agent, String> {
     let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
     Ok(ureq::AgentBuilder::new()
         .tls_connector(std::sync::Arc::new(tls))
@@ -74,7 +81,7 @@ fn send(token: &str, method: &str, url: &str, body: Option<Value>, what: &str) -
     Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
 }
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

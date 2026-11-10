@@ -262,6 +262,13 @@ pub struct Account {
     /// what the Google sign-in allows (mail, calendar, contacts), separated by spaces
     #[serde(default)]
     pub oauth_scopes: String,
+    /// The Google Workspace domain of the Google sign-in ("" for a personal account, None while
+    /// not known yet): the chat is offered only to Workspace accounts.
+    #[serde(default)]
+    pub google_hd: Option<String>,
+    /// The Google account's id (the chat tells the person's own messages by it).
+    #[serde(default)]
+    pub google_sub: String,
     /// The person's signature (formatted and as text), found in their sent mail.
     #[serde(default)]
     pub signature_html: String,
@@ -299,6 +306,8 @@ impl Default for Account {
             oauth_client_secret: String::new(),
             oauth_refresh_token: String::new(),
             oauth_scopes: String::new(),
+            google_hd: None,
+            google_sub: String::new(),
             signature_html: String::new(),
             signature_text: String::new(),
             signature_images: vec![],

@@ -6,6 +6,7 @@ mod autostart;
 mod book;
 mod cli;
 mod calendar;
+mod chat;
 mod compose_view;
 mod contacts;
 mod db;

@@ -106,6 +106,8 @@ pub mod ic {
     pub const CLEAR: &str = "\u{E711}";
     pub const CHECK: &str = "\u{E8FB}";
     pub const DOWNLOAD: &str = "\u{E896}";
+    pub const CHAT: &str = "\u{E8F2}";
+    pub const ATTACH: &str = "\u{E723}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

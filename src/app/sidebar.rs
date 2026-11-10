@@ -261,6 +261,8 @@ impl MailApp {
                     Module::Mail => self.actions.push(Action::NewMessage),
                     Module::Calendar => self.editor = Some(EventEditor::new(self.cal_day, None)),
                     Module::Contacts => self.book_new_person(),
+                    // a new conversation (choosing people) is made in Google Chat itself
+                    Module::Chat => crate::oauth::open_url(crate::chat::WEB_URL),
                 }
             }
             ui.add_space(8.0);
@@ -274,6 +276,14 @@ impl MailApp {
                     // (what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}
+                Module::Chat => {
+                    if tool_button(ui, ic::REFRESH, l("Odśwież"), self.chat_ready() && !self.chat.demo) {
+                        self.chat_refresh();
+                    }
+                    if tool_button(ui, ic::OPEN, l("Google Chat"), true) {
+                        crate::oauth::open_url(crate::chat::WEB_URL);
+                    }
+                }
                 Module::Calendar => {
                     if tool_button(ui, "◎", "Dziś", true) {
                         self.cal_day = Local::now().date_naive();
@@ -392,10 +402,16 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let unread = self.counts().inbox_unread_all;
-                    for (m, icon, tip) in [(Module::Mail, ic::MAIL, "Poczta"), (Module::Calendar, ic::CALENDAR, "Kalendarz"), (Module::Contacts, ic::PERSON, "Kontakty")] {
-                        let tip = if m == Module::Mail && unread > 0 { format!("{tip} — {}", crate::notify::unread_text(unread)) } else { tip.to_string() };
-                        let resp = icon_tab(ui, icon, self.module == m, 64.0);
-                        if m == Module::Mail && unread > 0 {
+                    let mut tabs = vec![(Module::Mail, ic::MAIL, "Poczta", unread), (Module::Calendar, ic::CALENDAR, "Kalendarz", 0), (Module::Contacts, ic::PERSON, "Kontakty", 0)];
+                    if self.chat_visible() {
+                        tabs.push((Module::Chat, ic::CHAT, "Czat", self.chat.unread));
+                    }
+                    // four tabs fit the narrowest panel too
+                    let w = (ui.available_width() / tabs.len() as f32).floor().min(64.0);
+                    for (m, icon, tip, unread) in tabs {
+                        let tip = if unread > 0 { format!("{tip} — {}", crate::notify::unread_text(unread)) } else { tip.to_string() };
+                        let resp = icon_tab(ui, icon, self.module == m, w);
+                        if unread > 0 {
                             count_badge(ui.painter(), resp.rect.center() + Vec2::new(9.0, -9.0), unread);
                         }
                         if resp.on_hover_text(tip).clicked() {
@@ -439,6 +455,7 @@ impl MailApp {
             Module::Mail => self.folder_list(ui),
             Module::Calendar => self.calendar_side(ui),
             Module::Contacts => self.contacts_side(ui),
+            Module::Chat => self.chat_side(ui),
         });
     }
 

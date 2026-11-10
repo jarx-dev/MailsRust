@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const SCOPES: &str = "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts openid email profile";
+pub const SCOPES: &str = "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts openid email profile";
 
 pub struct LoginResult {
     pub refresh_token: String,
@@ -22,6 +22,10 @@ pub struct LoginResult {
     pub name: String,
     /// what the person allowed (mail, calendar, contacts…), separated by spaces
     pub scopes: String,
+    /// the Google Workspace domain; empty for a personal account
+    pub hd: String,
+    /// the Google account's id
+    pub sub: String,
 }
 
 fn agent() -> Result<ureq::Agent, String> {
@@ -174,6 +178,11 @@ fn error_text(e: ureq::Error) -> String {
 
 /// The whole sign-in: browser, wait for Google's answer, swap the code for tokens.
 pub fn login(client_id: &str, client_secret: &str) -> Result<LoginResult, String> {
+    login_scopes(client_id, client_secret, SCOPES)
+}
+
+/// The sign-in asking for `scopes` (Google adds what was allowed before).
+pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Result<LoginResult, String> {
     let client_id = client_id.trim();
     if client_id.is_empty() {
         return Err("Wpisz identyfikator klienta (Client ID) z Google Cloud.".into());
@@ -188,7 +197,7 @@ pub fn login(client_id: &str, client_secret: &str) -> Result<LoginResult, String
         "{AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}&code_challenge={}&code_challenge_method=S256&state={}&access_type=offline&prompt=consent&include_granted_scopes=true",
         enc(client_id),
         enc(&redirect),
-        enc(SCOPES),
+        enc(scopes),
         challenge,
         state
     );
@@ -281,21 +290,19 @@ pub fn login(client_id: &str, client_secret: &str) -> Result<LoginResult, String
         return Err("Google nie zwrócił trwałego dostępu (refresh token). Spróbuj ponownie.".into());
     }
     // The id_token tells us which Google account was used.
-    let (email, name) = v
+    let (email, name, hd, sub) = v
         .get("id_token")
         .and_then(|x| x.as_str())
         .and_then(|jwt| jwt.split('.').nth(1).map(String::from))
         .and_then(|payload| URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok())
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .map(|claims| {
-            (
-                claims.get("email").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                claims.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            )
+            let s = |k: &str| claims.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            (s("email"), s("name"), s("hd"), s("sub"))
         })
         .unwrap_or_default();
     let scopes = v.get("scope").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    Ok(LoginResult { refresh_token, email, name, scopes })
+    Ok(LoginResult { refresh_token, email, name, scopes, hd, sub })
 }
 
 /// Access tokens last an hour: each is kept (per refresh token) for its first half hour,

@@ -31,7 +31,8 @@ impl MailApp {
         if self.loading.is_some() {
             return;
         }
-        let unread = self.counts().inbox_unread_all;
+        // unread mail of the inbox and unread chat messages together
+        let unread = self.counts().inbox_unread_all + self.chat.unread;
         // the taskbar forgets the sign when its button is made again (e.g. after Explorer restarts)
         let again = self.clock() - self.badge_at > 30.0;
         if self.badge_shown == Some(unread) && !again {
