@@ -101,7 +101,7 @@ impl MailApp {
                     ui.add_space(14.0);
                     ui.add(egui::Spinner::new().size(22.0).color(ACCENT()));
                     ui.add_space(10.0);
-                    ui.label(RichText::new("Wczytywanie poczty…").size(14.0).color(MUTED()));
+                    ui.label(RichText::new(t!("ui.window.loading")).size(14.0).color(MUTED()));
                 });
             });
         });
@@ -156,13 +156,14 @@ impl MailApp {
         // Only a refresh you asked for shows "syncing"; automatic checks and saving
         // changes happen quietly in the background.
         let syncing = self.receiving && !self.quiet_sync;
-        let problem = self.status.contains("nie powiodło") || self.status.contains("Najpierw") || self.status.contains("Wpisz");
+        // (English variants: the texts of sync.rs and contacts_ui.rs, "First …", "Enter …", "… failed")
+        let problem = ["nie powiodło", "Najpierw", "Wpisz", "failed", "First ", " first", "Enter "].iter().any(|w| self.status.contains(w));
         let keep = if problem { 8.0 } else { 4.0 };
         let age = now - self.status_at;
         if !syncing && (self.status.is_empty() || age > keep) {
             return;
         }
-        let text = if syncing { "Synchronizuję dane…".to_string() } else { self.status.clone() };
+        let text = if syncing { t!("ui.window.syncing").into_owned() } else { self.status.clone() };
         // fade out during the last half second
         let alpha = if syncing { 1.0 } else { ((keep - age) / 0.5).clamp(0.0, 1.0) as f32 };
         let pos = match (self.module, self.list_rect) {
@@ -219,9 +220,9 @@ impl MailApp {
                     }
                     self.oauth_setup = false;
                     self.account_open = true;
-                    self.set_status("Wczytano plik z Google — kliknij Zaloguj przez Google");
+                    self.set_status(t!("ui.window.google_file_loaded"));
                 }
-                None => self.set_status("To nie jest plik klienta z Google Cloud (client_secret_….json)"),
+                None => self.set_status(t!("ui.window.not_client_file")),
             }
         }
     }
@@ -683,14 +684,21 @@ pub fn another_copy_shown() -> bool {
     false
 }
 
-pub(super) fn make_tray(ctx: &egui::Context) -> (Option<tray_icon::TrayIcon>, Receiver<TrayMsg>) {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-    let (tx, rx) = channel();
-    let show = MenuItem::new("Pokaż Pocztę", true, None);
-    let quit = MenuItem::new("Zakończ", true, None);
+/// The tray icon's menu in the current language (made again when the language changes).
+pub(super) fn tray_menu() -> tray_icon::menu::Menu {
+    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+    let show = MenuItem::with_id("show", t!("tray.show"), true, None);
+    let quit = MenuItem::with_id("quit", t!("tray.quit"), true, None);
     let menu = Menu::new();
     let _ = menu.append_items(&[&show, &PredefinedMenuItem::separator(), &quit]);
+    menu
+}
+
+pub(super) fn make_tray(ctx: &egui::Context) -> (Option<tray_icon::TrayIcon>, Receiver<TrayMsg>) {
+    use tray_icon::menu::MenuEvent;
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let (tx, rx) = channel();
+    let menu = tray_menu();
     let big = image::RgbaImage::from_raw(crate::icon::SIZE, crate::icon::SIZE, crate::icon::rgba());
     let icon = big
         .map(|b| image::imageops::resize(&b, 32, 32, image::imageops::FilterType::Lanczos3))
@@ -706,9 +714,9 @@ pub(super) fn make_tray(ctx: &egui::Context) -> (Option<tray_icon::TrayIcon>, Re
             None
         }
     };
-    let (quit_id, t2, c2) = (quit.id().clone(), tx.clone(), ctx.clone());
+    let (t2, c2) = (tx.clone(), ctx.clone());
     MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
-        let _ = t2.send(if e.id == quit_id { TrayMsg::Quit } else { TrayMsg::Show });
+        let _ = t2.send(if e.id == "quit" { TrayMsg::Quit } else { TrayMsg::Show });
         c2.request_repaint();
     }));
     let c3 = ctx.clone();

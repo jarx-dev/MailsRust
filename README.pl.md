@@ -55,7 +55,7 @@ Sieć, budowa indeksów i wszystko, co powolne, działa w wątkach w tle, więc 
 <img src="docs/screenshots/calendar.png" alt="Kalendarz: widok miesiąca i panel dnia">
 
 **AI (opcjonalnie, własny klucz)**
-- „Popraw z AI” w kilku stylach i tłumaczenie odebranych wiadomości na polski.
+- „Popraw z AI” w kilku stylach i tłumaczenie odebranych wiadomości na język interfejsu.
 - Działa z API zgodnym z Anthropic Messages (`/v1/messages`). Adres i klucz ustawia się
   w menu ☰ → „Ustawienia AI”.
 - „Kopiuj link dla AI”: pojedynczą wiadomość można udostępnić agentowi AI w swojej prywatnej sieci
@@ -63,6 +63,7 @@ Sieć, budowa indeksów i wszystko, co powolne, działa w wątkach w tle, więc 
   a niczego nie wysyła sam.
 
 **Wygląd**
+- Interfejs po angielsku albo po polsku (menu ☰ → „Language / Język”, zmiana od razu).
 - Jasny i ciemny motyw, jeden zestaw ikon (Segoe Fluent), układ jak w klasycznych klientach
   poczty: foldery | lista | wiadomość | dzień w kalendarzu.
 

@@ -384,7 +384,7 @@ impl Finder {
         let tx = self.load_tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let r = std::panic::catch_unwind(Model::load).unwrap_or_else(|_| Err("nieoczekiwany błąd".into()));
+            let r = std::panic::catch_unwind(Model::load).unwrap_or_else(|_| Err(t!("mail.finder.unexpected_error").into_owned()));
             crate::diag::mem("with the meaning model");
             let _ = tx.send(r.map(Arc::new));
             ctx.request_repaint();
@@ -394,12 +394,10 @@ impl Finder {
     /// One short line about what is being prepared, if anything.
     pub fn status(&self) -> Option<String> {
         match &self.meaning {
-            MeaningState::Downloading(p) => Some(format!("Wyszukiwanie po znaczeniu: pobieranie modelu {}%", (p * 100.0) as i32)),
-            MeaningState::Loading => Some("Wyszukiwanie po znaczeniu: przygotowanie…".into()),
-            MeaningState::Ready if self.to_analyse > 0 => {
-                Some(format!("Wyszukiwanie po znaczeniu: analiza wiadomości (zostało {})", self.to_analyse))
-            }
-            MeaningState::Failed(e) => Some(format!("Wyszukiwanie po znaczeniu niedostępne: {e}")),
+            MeaningState::Downloading(p) => Some(t!("mail.finder.downloading", percent = (p * 100.0) as i32).into_owned()),
+            MeaningState::Loading => Some(t!("mail.finder.preparing").into_owned()),
+            MeaningState::Ready if self.to_analyse > 0 => Some(t!("mail.finder.analysing", left = self.to_analyse).into_owned()),
+            MeaningState::Failed(e) => Some(t!("mail.finder.unavailable", error = e).into_owned()),
             _ => None,
         }
     }

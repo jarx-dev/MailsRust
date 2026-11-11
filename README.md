@@ -14,7 +14,7 @@ Mail, calendar and contacts in one window · starts in a fraction of a second ·
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)
 ![MIT License](https://img.shields.io/badge/license-MIT-green)
 
-<img src="docs/screenshots/main.png" alt="Main window: folders, message list, an open message and the day's calendar">
+<img src="docs/screenshots/en/main.png" alt="Main window: folders, message list, an open message and the day's calendar">
 
 <sub>All screenshots show demo data (made-up people and messages).</sub>
 
@@ -22,7 +22,7 @@ Mail, calendar and contacts in one window · starts in a fraction of a second ·
 
 ---
 
-*"Poczta" is Polish for "Mail". The interface is currently in Polish only; Polish UI labels are quoted below with their English meaning in parentheses.*
+*"Poczta" is Polish for "Mail". The interface is in English or Polish (☰ menu → "Language / Język", switches at once).*
 
 ## Why
 
@@ -39,7 +39,7 @@ background threads, so the interface never waits.
 - New mail arrives instantly (IMAP IDLE), with a sound, a counter on the icon, a notification
   in the corner of the screen and background operation from the system tray.
 - Conversations in one place: the open message is expanded, earlier ones are collapsed into cards.
-- Views for "Nieprzeczytane" (Unread), "Oznaczone" (Flagged), "Bez odpowiedzi (7 dni)" (No reply, 7 days),
+- Views for "Unread", "Flagged", "Unanswered (7 days)",
   Gmail labels and favorites.
 - HTML messages rendered with the Edge engine (WebView2), with a built-in fallback renderer.
 - Compose in Markdown with a live preview, sent as HTML. Inline images are supported, and your
@@ -50,27 +50,27 @@ background threads, so the interface never waits.
 - Search by meaning: a small multilingual language model (Model2Vec) runs locally and finds
   messages about the same thing, even when different words were used.
 
-<img src="docs/screenshots/search.png" alt="Search results with the searched word highlighted">
+<img src="docs/screenshots/en/search.png" alt="Search results with the searched word highlighted">
 
 **Calendar and contacts**
 - Month and week views, a day panel next to your mail, events from Google Calendar.
-- Contacts with groups, including ones collected from your correspondence ("Z poczty", i.e. "From mail").
+- Contacts with groups, including ones collected from your correspondence ("From mail").
 
-<img src="docs/screenshots/calendar.png" alt="Calendar: month view and day panel">
+<img src="docs/screenshots/en/calendar.png" alt="Calendar: month view and day panel">
 
 **AI (optional, bring your own key)**
-- "Popraw z AI" (Improve with AI) in several styles, and translation of received messages into Polish.
+- "Fix with AI" in several styles, and translation of received messages into the interface language.
 - Works with APIs compatible with the Anthropic Messages API (`/v1/messages`). The address and key are set
-  in the ☰ menu → "Ustawienia AI" (AI settings).
-- "Kopiuj link dla AI" (Copy link for AI): a single message can be shared with an AI agent on your private
-  Tailscale network. The agent reads it as text or JSON and can leave a draft reply in Drafts
-  ("Szkice"), but it never sends anything on its own.
+  in the ☰ menu → "AI settings".
+- "Copy link for AI": a single message can be shared with an AI agent on your private
+  Tailscale network. The agent reads it as text or JSON and can leave a draft reply in Drafts,
+  but it never sends anything on its own. The page the agent reads is in Polish.
 
 **Look and feel**
 - Light and dark themes, a single icon set (Segoe Fluent), and a layout like classic mail
   clients: folders | list | message | calendar day.
 
-<img src="docs/screenshots/dark.png" alt="Dark theme">
+<img src="docs/screenshots/en/dark.png" alt="Dark theme">
 
 ## Performance
 
@@ -149,11 +149,11 @@ src/
 ## About the author
 
 Poczta was written by **Jarosław Hartwich** ([github.com/jarx-dev](https://github.com/jarx-dev)).
-You can find the same in the program: ☰ menu → "O programie" (About).
+You can find the same in the program: ☰ menu → "About".
 
 If you find Poczta useful, you can [buy me a coffee](https://buymeacoffee.com/jarx) ☕
 
-<img src="docs/screenshots/about.png" width="640" alt="The About window">
+<img src="docs/screenshots/en/about.png" width="640" alt="The About window">
 
 ## License
 

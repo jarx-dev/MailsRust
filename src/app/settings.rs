@@ -7,13 +7,13 @@ impl MailApp {
         let Some(m) = self.msg(id).cloned() else { return };
         let port = self.prefs.ai_port;
         let started = crate::share::tailscale_ip()
-            .ok_or_else(|| "Tailscale nie jest włączony na tym komputerze — włącz go i spróbuj ponownie".to_string())
+            .ok_or_else(|| t!("ui.settings.tailscale_off").into_owned())
             .and_then(|ip| self.hub.start(ip, port));
         match started {
             Err(e) => {
                 // no link without Tailscale: say why, rather than copying something else
                 crate::diag::log(format!("copy for AI: {e}"));
-                self.set_status(format!("Nie udało się utworzyć linku: {e}"));
+                self.set_status(t!("ui.settings.link_failed", e = e));
                 return;
             }
             Ok(addr) if addr.port() != port => {
@@ -44,7 +44,7 @@ impl MailApp {
         // just the one link: the page behind it lists everything else (attachments, pictures,
         // formatted version, how to leave a reply draft)
         self.ctx.copy_text(url);
-        self.flash("Link dla AI skopiowany do schowka — wklej go agentowi (działa w Twojej sieci Tailscale przez 7 dni)");
+        self.flash(&t!("ui.settings.ai_link_copied"));
         // a big message with only its header here: get the rest, the shared copy follows
         if m.partial && matches!(m.folder, Folder::Inbox | Folder::Sent) {
             if let Some(uid) = m.uid {
@@ -88,7 +88,7 @@ impl MailApp {
         if let Some((id, secret)) = crate::oauth::builtin_client().or_else(crate::oauth::find_downloaded_client) {
             self.store.account.oauth_client_id = id;
             self.store.account.oauth_client_secret = secret;
-            self.set_status("Znaleziono dane aplikacji z Google");
+            self.set_status(t!("ui.settings.google_client_found"));
             true
         } else {
             false
@@ -103,12 +103,12 @@ impl MailApp {
         let mut open = true;
         let lines = crate::diag::lines();
         let testing = self.diag_testing.load(std::sync::atomic::Ordering::Relaxed);
-        crate::theme::dialog(ctx, "diag", "Diagnostyka synchronizacji", 760.0, &mut open, |ui| {
+        crate::theme::dialog(ctx, "diag", &t!("ui.settings.diag.title"), 760.0, &mut open, |ui| {
                 ui.horizontal(|ui| {
                     let can = self.store.account.can_connect() && !testing;
                     if ui
-                        .add_enabled(can, egui::Button::new(RichText::new("  Test szybkości  ").color(Color32::WHITE)).fill(PRIMARY))
-                        .on_hover_text("Pobiera 200 najnowszych wiadomości tylko do odczytu i mierzy czas każdego kroku")
+                        .add_enabled(can, egui::Button::new(RichText::new(t!("ui.settings.diag.speed_test")).color(Color32::WHITE)).fill(PRIMARY))
+                        .on_hover_text(t!("ui.settings.diag.speed_hint"))
                         .clicked()
                     {
                         let acc = self.store.account.clone();
@@ -127,26 +127,26 @@ impl MailApp {
                     }
                     if testing {
                         ui.spinner();
-                        ui.label(RichText::new("trwa test…").color(MUTED()));
+                        ui.label(RichText::new(t!("ui.settings.diag.running")).color(MUTED()));
                     }
-                    if ui.button("Kopiuj").clicked() {
-                        self.flash = Some(("Dziennik skopiowany do schowka".into(), self.clock()));
+                    if ui.button(t!("ui.settings.diag.copy")).clicked() {
+                        self.flash = Some((t!("ui.settings.diag.copied").into_owned(), self.clock()));
                         ui.ctx().copy_text(lines.join("
 "));
                     }
-                    if ui.button("Otwórz plik dziennika").clicked() {
+                    if ui.button(t!("ui.settings.diag.open_log")).clicked() {
                         let _ = std::process::Command::new("notepad").arg(crate::diag::file()).spawn();
                     }
                 });
                 ui.label(
-                    RichText::new("Każdy krok synchronizacji z czasem trwania. Zapisywane też w pliku dziennika.")
+                    RichText::new(t!("ui.settings.diag.intro"))
                         .small()
                         .color(MUTED()),
                 );
                 ui.separator();
                 egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
                     if lines.is_empty() {
-                        ui.label(RichText::new("Jeszcze nic się nie działo — kliknij Odśwież albo Test szybkości.").color(MUTED()));
+                        ui.label(RichText::new(t!("ui.settings.diag.empty")).color(MUTED()));
                     }
                     for l in &lines {
                         let strong = l.contains("──");
@@ -184,12 +184,7 @@ impl MailApp {
                     let n = evs.len();
                     self.store.events.retain(|e| !e.google);
                     self.store.events.extend(evs);
-                    let word = match n {
-                        1 => "wydarzenie",
-                        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => "wydarzenia",
-                        _ => "wydarzeń",
-                    };
-                    self.gcal_said = Some(Ok(format!("{n} {word} z Google, {}", Local::now().format("%H:%M"))));
+                    self.gcal_said = Some(Ok(format!("{}, {}", i18n::plural("ui.settings.google_events", n), Local::now().format("%H:%M"))));
                     crate::diag::log(format!("Google calendar: {n} events"));
                     self.save_now = true;
                     self.touched = true;
@@ -209,11 +204,11 @@ impl MailApp {
                         self.store.events.retain(|e| e.id != id);
                     }
                     self.gcal_last = -1e9;
-                    self.set_status("Zapisano w Kalendarzu Google");
+                    self.set_status(t!("ui.settings.gcal.saved"));
                 }
                 Err(e) => {
                     crate::diag::log(format!("Google calendar save: {e}"));
-                    self.set_status(format!("Nie udało się zapisać w Kalendarzu Google: {e}"));
+                    self.set_status(t!("ui.settings.gcal.save_failed", e = e));
                 }
             }
             self.touched = true;
@@ -285,53 +280,53 @@ impl MailApp {
         let ready = crate::google::ready(&a);
         let (cal_ok, people_ok) = (crate::google::has_scope(&a, crate::google::SCOPE_CALENDAR), crate::google::has_scope(&a, crate::google::SCOPE_CONTACTS));
         ui.label(
-            RichText::new("Kalendarz i kontakty łączą się z Google tym samym logowaniem co poczta (konto Google, OAuth). Wydarzenia i kontakty z Google są tu na bieżąco, a zmiany zrobione w programie trafiają do Google.")
+            RichText::new(t!("ui.settings.gcal.intro"))
                 .small()
                 .color(MUTED()),
         );
         ui.add_space(4.0);
         let ok = Color32::from_rgb(0x2E, 0x9E, 0x5B);
         if !ready {
-            ui.label(RichText::new("Poczta nie jest zalogowana kontem Google (OAuth). Zaloguj się w „Konto pocztowe” → Konto Google.").color(FLAG));
-            if ui.button("Otwórz konto pocztowe").clicked() {
+            ui.label(RichText::new(t!("ui.settings.gcal.not_signed_in")).color(FLAG));
+            if ui.button(t!("ui.settings.gcal.open_account")).clicked() {
                 self.account_open = true;
                 self.gcal_open = false;
             }
             return;
         }
-        ui.label(RichText::new(format!("Konto Google: {}", a.email)).strong());
-        for (label, granted) in [("Poczta", true), ("Kalendarz", cal_ok), ("Kontakty", people_ok)] {
+        ui.label(RichText::new(t!("ui.settings.gcal.account", email = a.email)).strong());
+        for (label, granted) in [(t!("ui.settings.gcal.scope_mail"), true), (t!("ui.settings.gcal.scope_calendar"), cal_ok), (t!("ui.settings.gcal.scope_contacts"), people_ok)] {
             if granted {
-                ui.label(RichText::new(format!("✓  {label} — dostęp udzielony")).color(ok));
+                ui.label(RichText::new(t!("ui.settings.gcal.granted", label = label)).color(ok));
             } else {
-                ui.label(RichText::new(format!("✗  {label} — brak zgody (zaloguj się ponownie poniżej)")).color(FLAG));
+                ui.label(RichText::new(t!("ui.settings.gcal.missing", label = label)).color(FLAG));
             }
         }
         if !(cal_ok && people_ok) {
             ui.add_space(6.0);
-            ui.label(RichText::new("Jednorazowo, w Twoim projekcie Google Cloud (tym od logowania poczty):").small());
+            ui.label(RichText::new(t!("ui.settings.gcal.once")).small());
             ui.horizontal_wrapped(|ui| {
-                if ui.small_button("1. Włącz Google Calendar API ↗").clicked() {
+                if ui.small_button(t!("ui.settings.gcal.enable_calendar")).clicked() {
                     crate::oauth::open_url("https://console.cloud.google.com/apis/library/calendar-json.googleapis.com");
                 }
-                if ui.small_button("2. Włącz People API ↗").clicked() {
+                if ui.small_button(t!("ui.settings.gcal.enable_people")).clicked() {
                     crate::oauth::open_url("https://console.cloud.google.com/apis/library/people.googleapis.com");
                 }
             });
-            ui.label(RichText::new("3. Potem zaloguj się ponownie — Google zapyta o dostęp do poczty, kalendarza i kontaktów; zaznacz wszystkie pola i kliknij Kontynuuj.").small());
+            ui.label(RichText::new(t!("ui.settings.gcal.step3")).small());
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            let label = if cal_ok && people_ok { "Zaloguj ponownie przez Google" } else { "  G   Zaloguj ponownie przez Google (poczta, kalendarz, kontakty)  " };
+            let label = if cal_ok && people_ok { t!("ui.settings.gcal.relogin") } else { t!("ui.settings.gcal.relogin_all") };
             let btn = egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(ACCENT());
             if ui.add_enabled(!self.signing_in, btn).clicked() {
                 self.signing_in = true;
                 self.sign_in_error = None;
                 net::google_sign_in(a.oauth_client_id.clone(), a.oauth_client_secret.clone(), self.tx.clone(), self.ctx.clone());
-                self.set_status("Otwieram stronę logowania Google w przeglądarce…");
+                self.set_status(t!("ui.settings.opening_google"));
             }
             if self.signing_in {
-                ui.label(RichText::new("dokończ logowanie w przeglądarce…").small().color(MUTED()));
+                ui.label(RichText::new(t!("ui.settings.gcal.finish_signin")).small().color(MUTED()));
             }
         });
         if let Some(e) = &self.sign_in_error {
@@ -339,9 +334,9 @@ impl MailApp {
         }
         ui.add_space(6.0);
         let mut changed = false;
-        changed |= ui.checkbox(&mut self.prefs.google_calendar, "Synchronizuj kalendarz z Google").changed();
-        changed |= ui.checkbox(&mut self.prefs.google_contacts, "Synchronizuj kontakty i grupy z Google").changed();
-        if a.google_hd.as_deref().is_some_and(|d| !d.is_empty()) && ui.checkbox(&mut self.prefs.google_chat, "Czat Google w programie (konto Google Workspace)").changed() {
+        changed |= ui.checkbox(&mut self.prefs.google_calendar, t!("ui.settings.gcal.sync_calendar")).changed();
+        changed |= ui.checkbox(&mut self.prefs.google_contacts, t!("ui.settings.gcal.sync_contacts")).changed();
+        if a.google_hd.as_deref().is_some_and(|d| !d.is_empty()) && ui.checkbox(&mut self.prefs.google_chat, t!("ui.settings.gcal.chat")).changed() {
             self.save_now = true;
         }
         if changed {
@@ -357,7 +352,7 @@ impl MailApp {
                 static ONCE: AtomicBool = AtomicBool::new(false);
                 !ONCE.swap(true, Ordering::Relaxed)
             };
-            if ui.add_enabled(!busy, egui::Button::new("Sprawdź połączenie")).on_hover_text("Sprawdza dostęp do kalendarza i kontaktów (tylko odczyt)").clicked() || auto {
+            if ui.add_enabled(!busy, egui::Button::new(t!("ui.settings.gcal.check"))).on_hover_text(t!("ui.settings.gcal.check_hint")).clicked() || auto {
                 let (tx, rx) = channel();
                 let (acc, ctx) = (a.clone(), ui.ctx().clone());
                 std::thread::spawn(move || {
@@ -367,19 +362,19 @@ impl MailApp {
                 self.google_check_rx = Some(rx);
                 self.google_check = None;
             }
-            if ui.add_enabled(self.gcal_rx.is_none(), egui::Button::new("Synchronizuj teraz")).clicked() {
+            if ui.add_enabled(self.gcal_rx.is_none(), egui::Button::new(t!("ui.settings.gcal.sync_now"))).clicked() {
                 self.gcal_last = -1e9;
                 self.book_last = -1e9;
                 self.gcal_said = None;
                 self.book_said = None;
             }
             if busy || self.gcal_rx.is_some() || self.book_rx.is_some() {
-                ui.label(RichText::new("pracuję…").small().color(MUTED()));
+                ui.label(RichText::new(t!("ui.settings.gcal.working")).small().color(MUTED()));
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
             }
         });
         if let Some((cal, people)) = &self.google_check {
-            for (what, r) in [("Kalendarz", cal), ("Kontakty", people)] {
+            for (what, r) in [(t!("ui.settings.gcal.scope_calendar"), cal), (t!("ui.settings.gcal.scope_contacts"), people)] {
                 match r {
                     Ok(m) => {
                         ui.label(RichText::new(format!("✓  {m}")).small().color(ok));
@@ -401,7 +396,7 @@ impl MailApp {
                 None => {}
             }
         }
-        ui.label(RichText::new("Wydarzenia powtarzające się, całodniowe i z cudzych kalendarzy są tylko do odczytu — zmieniasz je w Google.").small().color(MUTED()));
+        ui.label(RichText::new(t!("ui.settings.gcal.readonly")).small().color(MUTED()));
     }
 
     /// „Poprawianie tekstu (AI)”: where CLIProxy is, its key and the model that corrects.
@@ -415,21 +410,21 @@ impl MailApp {
         }
         let s = self.ai_set.get_or_insert_with(crate::ai::load);
         let mut changed = false;
-        ui.label(RichText::new("Poprawianie tekstu (AI)").strong());
+        ui.label(RichText::new(t!("ui.settings.ai.title")).strong());
         ui.label(
-            RichText::new("Przycisk „✨ Popraw z AI” w oknie pisania poprawia tekst przez CLIProxy, w jednym z czterech stylów.")
+            RichText::new(t!("ui.settings.ai.intro"))
                 .small()
                 .color(MUTED()),
         );
         ui.add_space(4.0);
         egui::Grid::new("accgrid-ai").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            ui.label("Adres CLIProxy");
+            ui.label(t!("ui.settings.ai.url"));
             changed |= ui.add(egui::TextEdit::singleline(&mut s.url).hint_text("https://api.anthropic.com").desired_width(290.0)).changed();
             ui.end_row();
-            ui.label("Klucz");
+            ui.label(t!("ui.settings.ai.key"));
             changed |= ui.add(egui::TextEdit::singleline(&mut s.key).password(true).hint_text("sk-…").desired_width(290.0)).changed();
             ui.end_row();
-            ui.label("Model");
+            ui.label(t!("ui.settings.ai.model"));
             ui.horizontal(|ui| {
                 changed |= ui.add(egui::TextEdit::singleline(&mut s.model).hint_text("claude-sonnet-5-5").desired_width(200.0)).changed();
                 let mut list: Vec<String> = vec!["claude-sonnet-5-5".into(), "claude-opus-5-5".into(), "claude-haiku-5-5".into()];
@@ -452,10 +447,10 @@ impl MailApp {
             ui.end_row();
             let effort_box = |ui: &mut Ui, salt: &str, value: &mut String| -> bool {
                 let mut ch = false;
-                let shown = crate::ai::EFFORTS.iter().find(|(k, _)| *k == value.as_str()).map(|(_, l)| *l).unwrap_or("bez myślenia (najszybciej)");
-                egui::ComboBox::from_id_salt(salt).selected_text(shown).width(200.0).show_ui(ui, |ui| {
-                    for (k, l) in crate::ai::EFFORTS {
-                        if ui.selectable_label(value.as_str() == k, l).clicked() {
+                let label = crate::ai::effort_label;
+                egui::ComboBox::from_id_salt(salt).selected_text(label(value.as_str())).width(200.0).show_ui(ui, |ui| {
+                    for k in crate::ai::EFFORTS {
+                        if ui.selectable_label(value.as_str() == k, label(k)).clicked() {
                             *value = k.to_string();
                             ch = true;
                         }
@@ -463,10 +458,10 @@ impl MailApp {
                 });
                 ch
             };
-            ui.label("Myślenie");
+            ui.label(t!("ui.settings.ai.effort"));
             changed |= effort_box(ui, "ai-effort", &mut s.effort);
             ui.end_row();
-            ui.label("Tłumaczenie");
+            ui.label(t!("ui.settings.ai.translation"));
             ui.horizontal(|ui| {
                 changed |= ui.add(egui::TextEdit::singleline(&mut s.translate_model).hint_text("claude-haiku-5-5").desired_width(200.0)).changed();
                 egui::ComboBox::from_id_salt("ai-tr-model").selected_text("").width(24.0).show_ui(ui, |ui| {
@@ -479,12 +474,12 @@ impl MailApp {
                 });
             });
             ui.end_row();
-            ui.label("Myślenie (tłum.)");
+            ui.label(t!("ui.settings.ai.translation_effort"));
             changed |= effort_box(ui, "ai-tr-effort", &mut s.translate_effort);
             ui.end_row();
         });
         ui.label(
-            RichText::new("Model i myślenie z góry służą do „Popraw z AI”. Do tłumaczenia wystarczy szybki Haiku bez myślenia; wyższe myślenie daje staranniejszy wynik, ale trwa dłużej.")
+            RichText::new(t!("ui.settings.ai.note"))
                 .small()
                 .color(MUTED()),
         );
@@ -494,7 +489,7 @@ impl MailApp {
         }
         ui.horizontal(|ui| {
             let checking = self.ai_check.is_some();
-            if ui.add_enabled(!checking, egui::Button::new("Sprawdź połączenie").small()).clicked() {
+            if ui.add_enabled(!checking, egui::Button::new(t!("ui.settings.gcal.check")).small()).clicked() {
                 let (tx, rx) = std::sync::mpsc::channel();
                 let set = s.clone();
                 let ctx = ui.ctx().clone();
@@ -508,7 +503,7 @@ impl MailApp {
                 self.ai_said = None;
             }
             if checking {
-                ui.label(RichText::new("sprawdzam…").small().color(MUTED()));
+                ui.label(RichText::new(t!("ui.settings.ai.checking")).small().color(MUTED()));
             }
             match &self.ai_said {
                 Some(Ok(m)) => {
@@ -529,25 +524,25 @@ impl MailApp {
     pub(super) fn side_settings_ui(&mut self, ctx: &egui::Context) {
         if self.about_open {
             let mut open = true;
-            crate::theme::dialog(ctx, "about", "O programie", 420.0, &mut open, |ui| {
+            crate::theme::dialog(ctx, "about", &t!("ui.settings.about.title"), 420.0, &mut open, |ui| {
                 ui.label(RichText::new("Poczta").font(semibold(20.0)).color(TEXT()));
-                ui.label(RichText::new("Klient poczty dla Windows, napisany w Rust.").color(MUTED()));
+                ui.label(RichText::new(t!("ui.settings.about.tagline")).color(MUTED()));
                 let (version, build) = crate::update::version();
-                ui.label(RichText::new(format!("Wersja {version}")).color(MUTED())).on_hover_text(format!("Build {build}"));
+                ui.label(RichText::new(t!("ui.settings.about.version", version = version)).color(MUTED())).on_hover_text(format!("Build {build}"));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    ui.label("Autor: Jarosław Hartwich,");
+                    ui.label(t!("ui.settings.about.author"));
                     ui.hyperlink_to("github.com/jarx-dev", "https://github.com/jarx-dev");
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Kod źródłowy:");
+                    ui.label(t!("ui.settings.about.source"));
                     ui.hyperlink_to("github.com/jarx-dev/MailsRust", "https://github.com/jarx-dev/MailsRust");
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Podoba Ci się Poczta?");
-                    ui.hyperlink_to("Postaw mi kawę", "https://buymeacoffee.com/jarx");
+                    ui.label(t!("ui.settings.about.like"));
+                    ui.hyperlink_to(t!("ui.settings.about.coffee"), "https://buymeacoffee.com/jarx");
                 });
-                ui.label(RichText::new("Licencja MIT").color(MUTED()));
+                ui.label(RichText::new(t!("ui.settings.about.license")).color(MUTED()));
                 ui.add_space(4.0);
             });
             if !open {
@@ -556,7 +551,7 @@ impl MailApp {
         }
         if self.ai_open {
             let mut open = true;
-            crate::theme::dialog(ctx, "ai", "Ustawienia AI", 600.0, &mut open, |ui| self.ai_settings_ui(ui));
+            crate::theme::dialog(ctx, "ai", &t!("ui.settings.ai.dialog"), 600.0, &mut open, |ui| self.ai_settings_ui(ui));
             if !open {
                 self.ai_open = false;
             }
@@ -565,7 +560,7 @@ impl MailApp {
         }
         if self.gcal_open {
             let mut open = true;
-            crate::theme::dialog(ctx, "google", "Kalendarz i kontakty Google", 620.0, &mut open, |ui| self.gcal_settings_ui(ui));
+            crate::theme::dialog(ctx, "google", &t!("ui.settings.gcal.dialog"), 620.0, &mut open, |ui| self.gcal_settings_ui(ui));
             if !open {
                 self.gcal_open = false;
             }
@@ -577,66 +572,66 @@ impl MailApp {
         let Some((which, mut a)) = self.extra_edit.clone() else { return };
         let mut open = true;
         let (mut save, mut remove, mut cancel) = (false, false, false);
-        let title = if which.is_some() { "Konto pocztowe" } else { "Dodaj konto pocztowe" };
-        crate::theme::dialog(ctx, "extra-account", title, 540.0, &mut open, |ui| {
-            ui.label(RichText::new("Dodatkowe konto służy tylko do poczty. Jego nieprzeczytane wiadomości trafiają do wspólnej listy „Nieprzeczytane”, a odpowiedź wychodzi z konta, na które przyszła wiadomość.").small().color(MUTED()));
+        let title = if which.is_some() { t!("ui.settings.account.title") } else { t!("ui.settings.account.title_add") };
+        crate::theme::dialog(ctx, "extra-account", &title, 540.0, &mut open, |ui| {
+            ui.label(RichText::new(t!("ui.settings.account.extra_intro")).small().color(MUTED()));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("  G   To jest Gmail  ").color(Color32::WHITE)).fill(PRIMARY)).on_hover_text("Wpisuje ustawienia serwerów Gmaila").clicked() {
+                if ui.add(egui::Button::new(RichText::new(t!("ui.settings.account.this_is_gmail")).color(Color32::WHITE)).fill(PRIMARY)).on_hover_text(t!("ui.settings.account.this_is_gmail_hint")).clicked() {
                     a.use_gmail();
                     a.use_oauth = false;
                 }
-                if ui.link(RichText::new("Utwórz hasło aplikacji Google ↗").small()).clicked() {
+                if ui.link(RichText::new(t!("ui.settings.account.app_password_google")).small()).clicked() {
                     crate::oauth::open_url("https://myaccount.google.com/apppasswords");
                 }
             });
             ui.add_space(6.0);
             egui::Grid::new("extra-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                ui.label("Imię i nazwisko");
+                ui.label(t!("ui.settings.account.name"));
                 ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(320.0));
                 ui.end_row();
-                ui.label("Adres e-mail");
-                let r = ui.add(egui::TextEdit::singleline(&mut a.email).hint_text("ty@firma.pl").desired_width(320.0));
+                ui.label(t!("ui.settings.account.email"));
+                let r = ui.add(egui::TextEdit::singleline(&mut a.email).hint_text(t!("ui.settings.email_hint")).desired_width(320.0));
                 if r.changed() && (a.username.is_empty() || a.imap_host == "imap.gmail.com") {
                     a.username = a.email.clone();
                 }
                 ui.end_row();
-                ui.label("Hasło");
-                ui.add(egui::TextEdit::singleline(&mut a.password).password(true).hint_text("Gmail: 16-znakowe hasło aplikacji").desired_width(320.0));
+                ui.label(t!("ui.settings.account.password"));
+                ui.add(egui::TextEdit::singleline(&mut a.password).password(true).hint_text(t!("ui.settings.account.password_hint")).desired_width(320.0));
                 ui.end_row();
             });
-            egui::CollapsingHeader::new("Ustawienia serwerów").id_salt("extra-servers").default_open(a.imap_host.is_empty()).show(ui, |ui| {
+            egui::CollapsingHeader::new(t!("ui.settings.account.servers")).id_salt("extra-servers").default_open(a.imap_host.is_empty()).show(ui, |ui| {
                 egui::Grid::new("extra-servers-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Serwer IMAP");
+                    ui.label(t!("ui.settings.account.imap"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut a.imap_host).hint_text("imap.example.com").desired_width(220.0));
                         ui.add(egui::DragValue::new(&mut a.imap_port).range(1..=65535));
                     });
                     ui.end_row();
-                    ui.label("Serwer SMTP");
+                    ui.label(t!("ui.settings.account.smtp"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut a.smtp_host).hint_text("smtp.example.com").desired_width(220.0));
                         ui.add(egui::DragValue::new(&mut a.smtp_port).range(1..=65535));
                     });
                     ui.end_row();
-                    ui.label("Login");
-                    ui.add(egui::TextEdit::singleline(&mut a.username).hint_text("zwykle adres e-mail").desired_width(300.0));
+                    ui.label(t!("ui.settings.account.login"));
+                    ui.add(egui::TextEdit::singleline(&mut a.username).hint_text(t!("ui.settings.account.login_hint")).desired_width(300.0));
                     ui.end_row();
                 });
             });
-            ui.label(RichText::new("Hasło jest zapisane w zaszyfrowanej postaci (tylko dla Twojego konta Windows).").small().color(MUTED()));
+            ui.label(RichText::new(t!("ui.settings.account.password_stored")).small().color(MUTED()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let ready = !a.email.trim().is_empty() && !a.imap_host.trim().is_empty() && !a.password.is_empty();
-                if ui.add_enabled(ready, egui::Button::new(RichText::new("Zapisz i sprawdź pocztę").color(Color32::WHITE)).fill(ACCENT())).clicked() {
+                if ui.add_enabled(ready, egui::Button::new(RichText::new(t!("ui.settings.account.save_check")).color(Color32::WHITE)).fill(ACCENT())).clicked() {
                     save = true;
                 }
-                if ui.button("Anuluj").clicked() {
+                if ui.button(t!("ui.settings.account.cancel")).clicked() {
                     cancel = true;
                 }
                 if which.is_some() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(RichText::new("Usuń konto").color(FLAG)).on_hover_text("Usuwa konto i jego wiadomości z programu (na serwerze nic się nie zmienia)").clicked() {
+                        if ui.button(RichText::new(t!("ui.settings.account.remove")).color(FLAG)).on_hover_text(t!("ui.settings.account.remove_hint")).clicked() {
                             remove = true;
                         }
                     });
@@ -685,7 +680,7 @@ impl MailApp {
                 self.selected = None;
                 self.save_now = true;
                 self.touched = true;
-                self.set_status("Konto usunięte z programu");
+                self.set_status(t!("ui.settings.account.removed"));
             }
             self.extra_edit = None;
             return;
@@ -706,7 +701,7 @@ impl MailApp {
         let mut start_sign_in = false;
         let mut refresh_signature = false;
         // the window fits on the screen; what does not fit scrolls
-        crate::theme::dialog(ctx, "account", "Konto pocztowe", 560.0, &mut open, |ui| {
+        crate::theme::dialog(ctx, "account", &t!("ui.settings.account.title"), 560.0, &mut open, |ui| {
                 let signing_in = self.signing_in;
                 let sign_in_error = self.sign_in_error.clone();
                 let show_setup = self.oauth_setup;
@@ -715,30 +710,33 @@ impl MailApp {
                 if a.imap_host != "imap.gmail.com" {
                     ui.horizontal(|ui| {
                         if ui
-                            .add(egui::Button::new(RichText::new("  G   Użyj Gmaila  ").color(Color32::WHITE)).fill(PRIMARY))
-                            .on_hover_text("Wpisz ustawienia serwerów Gmaila i logowanie przez Google")
+                            .add(egui::Button::new(RichText::new(t!("ui.settings.account.use_gmail")).color(Color32::WHITE)).fill(PRIMARY))
+                            .on_hover_text(t!("ui.settings.account.use_gmail_hint"))
                             .clicked()
                         {
                             a.use_gmail();
                         }
-                        ui.label(RichText::new("lub wpisz ustawienia swojego dostawcy").small().color(MUTED()));
+                        ui.label(RichText::new(t!("ui.settings.account.or_own")).small().color(MUTED()));
                     });
                     ui.add_space(8.0);
                 }
                 egui::Grid::new("accgrid-top").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Imię i nazwisko");
-                    ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(300.0));
+                    ui.label(t!("ui.settings.account.name"));
+                    if ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(300.0)).changed() {
+                        // a name the person typed is theirs: a Google sign-in no longer replaces it
+                        a.demo_name = false;
+                    }
                     ui.end_row();
-                    ui.label("Adres e-mail");
-                    let r = ui.add(egui::TextEdit::singleline(&mut a.email).hint_text("ty@gmail.com").desired_width(300.0));
+                    ui.label(t!("ui.settings.account.email"));
+                    let r = ui.add(egui::TextEdit::singleline(&mut a.email).hint_text(t!("ui.settings.gmail_hint")).desired_width(300.0));
                     if r.changed() && a.imap_host == "imap.gmail.com" {
                         a.username = a.email.clone();
                     }
                     ui.end_row();
-                    ui.label("Logowanie");
+                    ui.label(t!("ui.settings.account.sign_in"));
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut a.use_oauth, true, "Konto Google");
-                        ui.selectable_value(&mut a.use_oauth, false, "Hasło");
+                        ui.selectable_value(&mut a.use_oauth, true, t!("ui.settings.account.google"));
+                        ui.selectable_value(&mut a.use_oauth, false, t!("ui.settings.account.password"));
                     });
                     ui.end_row();
                 });
@@ -747,16 +745,16 @@ impl MailApp {
                     if !a.oauth_refresh_token.is_empty() {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(format!("✓  Zalogowano przez Google jako {}", a.email))
+                                RichText::new(t!("ui.settings.account.signed_in_as", email = a.email))
                                     .color(Color32::from_rgb(0x2E, 0x9E, 0x5B)),
                             );
-                            if ui.small_button("Wyloguj").clicked() {
+                            if ui.small_button(t!("ui.settings.account.sign_out")).clicked() {
                                 a.oauth_refresh_token.clear();
                             }
                         });
                     } else {
                         ui.horizontal(|ui| {
-                            let btn = egui::Button::new(RichText::new("G    Zaloguj przez Google").color(TEXT()))
+                            let btn = egui::Button::new(RichText::new(t!("ui.settings.account.sign_in_google")).color(TEXT()))
                                 .fill(BG())
                                 .stroke(Stroke::new(1.0, BORDER()))
                                 .min_size(Vec2::new(0.0, 30.0));
@@ -765,7 +763,7 @@ impl MailApp {
                             }
                             if signing_in {
                                 ui.spinner();
-                                ui.label(RichText::new("Dokończ logowanie w przeglądarce…").color(MUTED()));
+                                ui.label(RichText::new(t!("ui.settings.account.finish_signin")).color(MUTED()));
                             }
                         });
                     }
@@ -780,45 +778,42 @@ impl MailApp {
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::same(10))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("Jednorazowa konfiguracja (ok. 5 minut)").font(semibold(14.0)));
+                                ui.label(RichText::new(t!("ui.settings.account.setup_title")).font(semibold(14.0)));
                                 ui.label(
-                                    RichText::new(
-                                        "Google wymaga, by każda aplikacja miała własny identyfikator. Oryginalny program \
-                                         dostał go od swojego producenta; tę aplikację trzeba raz zarejestrować na swoim koncie.",
-                                    )
+                                    RichText::new(t!("ui.settings.account.setup_why"))
                                     .small()
                                     .color(MUTED()),
                                 );
                                 ui.add_space(4.0);
-                                let steps: [(&str, &str); 4] = [
-                                    ("1. Utwórz projekt w Google Cloud", "https://console.cloud.google.com/projectcreate"),
-                                    ("2. Włącz Gmail API", "https://console.cloud.google.com/apis/library/gmail.googleapis.com"),
-                                    ("3. Ekran zgody: Zewnętrzny, dodaj siebie jako testera", "https://console.cloud.google.com/auth/audience"),
-                                    ("4. Utwórz klienta „Aplikacja komputerowa” i pobierz plik JSON", "https://console.cloud.google.com/auth/clients"),
+                                let steps: [(std::borrow::Cow<str>, &str); 4] = [
+                                    (t!("ui.settings.account.step1"), "https://console.cloud.google.com/projectcreate"),
+                                    (t!("ui.settings.account.step2"), "https://console.cloud.google.com/apis/library/gmail.googleapis.com"),
+                                    (t!("ui.settings.account.step3"), "https://console.cloud.google.com/auth/audience"),
+                                    (t!("ui.settings.account.step4"), "https://console.cloud.google.com/auth/clients"),
                                 ];
                                 for (label, url) in steps {
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new(label).small());
-                                        if ui.small_button("Otwórz ↗").clicked() {
+                                        if ui.small_button(t!("ui.settings.account.open")).clicked() {
                                             crate::oauth::open_url(url);
                                         }
                                     });
                                 }
                                 ui.label(
-                                    RichText::new("5. Pobrany plik zostanie znaleziony sam (folder Pobrane) — albo przeciągnij go na to okno.")
+                                    RichText::new(t!("ui.settings.account.step5"))
                                         .small(),
                                 );
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new("Bez konfiguracji:").small().color(MUTED()));
-                                    if ui.link(RichText::new("zaloguj hasłem aplikacji").small()).clicked() {
+                                    ui.label(RichText::new(t!("ui.settings.account.without_setup")).small().color(MUTED()));
+                                    if ui.link(RichText::new(t!("ui.settings.account.use_app_password")).small()).clicked() {
                                         a.use_oauth = false;
                                         crate::oauth::open_url("https://myaccount.google.com/apppasswords");
                                     }
                                 });
                             });
                     }
-                    egui::CollapsingHeader::new("Zaawansowane")
+                    egui::CollapsingHeader::new(t!("ui.settings.account.advanced"))
                         .id_salt("oauth-advanced")
                         .show(ui, |ui| {
                             egui::Grid::new("accgrid-oauth").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -841,42 +836,42 @@ impl MailApp {
                         });
                 } else {
                     egui::Grid::new("accgrid-pass").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                        ui.label("Hasło");
+                        ui.label(t!("ui.settings.account.password"));
                         ui.add(
                             egui::TextEdit::singleline(&mut a.password)
                                 .password(true)
-                                .hint_text("Gmail: 16-znakowe hasło aplikacji")
+                                .hint_text(t!("ui.settings.account.password_hint"))
                                 .desired_width(300.0),
                         );
                         ui.end_row();
                     });
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Hasło jest zapisane w zaszyfrowanej postaci (tylko dla Twojego konta Windows).").small().color(MUTED()));
-                        if a.imap_host == "imap.gmail.com" && ui.link(RichText::new("Utwórz hasło aplikacji ↗").small()).clicked() {
+                        ui.label(RichText::new(t!("ui.settings.account.password_stored")).small().color(MUTED()));
+                        if a.imap_host == "imap.gmail.com" && ui.link(RichText::new(t!("ui.settings.account.app_password")).small()).clicked() {
                             crate::oauth::open_url("https://myaccount.google.com/apppasswords");
                         }
                     });
                 }
                 ui.add_space(4.0);
-                egui::CollapsingHeader::new("Ustawienia serwerów")
+                egui::CollapsingHeader::new(t!("ui.settings.account.servers"))
                     .id_salt("servers")
                     .default_open(!a.use_oauth && a.imap_host.is_empty())
                     .show(ui, |ui| {
                         egui::Grid::new("accgrid-servers").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                            ui.label("Serwer IMAP");
+                            ui.label(t!("ui.settings.account.imap"));
                             ui.horizontal(|ui| {
                                 ui.add(egui::TextEdit::singleline(&mut a.imap_host).hint_text("imap.example.com").desired_width(210.0));
                                 ui.add(egui::DragValue::new(&mut a.imap_port).range(1..=65535));
                             });
                             ui.end_row();
-                            ui.label("Serwer SMTP");
+                            ui.label(t!("ui.settings.account.smtp"));
                             ui.horizontal(|ui| {
                                 ui.add(egui::TextEdit::singleline(&mut a.smtp_host).hint_text("smtp.example.com").desired_width(210.0));
                                 ui.add(egui::DragValue::new(&mut a.smtp_port).range(1..=65535));
                             });
                             ui.end_row();
-                            ui.label("Login");
-                            ui.add(egui::TextEdit::singleline(&mut a.username).hint_text("zwykle adres e-mail").desired_width(290.0));
+                            ui.label(t!("ui.settings.account.login"));
+                            ui.add(egui::TextEdit::singleline(&mut a.username).hint_text(t!("ui.settings.account.login_hint")).desired_width(290.0));
                             ui.end_row();
                         });
                     });
@@ -884,11 +879,11 @@ impl MailApp {
                 ui.separator();
                 // Signature: taken from the person's own sent mail (Gmail adds it there)
                 {
-                    ui.label(RichText::new("Podpis").strong());
-                    ui.checkbox(&mut self.store.account.signature_on, "Dodawaj podpis do nowych wiadomości i odpowiedzi");
+                    ui.label(RichText::new(t!("ui.settings.account.signature")).strong());
+                    ui.checkbox(&mut self.store.account.signature_on, t!("ui.settings.account.signature_on"));
                     if self.store.account.signature_text.trim().is_empty() {
                         ui.label(
-                            RichText::new("Nie znaleziono jeszcze podpisu — pojawi się, gdy zsynchronizują się Twoje wiadomości wysłane.")
+                            RichText::new(t!("ui.settings.account.signature_none"))
                                 .small()
                                 .color(MUTED()),
                         );
@@ -899,27 +894,27 @@ impl MailApp {
                     }
                     let a = &mut self.store.account;
                     ui.horizontal(|ui| {
-                        if ui.button("Pobierz ponownie z wysłanych").on_hover_text("Szuka podpisu w Twoich ostatnich wiadomościach wysłanych").clicked() {
+                        if ui.button(t!("ui.settings.account.signature_refresh")).on_hover_text(t!("ui.settings.account.signature_refresh_hint")).clicked() {
                             a.signature_auto = true;
                             refresh_signature = true;
                         }
-                        if !a.signature_text.is_empty() && ui.small_button("Usuń podpis").clicked() {
+                        if !a.signature_text.is_empty() && ui.small_button(t!("ui.settings.account.signature_remove")).clicked() {
                             a.signature_text.clear();
                             a.signature_html.clear();
                             a.signature_images.clear();
                             a.signature_auto = false;
                         }
                     });
-                    ui.label(RichText::new("Podpis jest brany z Twoich wiadomości wysłanych przez Gmaila, razem z wyglądem i zdjęciem.").small().color(MUTED()));
+                    ui.label(RichText::new(t!("ui.settings.account.signature_note")).small().color(MUTED()));
                 }
                 ui.add_space(8.0);
                 ui.separator();
                 // the footer as in Windows dialogs: on the right, the main action first
                 ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new("Zamknij").min_size(Vec2::new(0.0, 30.0))).clicked() {
+                    if ui.add(egui::Button::new(t!("ui.settings.account.close")).min_size(Vec2::new(0.0, 30.0))).clicked() {
                         self.account_open = false;
                     }
-                    if ui.add(egui::Button::new(RichText::new("Zapisz i sprawdź pocztę").color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(t!("ui.settings.account.save_check")).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0))).clicked() {
                         save_and_check = true;
                     }
                 });
@@ -951,7 +946,7 @@ impl MailApp {
                 self.sign_in_error = None;
                 let a = &self.store.account;
                 net::google_sign_in(a.oauth_client_id.clone(), a.oauth_client_secret.clone(), self.tx.clone(), self.ctx.clone());
-                self.set_status("Otwieram stronę logowania Google w przeglądarce…");
+                self.set_status(t!("ui.settings.opening_google"));
             }
         }
         if save_and_check {

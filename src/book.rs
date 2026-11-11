@@ -247,6 +247,6 @@ pub fn sync(acc: &crate::model::Account, book: &Book) -> Result<Synced, String> 
     for (id, name, emails, groups) in people {
         fresh.people.push(Person { id, name, emails, groups, ..Default::default() });
     }
-    fresh.synced = chrono::Local::now().format("%d.%m %H:%M").to_string();
+    fresh.synced = chrono::Local::now().format(if crate::i18n::is_pl() { "%d.%m %H:%M" } else { "%-d %b %H:%M" }).to_string();
     Ok(Synced { book: fresh, renamed, sent_rev, sent })
 }

@@ -15,7 +15,8 @@ pub(super) struct VisList {
 
 #[derive(Clone, Copy)]
 pub(super) enum Row {
-    Group(&'static str),
+    /// a date heading, as an index into `group_title` (the words follow the language live)
+    Group(u8),
     Msg(u64),
 }
 
@@ -69,14 +70,29 @@ pub(super) enum MailView {
 }
 
 impl MailView {
+    /// The view's name in the interface language. Read once per language and kept, so callers
+    /// keep getting a `&'static str` (as `Folder::name`).
     pub(super) fn title(self) -> &'static str {
-        match self {
-            MailView::Folder(f) => f.name(),
-            MailView::Unread => "Nieprzeczytane",
-            MailView::Flagged => "Oznaczone",
-            MailView::NoReply => "Bez odpowiedzi (7 dni)",
-            MailView::Label => "Tag",
-        }
+        static NAMES: std::sync::OnceLock<[[&'static str; 4]; 2]> = std::sync::OnceLock::new();
+        let i = match self {
+            MailView::Folder(f) => return f.name(),
+            MailView::Unread => 0,
+            MailView::Flagged => 1,
+            MailView::NoReply => 2,
+            MailView::Label => 3,
+        };
+        let names = NAMES.get_or_init(|| {
+            let keep = |s: std::borrow::Cow<str>| -> &'static str { Box::leak(s.into_owned().into_boxed_str()) };
+            ["en", "pl"].map(|l| {
+                [
+                    keep(t!("mail.list.title_unread", locale = l)),
+                    keep(t!("mail.list.title_flagged", locale = l)),
+                    keep(t!("mail.list.title_no_reply", locale = l)),
+                    keep(t!("mail.list.title_tag", locale = l)),
+                ]
+            })
+        });
+        names[crate::i18n::is_pl() as usize][i]
     }
 }
 
@@ -252,7 +268,7 @@ impl MailApp {
     /// One message of a conversation as a card: folded to one line, or unfolded with its text.
     /// Returns true when its header was clicked (to fold or unfold it).
     pub(super) fn thread_card(&mut self, ui: &mut Ui, x: &Message, unfolded: bool) -> bool {
-        let when = x.date.format("%d-%m-%Y %H:%M").to_string();
+        let when = format!("{} {}", i18n::date(x.date.date()), x.date.format("%H:%M"));
         let who = if x.from_name.is_empty() { x.from_addr.clone() } else { x.from_name.clone() };
         let card = SURFACE();
         let hot = SELECTED();
@@ -272,7 +288,7 @@ impl MailApp {
             if resp.double_clicked() && !formatted {
                 self.actions.push(Action::OpenWindow(x.id));
             }
-            let tip = if formatted { "Kliknij, aby otworzyć" } else { "Kliknij, aby rozwinąć · dwukrotnie, aby otworzyć w osobnym oknie" };
+            let tip = if formatted { t!("mail.list.tip_open") } else { t!("mail.list.tip_unfold") };
             return resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked();
         }
         let mut clicked = false;
@@ -292,13 +308,20 @@ impl MailApp {
                 p.text(Pos2::new(r.right(), r.top() + 8.0), Align2::RIGHT_TOP, &when, FontId::proportional(12.5), MUTED());
                 line_f(p, Pos2::new(r.left() + 52.0, r.top() + 6.0), &who, semibold(14.0), ACCENT(), r.width() - 70.0 - tw);
                 let to_name = if x.to.is_empty() { "—".to_string() } else { split_address(x.to.split(',').next().unwrap_or("")).0 };
-                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &format!("do {to_name}"), 12.5, MUTED(), r.width() - 270.0);
+                line(p, Pos2::new(r.left() + 52.0, r.top() + 27.0), &t!("mail.list.to_name", name = to_name), 12.5, MUTED(), r.width() - 270.0);
                 if resp.double_clicked() {
                     self.actions.push(Action::OpenWindow(x.id));
                 }
                 clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
                 // what to do with this message, under its time (as on the open message)
-                let tools = [(ic::OPEN, "Otwórz"), (ic::FORWARD, "Prześlij dalej"), (ic::REPLY_ALL, "Odpowiedz wszystkim"), (ic::REPLY, "Odpowiedz"), (ic::LINK, "Kopiuj link dla AI"), (ic::MORE, "Więcej")];
+                let tools = [
+                    (ic::OPEN, t!("mail.list.open")),
+                    (ic::FORWARD, t!("mail.list.forward")),
+                    (ic::REPLY_ALL, t!("mail.list.reply_all")),
+                    (ic::REPLY, t!("mail.list.reply")),
+                    (ic::LINK, t!("mail.list.copy_for_ai")),
+                    (ic::MORE, t!("mail.list.more")),
+                ];
                 for (k, (glyph, tip)) in tools.iter().enumerate() {
                     // (the reply buttons and Otwórz on the right, the AI link and the menu before them)
                     let slot = if k >= 4 { k + 1 } else { k };
@@ -339,14 +362,14 @@ impl MailApp {
                                 egui::ScrollArea::horizontal().id_salt(("card-html", x.id)).show(ui, |ui| self.render_html(ui, x, &b));
                             });
                         } else if body.is_empty() && x.partial {
-                            ui.label(RichText::new("Treść tej wiadomości nie została jeszcze pobrana — otwórz ją, aby ją pobrać.").color(MUTED()));
+                            ui.label(RichText::new(t!("mail.list.body_not_downloaded")).color(MUTED()));
                         } else {
                             // very long texts are cut here; "Otwórz" shows the whole message
                             let cut: String = body.chars().take(8000).collect();
                             let more = cut.len() < body.len();
                             ui.add(egui::Label::new(RichText::new(cut).size(13.5).color(TEXT())).selectable(true).wrap());
                             if more {
-                                ui.label(RichText::new("… (dalsza część po otwarciu wiadomości)").size(12.5).color(MUTED()));
+                                ui.label(RichText::new(t!("mail.list.body_cut")).size(12.5).color(MUTED()));
                             }
                         }
                         if !x.attachments.is_empty() {
@@ -373,7 +396,7 @@ impl MailApp {
         let shown: Vec<&Message> = if open || earlier.len() <= 3 { earlier.clone() } else { earlier[earlier.len() - 3..].to_vec() };
         let hidden = earlier.len() - shown.len();
         if hidden > 0 {
-            let label = format!("Wyświetl {hidden} {}", pl_older(hidden));
+            let label = i18n::plural("mail.list.older_show", hidden);
             let w = text_width(ui, &label, FontId::proportional(13.0)) + 28.0;
             let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::hover());
             let r = Rect::from_center_size(row.center(), Vec2::new(w, 26.0));
@@ -434,7 +457,7 @@ impl MailApp {
             }
         });
         if ids.len() > LATER_SHOWN {
-            let label = format!("↓  Przejdź do najnowszej ({} {} w tej rozmowie)", ids.len(), pl_newer(ids.len()));
+            let label = i18n::plural("mail.list.newer_goto", ids.len());
             let resp = ui.add(egui::Label::new(RichText::new(label).size(12.5).color(ACCENT())).sense(Sense::click()));
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 if let Some(last) = ids.last() {
@@ -485,7 +508,7 @@ impl MailApp {
         let searching = !key.2.is_empty();
         let mut rows = Vec::with_capacity(list.len() + 8);
         let mut y = 0.0;
-        let mut last_group = "";
+        let mut last_group = u8::MAX;
         for m in &list {
             let g = group_of(m.date.date(), today);
             // (search results: no date headings, those found by meaning come after the rest)
@@ -654,16 +677,19 @@ impl MailApp {
         let today = Local::now().date_naive();
         let vis = self.vis_list();
         let title = if self.loading.is_some() {
-            "Wczytywanie skrzynki…".to_string()
+            t!("mail.list.loading_mailbox").into_owned()
         } else if self.search.trim().is_empty() {
-            let name = if self.view == MailView::Label { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
+            let name = if self.view == MailView::Label && self.label_filter == FAVOURITES {
+                // the Gmail label keeps its Polish name; the heading follows the language
+                t!("ui.sidebar.favourites").into_owned()
+            } else if self.view == MailView::Label { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
             let unread = match self.view {
                 MailView::Folder(f) => self.counts().folder_unread.get(&f).copied().unwrap_or(0),
                 _ => vis.unread,
             };
             format!("{} ({} / {})", name, unread, vis.ids.len())
         } else {
-            format!("Wyniki wyszukiwania ({})", vis.ids.len())
+            t!("mail.list.search_results", n = vis.ids.len()).into_owned()
         };
         let (hr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::hover());
         line_f(ui.painter(), Pos2::new(hr.left() + 14.0, hr.top() + 12.0), &title, semibold(17.0), TEXT(), hr.width() - 28.0);
@@ -671,7 +697,7 @@ impl MailApp {
             // where to look: everywhere, received or sent mail, each with its number of results
             let (sr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::hover());
             let mut x = sr.left() + 12.0;
-            for (i, (scope, name)) in [(Scope::All, "Wszędzie"), (Scope::Received, "Odebrane"), (Scope::Sent, "Wysłane")].into_iter().enumerate() {
+            for (i, (scope, name)) in [(Scope::All, t!("mail.list.scope_all")), (Scope::Received, t!("mail.list.scope_received")), (Scope::Sent, t!("mail.list.scope_sent"))].into_iter().enumerate() {
                 let label = format!("{name} {}", vis.found[i]);
                 let w = text_width(ui, &label, FontId::proportional(12.5)) + 18.0;
                 let r = Rect::from_min_size(Pos2::new(x, sr.top() + 2.0), Vec2::new(w, 24.0));
@@ -704,7 +730,7 @@ impl MailApp {
                     ui.add_space(40.0);
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            RichText::new(if self.search.is_empty() { "Ten folder jest pusty" } else { "Brak wiadomości pasujących do wyszukiwania" })
+                            RichText::new(if self.search.is_empty() { t!("mail.list.empty_folder") } else { t!("mail.list.no_matches") })
                                 .color(MUTED()),
                         );
                     });
@@ -724,7 +750,7 @@ impl MailApp {
                         let gr = Rect::from_min_size(origin + Vec2::new(0.0, *y), Vec2::new(w, GROUP_H));
                         let p = ui.painter();
                         chevron(p, Pos2::new(gr.left() + 16.0, gr.center().y), true, MUTED());
-                        p.text(Pos2::new(gr.left() + 30.0, gr.center().y), Align2::LEFT_CENTER, g, FontId::proportional(14.5), MUTED());
+                        p.text(Pos2::new(gr.left() + 30.0, gr.center().y), Align2::LEFT_CENTER, group_title(g), FontId::proportional(14.5), MUTED());
                         p.hline(gr.left() + 10.0..=gr.right() - 10.0, gr.bottom() - 1.0, Stroke::new(1.0, BORDER()));
                     }
                     Row::Msg(id) => {
@@ -750,22 +776,24 @@ impl MailApp {
             p.rect_filled(r, CornerRadius::same(3), HOVER());
         }
         let outgoing = matches!(m.folder, Folder::Sent | Folder::Drafts | Folder::Outbox);
-        let who = if outgoing {
+        let (who, avatar_name) = if outgoing {
             if m.to.is_empty() {
-                "(bez odbiorcy)".to_string()
+                let none = t!("mail.list.no_recipient").into_owned();
+                (none.clone(), none)
             } else {
-                format!("Do: {}", split_address(m.to.split(',').next().unwrap_or("")).0)
+                let name = split_address(m.to.split(',').next().unwrap_or("")).0;
+                (t!("mail.list.to_label", name = name).into_owned(), name)
             }
         } else {
-            m.from_name.clone()
+            (m.from_name.clone(), m.from_name.clone())
         };
         let email = if outgoing { split_address(m.to.split(',').next().unwrap_or("")).1 } else { m.from_addr.clone() };
-        self.avatar_or_logo(ui, Pos2::new(r.left() + 28.0, r.top() + 24.0), 17.0, who.trim_start_matches("Do: "), &email);
+        self.avatar_or_logo(ui, Pos2::new(r.left() + 28.0, r.top() + 24.0), 17.0, &avatar_name, &email);
         let p = ui.painter();
         let x = r.left() + 56.0;
         // a search result found by meaning rather than by its words gets a small "≈"
         let by_meaning = !self.search.trim().is_empty() && self.finder.by_meaning.contains(&m.id);
-        let date = if by_meaning { format!("≈ znaczenie · {}", short_date(m.date, today)) } else { short_date(m.date, today) };
+        let date = if by_meaning { t!("mail.list.by_meaning", date = short_date(m.date, today)).into_owned() } else { short_date(m.date, today) };
         let df = FontId::proportional(12.0);
         let dw = text_width(ui, &date, df.clone());
         p.text(Pos2::new(r.right() - 10.0, r.top() + 7.0), Align2::RIGHT_TOP, &date, df, if m.read { MUTED() } else { TEXT() });
@@ -783,14 +811,14 @@ impl MailApp {
         if let Some(f) = self.forwarded.get(&m.id).and_then(|f| self.msg(*f)) {
             let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 24.0), Vec2::new(18.0, 18.0));
             ui.painter().text(ar.center(), Align2::CENTER_CENTER, ic::FORWARD, FontId::proportional(13.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
-            let tip = format!("Przekazano dalej {} {} do: {}", pl::short_day_month(f.date.date()), f.date.format("%H:%M"), short_people(&f.to));
+            let tip = t!("mail.list.forwarded_tip", date = i18n::short_day_month(f.date.date()), time = f.date.format("%H:%M"), to = short_people(&f.to)).into_owned();
             ui.interact(ar, id(("forwarded", m.id)), Sense::hover()).on_hover_text(tip);
             icons_w += 18.0;
         }
         if let Some(when) = self.answered.1.get(&m.id) {
             let ar = Rect::from_min_size(Pos2::new(r.right() - 26.0 - icons_w, r.top() + 24.0), Vec2::new(18.0, 18.0));
             ui.painter().text(ar.center(), Align2::CENTER_CENTER, ic::REPLY, FontId::proportional(13.0), Color32::from_rgb(0x8E, 0x5B, 0xD0));
-            let when = format!("Odpowiedziano {} {}", pl::short_day_month(when.date()), when.format("%H:%M"));
+            let when = t!("mail.list.replied_tip", date = i18n::short_day_month(when.date()), time = when.format("%H:%M")).into_owned();
             ui.interact(ar, id(("answered", m.id)), Sense::hover()).on_hover_text(when);
             icons_w += 18.0;
         }
@@ -830,15 +858,15 @@ impl MailApp {
     }
 
     pub(super) fn message_menu(&mut self, ui: &mut Ui, id: u64, read: bool, flagged: bool) {
-        if ui.button("↶  Odpowiedz").clicked() {
+        if ui.button(t!("mail.list.menu_reply")).clicked() {
             self.actions.push(Action::Reply(id, false));
             ui.close();
         }
-        if ui.button("⮪  Odpowiedz wszystkim").clicked() {
+        if ui.button(t!("mail.list.menu_reply_all")).clicked() {
             self.actions.push(Action::Reply(id, true));
             ui.close();
         }
-        if ui.button("➦  Prześlij dalej").clicked() {
+        if ui.button(t!("mail.list.menu_forward")).clicked() {
             self.actions.push(Action::Forward(id));
             ui.close();
         }
@@ -850,8 +878,8 @@ impl MailApp {
         });
         if mine
             && ui
-                .button("⟳  Wyślij ponownie")
-                .on_hover_text("Otwiera tę wiadomość do wysłania jeszcze raz — z tymi samymi odbiorcami, treścią i załącznikami, które możesz zmienić")
+                .button(t!("mail.list.menu_send_again"))
+                .on_hover_text(t!("mail.list.menu_send_again_tip"))
                 .clicked()
         {
             self.actions.push(Action::SendAgain(id));
@@ -859,42 +887,42 @@ impl MailApp {
         }
         ui.separator();
         if ui
-            .button("🔗  Kopiuj link dla AI")
-            .on_hover_text("Udostępnia ten e-mail w Twojej sieci Tailscale i kopiuje link, który możesz dać agentowi AI. Agent może też zostawić szkic odpowiedzi.")
+            .button(t!("mail.list.menu_copy_link_ai"))
+            .on_hover_text(t!("mail.list.menu_copy_link_ai_tip"))
             .clicked()
         {
             self.actions.push(Action::CopyForAi(id));
             ui.close();
         }
-        if ui.button("📋  Kopiuj treść dla AI").on_hover_text("Kopiuje cały e-mail jako tekst do wklejenia w czacie z AI").clicked() {
+        if ui.button(t!("mail.list.menu_copy_text_ai")).on_hover_text(t!("mail.list.menu_copy_text_ai_tip")).clicked() {
             self.actions.push(Action::CopyTextForAi(id));
             ui.close();
         }
-        let tr_label = if self.show_translated.contains(&id) { "🌐  Pokaż oryginał" } else { "🌐  Przetłumacz na polski" };
-        if ui.button(tr_label).on_hover_text("Tłumaczenie przez AI (CLIProxy), z zachowaniem wyglądu wiadomości").clicked() {
+        let tr_label = if self.show_translated.contains(&id) { t!("mail.list.menu_show_original") } else { t!("mail.list.menu_translate") };
+        if ui.button(tr_label).on_hover_text(t!("mail.list.menu_translate_tip")).clicked() {
             self.actions.push(Action::Translate(id));
             ui.close();
         }
         ui.separator();
-        if ui.button(if read { "Oznacz jako nieprzeczytane" } else { "Oznacz jako przeczytane" }).clicked() {
+        if ui.button(if read { t!("mail.list.menu_mark_unread") } else { t!("mail.list.menu_mark_read") }).clicked() {
             self.actions.push(Action::SetRead(id, !read));
             ui.close();
         }
-        if ui.button(if flagged { "Usuń oznaczenie" } else { "⚑  Oznacz" }).clicked() {
+        if ui.button(if flagged { t!("mail.list.menu_unflag") } else { t!("mail.list.menu_flag") }).clicked() {
             self.actions.push(Action::ToggleFlag(id));
             ui.close();
         }
         let marked = self.prefs.no_reply_needed.contains(&id);
         let waiting = self.msg(id).is_some_and(|m| self.waits_for_reply(m));
         if marked {
-            if ui.button("↩  Wymaga odpowiedzi").on_hover_text("Wraca do listy „Bez odpowiedzi”").clicked() {
+            if ui.button(t!("mail.list.menu_needs_reply")).on_hover_text(t!("mail.list.menu_needs_reply_tip")).clicked() {
                 self.actions.push(Action::NoReplyNeeded(id, false));
                 ui.close();
             }
         } else if waiting
             && ui
-                .button("✓  Nie wymaga odpowiedzi")
-                .on_hover_text("Znika z listy „Bez odpowiedzi” (nie zmienia niczego na serwerze)")
+                .button(t!("mail.list.menu_no_reply"))
+                .on_hover_text(t!("mail.list.menu_no_reply_tip"))
                 .clicked()
         {
             self.actions.push(Action::NoReplyNeeded(id, true));
@@ -902,15 +930,15 @@ impl MailApp {
         }
         let fav = self.msg(id).is_some_and(|m| m.labels.iter().any(|l| l == FAVOURITES));
         if ui
-            .button(if fav { "☆  Usuń z ulubionych" } else { "★  Dodaj do ulubionych" })
-            .on_hover_text("Ulubione są w Gmailu etykietą „Ulubione”, więc widać je też w telefonie")
+            .button(if fav { t!("mail.list.menu_unfav") } else { t!("mail.list.menu_fav") })
+            .on_hover_text(t!("mail.list.menu_fav_tip"))
             .clicked()
         {
             self.actions.push(if fav { Action::RemoveTag(id, FAVOURITES.into()) } else { Action::AddTag(id, FAVOURITES.into()) });
             ui.close();
         }
-        ui.menu_button("🏷  Tagi", |ui| self.tag_menu(ui, id));
-        ui.menu_button("Przenieś do", |ui| {
+        ui.menu_button(t!("mail.list.menu_tags"), |ui| self.tag_menu(ui, id));
+        ui.menu_button(t!("mail.list.menu_move_to"), |ui| {
             for f in Folder::ALL {
                 if ui.button(format!("{}  {}", f.icon(), f.name())).clicked() {
                     self.actions.push(Action::Move(id, f));
@@ -919,28 +947,41 @@ impl MailApp {
             }
         });
         ui.separator();
-        if ui.button("🗑  Usuń").clicked() {
+        if ui.button(t!("mail.list.menu_delete")).clicked() {
             self.actions.push(Action::Delete(id));
             ui.close();
         }
     }
 }
 
-pub(super) fn group_of(d: NaiveDate, today: NaiveDate) -> &'static str {
+/// Which date heading a day falls under (an index for `group_title`).
+pub(super) fn group_of(d: NaiveDate, today: NaiveDate) -> u8 {
     let days = (today - d).num_days();
     if days <= 0 {
-        "Dzisiaj"
+        0
     } else if days == 1 {
-        "Wczoraj"
+        1
     } else if days < 7 && d.weekday().num_days_from_monday() < today.weekday().num_days_from_monday() {
-        "Wcześniej w tym tygodniu"
+        2
     } else if days < 14 {
-        "W zeszłym tygodniu"
+        3
     } else if d.month() == today.month() && d.year() == today.year() {
-        "Wcześniej w tym miesiącu"
+        4
     } else {
-        "Starsze"
+        5
     }
+}
+
+pub(super) fn group_title(g: u8) -> String {
+    match g {
+        0 => t!("mail.list.group_today"),
+        1 => t!("mail.list.group_yesterday"),
+        2 => t!("mail.list.group_earlier_week"),
+        3 => t!("mail.list.group_last_week"),
+        4 => t!("mail.list.group_earlier_month"),
+        _ => t!("mail.list.group_older"),
+    }
+    .into_owned()
 }
 
 pub(super) fn short_date(dt: NaiveDateTime, today: NaiveDate) -> String {
@@ -949,9 +990,9 @@ pub(super) fn short_date(dt: NaiveDateTime, today: NaiveDate) -> String {
     if days <= 0 {
         dt.format("%H:%M").to_string()
     } else if days < 7 {
-        format!("{} {}", pl::wd_short(d), dt.format("%H:%M"))
+        format!("{} {}", i18n::wd_short(d), dt.format("%H:%M"))
     } else {
-        dt.format("%d-%m-%Y").to_string()
+        i18n::date(d)
     }
 }
 
@@ -988,22 +1029,6 @@ pub(super) fn thread_subject(s: &str) -> String {
         }
     }
     t.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-pub(super) fn pl_older(n: usize) -> &'static str {
-    match n {
-        1 => "starszą wiadomość",
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => "starsze wiadomości",
-        _ => "starszych wiadomości",
-    }
-}
-
-pub(super) fn pl_newer(n: usize) -> &'static str {
-    match n {
-        1 => "nowsza wiadomość",
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => "nowsze wiadomości",
-        _ => "nowszych wiadomości",
-    }
 }
 
 /// How many newer messages of a conversation are shown below the open one (folded).

@@ -2,6 +2,12 @@
 //! runs instead of the window and then the program ends.
 use crate::*;
 
+/// The demo mailbox as these checks expect it: in Polish (they type and look for its Polish names).
+fn pl_sample() -> model::Store {
+    i18n::set("pl");
+    model::Store::sample()
+}
+
 /// Runs the command-line check named in `args`; `true` when one ran (no window is opened then).
 pub fn run(args: &[String]) -> bool {
     if args.iter().any(|a| a == "--chat-check") {
@@ -213,7 +219,7 @@ pub fn run(args: &[String]) -> bool {
     if args.iter().any(|a| a == "--suggest-selftest") {
         // The recipients box with its suggestion list, driven by simulated mouse and keys.
         use eframe::egui;
-        let sample = model::Store::sample();
+        let sample = pl_sample();
         let people = contacts::collect(&sample.messages, &sample.account.email);
         let ctx = egui::Context::default();
         let mut text = String::from("ann");
@@ -296,7 +302,7 @@ pub fn run(args: &[String]) -> bool {
         let mine2 = unigram::Unigram::load(&dir.join("vocab-test.bin")).expect("load");
         println!("compact file loads in {:?}", t.elapsed());
         let _ = std::fs::remove_file(dir.join("vocab-test.bin"));
-        let store = db::Db::open().ok().and_then(|mut d| d.load()).unwrap_or_else(model::Store::sample);
+        let store = db::Db::open().ok().and_then(|mut d| d.load()).unwrap_or_else(pl_sample);
         let t = std::time::Instant::now();
         let n: usize = store.messages.iter().take(500).map(|m| mine2.encode(&format!("{}
 {}", m.subject, m.body)).len()).sum();
@@ -377,12 +383,12 @@ pub fn run(args: &[String]) -> bool {
         let base = ai::load();
         let texts = vec!["Hello Jarek, thank you for your order.".to_string(), "Best regards".to_string()];
         for model in ["claude-haiku-5-5", "claude-sonnet-5-5"] {
-            for (effort, _) in ai::EFFORTS {
+            for effort in ai::EFFORTS {
                 let mut s = base.clone();
                 s.translate_model = model.into();
                 s.translate_effort = effort.into();
                 let t = std::time::Instant::now();
-                let r = ai::translate_texts(&s, &texts);
+                let r = ai::translate_texts(&s, &texts, true);
                 println!("{model} {effort}: {:.1} s {:?}", t.elapsed().as_secs_f32(), r);
             }
         }
@@ -399,7 +405,7 @@ pub fn run(args: &[String]) -> bool {
             return true;
         }
         let t = std::time::Instant::now();
-        match translate::translate_email(&ai::load(), Some(html), "") {
+        match translate::translate_email(&ai::load(), Some(html), "", true) {
             Ok(path) => println!("done in {:.1} s -> {path}", t.elapsed().as_secs_f32()),
             Err(e) => println!("error after {:.1} s: {e}", t.elapsed().as_secs_f32()),
         }
@@ -412,7 +418,7 @@ pub fn run(args: &[String]) -> bool {
         let html = "<html><head><style>p{color:red}</style><title>X</title></head><body><table style=\"background:#eef\"><tr><td><h2>Hello Jarek,</h2><p>Thank you for your order <b>#12345</b>. It will ship on <a href=\"https://example.com/track\">Monday</a>.</p><p>Best regards,<br>Natalia Kalka</p></td></tr></table></body></html>";
         let pieces = translate::pieces(html);
         println!("pieces: {:?}", pieces.iter().map(|(a, b)| &html[*a..*b]).collect::<Vec<_>>());
-        match translate::translate_email(&ai::load(), Some(html.to_string()), "") {
+        match translate::translate_email(&ai::load(), Some(html.to_string()), "", true) {
             Ok(path) => println!("{}", std::fs::read_to_string(path).unwrap_or_default()),
             Err(e) => println!("error: {e}"),
         }
@@ -549,7 +555,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         return true;
     }
     if args.iter().any(|a| a == "--signature-selftest") {
-        let store = model::Store::sample();
+        let store = pl_sample();
         let base = store.messages[0].clone();
         let logo = model::cache_put(&std::fs::read("assets/poczta.png").unwrap_or_default(), "png");
         let sent = |n: u64, body: &str, html: Option<String>| {
@@ -629,7 +635,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         use std::io::{Read, Write};
         println!("Tailscale on this computer: {}", if share::tailscale_ip().is_some() { "yes" } else { "no" });
         println!("name in the Tailscale network: {:?}", share::tailscale_name());
-        let store = model::Store::sample();
+        let store = pl_sample();
         let mut m = store.messages.iter().find(|m| !m.attachments.is_empty()).unwrap_or(&store.messages[0]).clone();
         // a screenshot inside the email and a real attachment file, as in a typical email
         let png = crate::model::cache_put(&std::fs::read("assets/poczta.png").unwrap_or_default(), "png");
@@ -688,7 +694,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         return true;
     }
     if args.iter().any(|a| a == "--contacts-selftest") {
-        let sample = model::Store::sample();
+        let sample = pl_sample();
         let all = contacts::collect(&sample.messages, &sample.account.email);
         for q in ["m", "ann", "kow", "zesp"] {
             let found: Vec<String> = contacts::find(&all, q, "", 6).iter().map(|c| c.text()).collect();
@@ -782,7 +788,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
             .collect();
         println!("{} pages copied", pages.len());
         let _ = std::fs::remove_file(db::path());
-        let mut store = model::Store::sample();
+        let mut store = pl_sample();
         let template = store.messages.iter().find(|m| m.folder == model::Folder::Inbox).cloned().expect("a message");
         store.messages.clear();
         let mut extra = model::Account { display_name: "Konto testowe".into(), email: "test@example.com".into(), ..Default::default() };
@@ -813,7 +819,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
             return true;
         }
         let _ = std::fs::remove_file(db::path());
-        let mut store = model::Store::sample();
+        let mut store = pl_sample();
         let template = store.messages[0].clone();
         store.messages.clear();
         for i in 0..20_000u64 {

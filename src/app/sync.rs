@@ -112,7 +112,7 @@ impl MailApp {
             self.update_rx = crate::update::start();
         }
         if self.read_only {
-            self.set_status("Poczta jest już otwarta w innym oknie — zamknij to okno");
+            self.set_status(t!("core.sync.already_open"));
         }
         if migrating {
             self.save_now = true;
@@ -205,7 +205,7 @@ specjalista ds. Informatyki".into();
                 on_disk: false,
             });
             self.save_now = true;
-            self.set_status("AI przygotowało szkic odpowiedzi — znajdziesz go w Szkicach");
+            self.set_status(t!("core.sync.ai_draft"));
             self.touched = true;
         }
     }
@@ -240,12 +240,8 @@ specjalista ds. Informatyki".into();
         let logo = self.logo_for(&from_addr).and_then(|(_, b)| image::load_from_memory(&b).ok()).map(|i| i.to_rgba8());
         let [r, g, b, _] = crate::theme::avatar_color(&from).to_array();
         let n = ids.len();
-        let head = match n {
-            1 => "Nowa wiadomość".to_string(),
-            2..=4 => format!("{n} nowe wiadomości"),
-            _ => format!("{n} nowych wiadomości"),
-        };
-        let subject_shown = if subject.trim().is_empty() { "(bez tematu)".to_string() } else { subject.clone() };
+        let head = crate::i18n::plural("core.sync.toast_head", n);
+        let subject_shown = if subject.trim().is_empty() { t!("core.sync.no_subject").into_owned() } else { subject.clone() };
         crate::popup::show(
             crate::popup::Note {
                 head,
@@ -440,15 +436,15 @@ specjalista ds. Informatyki".into();
         }
         if !self.store.account.is_configured() {
             self.account_open = true;
-            self.set_status("Najpierw skonfiguruj konto");
+            self.set_status(t!("core.sync.configure_first"));
             return;
         }
         if !self.store.account.can_connect() {
             self.account_open = true;
             self.set_status(if self.store.account.use_oauth {
-                "Zaloguj się przez Google, aby się połączyć"
+                t!("core.sync.sign_in_google_to_connect")
             } else {
-                "Wpisz hasło (dla Gmaila: hasło aplikacji), aby się połączyć"
+                t!("core.sync.enter_password_to_connect")
             });
             return;
         }
@@ -809,13 +805,9 @@ specjalista ds. Informatyki".into();
                     // older mail arrives quietly (the note in the left bar shows the progress)
                     if !backfill && f == Folder::Inbox {
                         if added > 0 {
-                            self.set_status(match added {
-                                1 => "1 nowa wiadomość".to_string(),
-                                2..=4 => format!("{added} nowe wiadomości"),
-                                _ => format!("{added} nowych wiadomości"),
-                            });
+                            self.set_status(crate::i18n::plural("core.sync.new_messages", added));
                         } else if !quiet && !labels_only {
-                            self.set_status("Wszystko aktualne");
+                            self.set_status(t!("core.sync.up_to_date"));
                         }
                     }
                     if last || !backfill {
@@ -867,7 +859,7 @@ specjalista ds. Informatyki".into();
                         m.folder = Folder::Sent;
                         m.date = Local::now().naive_local();
                     }
-                    self.set_status("Wiadomość wysłana");
+                    self.set_status(t!("core.sync.sent"));
                 }
                 NetResult::Synced => {
                     self.ops_running = false;
@@ -884,15 +876,15 @@ specjalista ds. Informatyki".into();
                         }
                     }
                     let what = if what.starts_with("Sending") {
-                        "Wysyłanie"
+                        t!("core.sync.what_sending")
                     } else if what == "Synchronizacja" {
-                        "Zapisywanie zmian na serwerze"
+                        t!("core.sync.what_saving")
                     } else {
-                        "Odbieranie"
+                        t!("core.sync.what_receiving")
                     };
-                    let mut s = format!("{what} nie powiodło się: {error}");
+                    let mut s = t!("core.sync.failed", what = what, error = error).into_owned();
                     if id.is_some() {
-                        s.push_str(" (zostaje w skrzynce nadawczej)");
+                        s.push_str(&t!("core.sync.stays_in_outbox"));
                     }
                     self.set_status(s);
                 }
@@ -900,6 +892,7 @@ specjalista ds. Informatyki".into();
                     self.save_now = true;
                     self.signing_in = false;
                     let a = &mut self.store.account;
+                    let demo_name = a.takes_google_name();
                     a.oauth_refresh_token = r.refresh_token;
                     a.oauth_scopes = r.scopes;
                     // without the id token the account kind stays as it was known
@@ -916,19 +909,19 @@ specjalista ds. Informatyki".into();
                         a.email = r.email.clone();
                         a.username = r.email;
                     }
-                    if !r.name.is_empty() && (a.display_name.is_empty() || a.display_name == "Aleks Nowicki") {
+                    if !r.name.is_empty() && demo_name {
                         a.display_name = r.name;
                     }
                     let who = a.email.clone();
                     self.sign_in_error = None;
-                    self.set_status(format!("Zalogowano przez Google jako {who}"));
+                    self.set_status(t!("core.sync.signed_in", who = who));
                     // Fetch mail straight away.
                     self.send_receive();
                 }
                 NetResult::SignInFailed(e) => {
                     self.signing_in = false;
                     self.sign_in_error = Some(e.clone());
-                    self.set_status(format!("Logowanie przez Google nie powiodło się: {e}"));
+                    self.set_status(t!("core.sync.sign_in_failed", e = e));
                 }
             }
         }

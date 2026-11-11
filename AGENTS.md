@@ -1,6 +1,6 @@
 # Poczta
 
-A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, redb, WebView2). One EXE; Polish UI.
+A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, redb, WebView2). One EXE; English and Polish UI (`locales/*.yml` through `t!`, see `src/i18n.rs`).
 
 ## What we never compromise on
 
@@ -12,7 +12,7 @@ A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, r
 
 - Build on Linux: `cargo xwin build --release --target x86_64-pc-windows-msvc`. Nothing runs on Linux, including `cargo test`; verify on Windows.
 - Test on the Windows laptop (the owner's working machine) only after loading the skill `win-laptop-test`; `scripts/win-test.sh`'s header has the modes. Runs are invisible by default and must stay so. After touching window creation, the hooks in `main.rs`, `win-run.cmd` or the task, `probe 300` must end with `WYNIK: NIEWIDOCZNY` and no `SESJA ZABLOKOWANA`.
-- Screenshots: `mailclient.exe --screenshot out.png` draws demo data (`Store::sample()`); `POCZTA_START=account|calendar|about|…` and `POCZTA_DARK=1` pick the state.
+- Screenshots: `mailclient.exe --screenshot out.png` draws demo data (`Store::sample()`); `POCZTA_START=account|calendar|about|…` and `POCZTA_DARK=1` pick the state; `POCZTA_LANG=pl` draws it in Polish (pictures start in English, they never read saved settings).
 - Lint: `cargo clippy --release --target x86_64-pc-windows-msvc --all-targets`. The bin has 42 known warnings; a change must not add any. `.githooks/pre-push` enforces this once a clone has `git config core.hooksPath ./.githooks`.
 
 ## Hit every surface

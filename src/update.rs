@@ -53,7 +53,7 @@ fn built_at() -> u64 {
 pub fn version() -> (String, &'static str) {
     let short = chrono::DateTime::from_timestamp(built_at() as i64, 0).map(|t| t.with_timezone(&chrono::Local).format("v%y.%m%d.%H%M").to_string()).unwrap_or_default();
     // a build that doesn't update itself
-    (if PUBLISHED { short } else { format!("{short} lokalna") }, BUILD)
+    (if PUBLISHED { short } else { format!("{short} {}", t!("core.update.local_build")) }, BUILD)
 }
 
 /// `latest.json` written by the publish script.

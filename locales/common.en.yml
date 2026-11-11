@@ -1,0 +1,9 @@
+tray:
+  show: Show Poczta
+  quit: Quit
+people:
+  one: "%{n} person"
+  other: "%{n} people"
+contacts:
+  group_of: "group · %{people}"
+  google_synced: "Google Contacts: %{people}, %{when}"

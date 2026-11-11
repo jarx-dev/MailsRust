@@ -28,14 +28,14 @@ fn download(url: &str) -> Result<String, String> {
     }
     let resp = agent()?.get(&url).call().map_err(|e| match e {
         ureq::Error::Status(404, _) | ureq::Error::Status(403, _) | ureq::Error::Status(401, _) => {
-            "Google nie udostępnia kalendarza pod tym adresem (adres zmieniony albo wyłączony)".to_string()
+            t!("cal.gcal.not_shared").into_owned()
         }
-        ureq::Error::Status(code, _) => format!("Google odpowiedział {code}"),
-        other => format!("brak połączenia: {other}"),
+        ureq::Error::Status(code, _) => t!("cal.gcal.http_status", code = code).into_owned(),
+        other => t!("cal.gcal.no_connection", err = other).into_owned(),
     })?;
     let text = resp.into_string().map_err(|e| e.to_string())?;
     if !text.contains("BEGIN:VCALENDAR") {
-        return Err("pod tym adresem nie ma kalendarza (to musi być „Tajny adres w formacie iCal”)".into());
+        return Err(t!("cal.gcal.not_calendar").into_owned());
     }
     Ok(text)
 }
@@ -313,7 +313,7 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
         }
         let Some(start) = get("DTSTART").and_then(parse_when) else { continue };
         let uid = get("UID").map(|p| p.value.clone()).unwrap_or_default();
-        let title = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "(bez tytułu)".into());
+        let title = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
         let location = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default();
         let end = get("DTEND").and_then(parse_when);
         let dur = get("DURATION").and_then(|p| parse_duration(&p.value));
@@ -404,7 +404,7 @@ pub fn sync(urls: &[String], key: &str) -> Result<Vec<Event>, String> {
         };
         match got {
             Ok(evs) => all.extend(evs),
-            Err(e) => errors.push(if urls.len() > 1 { format!("kalendarz {}: {e}", i + 1) } else { e }),
+            Err(e) => errors.push(if urls.len() > 1 { t!("cal.gcal.calendar_n", n = i + 1, err = e).into_owned() } else { e }),
         }
     }
     if !errors.is_empty() && all.is_empty() {
@@ -433,8 +433,7 @@ pub fn is_script(url: &str) -> bool {
 /// events made in this app (in the main calendar).
 pub fn script_text(key: &str) -> String {
     format!(
-        r#"// Poczta — synchronizacja Kalendarza i Kontaktów Google (wklej całość, zapisz i wdróż jako aplikację internetową).
-// Kontakty potrzebują usługi „People API”: w edytorze po lewej „Usługi” (+) → People API → Dodaj.
+        r#"{header}
 const KLUCZ = '{key}';
 
 function doGet(e) {{
@@ -492,7 +491,7 @@ function remove(p) {{
   return {{ ok: true }};
 }}
 
-// ---- Kontakty Google (People API) ----
+{contacts_title}
 
 function contacts() {{
   const groups = [];
@@ -556,7 +555,7 @@ function deletePerson(p) {{
   return {{ ok: true }};
 }}
 
-// Uruchom tę funkcję raz w edytorze (▶ Uruchom), jeśli Google nie zapytał o zgodę na kalendarz i kontakty.
+{authorize_hint}
 function autoryzuj() {{
   CalendarApp.getDefaultCalendar().getName();
   People.ContactGroups.list({{ pageSize: 1 }});
@@ -565,7 +564,10 @@ function autoryzuj() {{
 function out(o) {{
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }}
-"#
+"#,
+        header = t!("cal.gcal.script_header"),
+        contacts_title = t!("cal.gcal.script_contacts"),
+        authorize_hint = t!("cal.gcal.script_authorize"),
     )
 }
 
@@ -580,15 +582,6 @@ fn enc(s: &str) -> String {
     out
 }
 
-/// The Polish form for a number: 1 kontakt, 2 kontakty, 5 kontaktów.
-fn pl(n: usize, one: &'static str, few: &'static str, many: &'static str) -> &'static str {
-    match n {
-        1 => one,
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => few,
-        _ => many,
-    }
-}
-
 /// Is everything allowed? The calendar and the contacts asked once each (only reading):
 /// for each, what it holds or what is missing (with what to do).
 pub fn check(url: &str, key: &str) -> (Result<String, String>, Result<String, String>) {
@@ -601,14 +594,14 @@ pub fn check(url: &str, key: &str) -> (Result<String, String>, Result<String, St
     .map(|v| {
         let n = v["events"].as_array().map(|a| a.len()).unwrap_or(0);
         let c = v["calendars"].as_array().map(|a| a.len()).unwrap_or(0);
-        format!("kalendarz działa ({c} {}, {n} {} w najbliższych tygodniach)", pl(c, "kalendarz", "kalendarze", "kalendarzy"), pl(n, "wydarzenie", "wydarzenia", "wydarzeń"))
+        t!("cal.gcal.calendar_ok", calendars = crate::i18n::plural("cal.gcal.calendars", c), events = crate::i18n::plural("cal.gcal.events", n)).into_owned()
     });
     let people = ask_script(url, key, &[("action", "contacts".into())]).and_then(|v| match v.get("people") {
         Some(p) => {
             let (n, g) = (p.as_array().map(|a| a.len()).unwrap_or(0), v["groups"].as_array().map(|a| a.len()).unwrap_or(0));
-            Ok(format!("kontakty działają ({n} {}, {g} {})", pl(n, "kontakt", "kontakty", "kontaktów"), pl(g, "grupa", "grupy", "grup")))
+            Ok(t!("cal.gcal.contacts_ok", people = crate::i18n::plural("cal.gcal.people", n), groups = crate::i18n::plural("cal.gcal.groups", g)).into_owned())
         }
-        None => Err("skrypt jest w starszej wersji, bez kontaktów — skopiuj go z programu jeszcze raz, wklej w miejsce starego i wdróż nową wersję".into()),
+        None => Err(t!("cal.gcal.old_script").into_owned()),
     });
     (cal, people)
 }
@@ -620,28 +613,28 @@ fn ask_script(url: &str, key: &str, params: &[(&str, String)]) -> Result<serde_j
         q.push_str(&format!("&{k}={}", enc(v)));
     }
     let resp = agent()?.get(&q).call().map_err(|e| match e {
-        ureq::Error::Status(404, _) => "nie ma skryptu pod tym adresem (sprawdź adres /exec)".to_string(),
-        ureq::Error::Status(401 | 403, _) => "Google nie wpuszcza do skryptu — przy wdrożeniu wybierz „Kto ma dostęp: Każdy”".to_string(),
-        ureq::Error::Status(code, _) => format!("Google odpowiedział {code}"),
-        other => format!("brak połączenia: {other}"),
+        ureq::Error::Status(404, _) => t!("cal.gcal.script_404").into_owned(),
+        ureq::Error::Status(401 | 403, _) => t!("cal.gcal.script_denied").into_owned(),
+        ureq::Error::Status(code, _) => t!("cal.gcal.http_status", code = code).into_owned(),
+        other => t!("cal.gcal.no_connection", err = other).into_owned(),
     })?;
     let text = resp.into_string().map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
         if text.contains("accounts.google.com") || text.to_lowercase().contains("<html") {
-            "Google prosi o zalogowanie — przy wdrożeniu skryptu wybierz „Kto ma dostęp: Każdy”".to_string()
+            t!("cal.gcal.script_login").into_owned()
         } else {
-            "skrypt odpowiedział czymś innym niż oczekiwano".to_string()
+            t!("cal.gcal.script_other").into_owned()
         }
     })?;
     if let Some(e) = v["error"].as_str() {
         let low = e.to_lowercase();
         if low.contains("authorization is required") || low.contains("you do not have permission") || low.contains("insufficient") {
-            return Err("skrypt nie ma zgody Google — w edytorze skryptu wybierz funkcję „autoryzuj”, kliknij ▶ Uruchom i zezwól, potem wdróż nową wersję".into());
+            return Err(t!("cal.gcal.script_no_consent").into_owned());
         }
         if e.contains("People is not defined") {
-            return Err("w skrypcie brakuje usługi People API — w edytorze skryptu: Usługi (+) → People API → Dodaj, potem Wdróż → Zarządzaj wdrożeniami → nowa wersja".into());
+            return Err(t!("cal.gcal.script_no_people").into_owned());
         }
-        return Err(if e.contains("klucz") { "skrypt ma inny klucz — skopiuj skrypt z programu jeszcze raz i wdróż go ponownie".into() } else { format!("skrypt: {e}") });
+        return Err(if e.contains("klucz") { t!("cal.gcal.script_other_key").into_owned() } else { t!("cal.gcal.script_error", err = e).into_owned() });
     }
     Ok(v)
 }
@@ -660,7 +653,7 @@ pub fn parse_script(v: &serde_json::Value, color_base: usize) -> Vec<Event> {
     for e in v["events"].as_array().cloned().unwrap_or_default() {
         let (Some(s), Some(en)) = (e["start"].as_i64().and_then(local_ms), e["end"].as_i64().and_then(local_ms)) else { continue };
         let gid = e["id"].as_str().unwrap_or_default().to_string();
-        let title = e["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("(bez tytułu)").to_string();
+        let title = e["title"].as_str().filter(|t| !t.trim().is_empty()).map(String::from).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
         let location = e["location"].as_str().unwrap_or_default().to_string();
         let all_day = e["allDay"].as_bool().unwrap_or(false);
         let editable = e["editable"].as_bool().unwrap_or(false);

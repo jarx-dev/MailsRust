@@ -23,16 +23,25 @@ impl Folder {
         Folder::Trash,
     ];
 
+    /// The folder's name in the interface language. Read once per language and kept (7 × 2 short
+    /// strings), so callers keep getting a `&'static str`.
     pub fn name(self) -> &'static str {
-        match self {
-            Folder::Inbox => "Skrzynka odbiorcza",
-            Folder::Drafts => "Szkice",
-            Folder::Outbox => "Skrzynka nadawcza",
-            Folder::Sent => "Wysłane",
-            Folder::Archive => "Archiwum",
-            Folder::Junk => "Spam",
-            Folder::Trash => "Kosz",
-        }
+        static NAMES: std::sync::OnceLock<[[&'static str; 7]; 2]> = std::sync::OnceLock::new();
+        let names = NAMES.get_or_init(|| {
+            let keep = |s: std::borrow::Cow<str>| -> &'static str { Box::leak(s.into_owned().into_boxed_str()) };
+            ["en", "pl"].map(|l| {
+                [
+                    keep(t!("misc.model.inbox", locale = l)),
+                    keep(t!("misc.model.drafts", locale = l)),
+                    keep(t!("misc.model.outbox", locale = l)),
+                    keep(t!("misc.model.sent", locale = l)),
+                    keep(t!("misc.model.archive", locale = l)),
+                    keep(t!("misc.model.junk", locale = l)),
+                    keep(t!("misc.model.trash", locale = l)),
+                ]
+            })
+        });
+        names[crate::i18n::is_pl() as usize][self as usize]
     }
 
     pub fn icon(self) -> &'static str {
@@ -132,8 +141,8 @@ impl Message {
     }
 }
 
-/// A small formatted newsletter for the sample mailbox: banner picture, heading, list, link.
-fn sample_newsletter_html() -> String {
+/// A small formatted newsletter for the sample mailbox: banner picture, heading, list, link (in Polish or English).
+fn sample_newsletter_html(pl: bool) -> String {
     use base64::Engine;
     let (w, h) = (560u32, 150u32);
     let img = image::RgbaImage::from_fn(w, h, |x, y| {
@@ -151,33 +160,58 @@ fn sample_newsletter_html() -> String {
         return String::new();
     }
     let data = base64::engine::general_purpose::STANDARD.encode(&png);
+    let l = |p: &'static str, e: &'static str| if pl { p } else { e };
     let html = format!(
         r#"<html><head><style>p {{ margin: 0 }}</style></head><body>
-<div style="display:none;max-height:0">Ukryty tekst podglądu</div>
+<div style="display:none;max-height:0">{}</div>
 <table width="100%"><tr><td align="center">
-<img src="data:image/png;base64,{data}" width="560" height="150" alt="Ogród">
-<h1>Dzień otwarty ogrodu</h1>
-<p>W sobotę od <b>10:00</b> do <b>16:00</b> zapraszamy do ogrodu społecznego.</p>
-<p><a href="https://example.org/ogrod">Zobacz program dnia</a></p>
+<img src="data:image/png;base64,{data}" width="560" height="150" alt="{}">
+<h1>{}</h1>
+<p>{}</p>
+<p><a href="https://example.org/ogrod">{}</a></p>
 </td></tr></table>
 <table width="100%" cellspacing="8"><tr>
-<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">58</div><div style="font-size:12px;color:#555">zapisanych osób</div></td>
-<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">3</div><div style="font-size:12px;color:#555">warsztaty</div></td>
-<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">8</div><div style="font-size:12px;color:#555">stoisk</div></td>
+<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">58</div><div style="font-size:12px;color:#555">{}</div></td>
+<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">3</div><div style="font-size:12px;color:#555">{}</div></td>
+<td align="center" style="background:#EEF4FD;border:1px solid #D6E4FA"><div style="font-size:26px;font-weight:bold;color:#1E6FD9">8</div><div style="font-size:12px;color:#555">{}</div></td>
 </tr></table>
 <table width="100%" cellspacing="0" style="border:1px solid #e3e3e3">
-<thead><tr style="background:#f5f5f5"><th align="left">Wydarzenie</th><th align="left">Miejsce</th><th>Godzina</th></tr></thead>
+<thead><tr style="background:#f5f5f5"><th align="left">{}</th><th align="left">{}</th><th>{}</th></tr></thead>
 <tbody>
-<tr><td>Dzień otwarty ogrodu<br><span style="font-size:12px;color:#777">warsztaty sadzenia · degustacja</span></td><td>Ogród społeczny</td><td align="center">10:00–16:00</td></tr>
-<tr><td>Wymiana książek</td><td>Biblioteka</td><td align="center">15:00</td></tr>
-<tr><td>Spotkanie wolontariuszy</td><td>Dom kultury, sala 2</td><td align="center">18:30</td></tr>
+<tr><td>{}<br><span style="font-size:12px;color:#777">{}</span></td><td>{}</td><td align="center">10:00–16:00</td></tr>
+<tr><td>{}</td><td>{}</td><td align="center">15:00</td></tr>
+<tr><td>{}</td><td>{}</td><td align="center">18:30</td></tr>
 </tbody></table>
-<p>Najważniejsze w tym tygodniu:</p>
-<ul><li>Wymiana książek w bibliotece w niedzielę po południu</li><li>Szukamy wolontariuszy do wiosennego sprzątania</li></ul>
-<p>Do zobaczenia!<br><i>Zespół newslettera</i></p>
-<hr><p style="font-size:12px">Otrzymujesz tę wiadomość, bo zapisałeś się do newslettera osiedlowego.</p>
+<p>{}</p>
+<ul><li>{}</li><li>{}</li></ul>
+<p>{}<br><i>{}</i></p>
+<hr><p style="font-size:12px">{}</p>
 <img src="https://example.org/pixel.gif" width="1" height="1">
-</body></html>"#
+</body></html>"#,
+        l("Ukryty tekst podglądu", "Hidden preview text"),
+        l("Ogród", "Garden"),
+        l("Dzień otwarty ogrodu", "Garden open day"),
+        l("W sobotę od <b>10:00</b> do <b>16:00</b> zapraszamy do ogrodu społecznego.", "Join us at the community garden on Saturday from <b>10:00</b> to <b>16:00</b>."),
+        l("Zobacz program dnia", "See the day's program"),
+        l("zapisanych osób", "people signed up"),
+        l("warsztaty", "workshops"),
+        l("stoisk", "stalls"),
+        l("Wydarzenie", "Event"),
+        l("Miejsce", "Place"),
+        l("Godzina", "Time"),
+        l("Dzień otwarty ogrodu", "Garden open day"),
+        l("warsztaty sadzenia · degustacja", "planting workshops · tasting"),
+        l("Ogród społeczny", "Community garden"),
+        l("Wymiana książek", "Book swap"),
+        l("Biblioteka", "Library"),
+        l("Spotkanie wolontariuszy", "Volunteer meeting"),
+        l("Dom kultury, sala 2", "Community center, room 2"),
+        l("Najważniejsze w tym tygodniu:", "This week's highlights:"),
+        l("Wymiana książek w bibliotece w niedzielę po południu", "Book swap at the library on Sunday afternoon"),
+        l("Szukamy wolontariuszy do wiosennego sprzątania", "We're looking for volunteers for the spring cleanup"),
+        l("Do zobaczenia!", "See you there!"),
+        l("Zespół newslettera", "The newsletter team"),
+        l("Otrzymujesz tę wiadomość, bo zapisałeś się do newslettera osiedlowego.", "You're receiving this because you signed up for the neighborhood newsletter."),
     );
     cache_put(html.as_bytes(), "html")
 }
@@ -283,6 +317,11 @@ pub struct Account {
     /// Keep taking the signature from sent mail (off once the person removed it).
     #[serde(default = "yes")]
     pub signature_auto: bool,
+    /// The display name is the demo one nobody chose; a Google sign-in replaces it. Off once the
+    /// person edits the name. Saved before it existed: on, so an untouched demo account still gets
+    /// its Google name as before (a name typed earlier is kept anyway unless it equals the demo name).
+    #[serde(default = "yes")]
+    pub demo_name: bool,
 }
 
 fn yes() -> bool {
@@ -313,11 +352,17 @@ impl Default for Account {
             signature_images: vec![],
             signature_on: true,
             signature_auto: true,
+            demo_name: true,
         }
     }
 }
 
 impl Account {
+    /// A Google sign-in may put the profile's name here: the name is empty or still the untouched demo one.
+    pub fn takes_google_name(&self) -> bool {
+        self.display_name.trim().is_empty() || (self.demo_name && ["Aleks Nowicki", "Alex Newman"].contains(&self.display_name.as_str()))
+    }
+
     pub fn is_configured(&self) -> bool {
         !self.imap_host.trim().is_empty() && !self.username.trim().is_empty()
     }
@@ -338,7 +383,7 @@ impl Account {
         self.smtp_host = "smtp.gmail.com".into();
         self.smtp_port = 465;
         self.use_oauth = true;
-        if self.username.trim().is_empty() || self.username == "aleks@example.com" {
+        if self.username.trim().is_empty() || ["aleks@example.com", "alex@example.com"].contains(&self.username.as_str()) {
             self.username = self.email.clone();
         }
     }
@@ -395,9 +440,17 @@ impl Store {
         let at = |days: i64, h: u32, m: u32| -> NaiveDateTime {
             (today - Duration::days(days)).and_hms_opt(h, m, 0).unwrap()
         };
+        // the demo mailbox in the interface language: (Polish, English), the same mail either way
+        let pl = crate::i18n::is_pl();
+        let l = |p: &'static str, e: &'static str| if pl { p } else { e };
+        let mut account = Account::default();
+        if !pl {
+            account.display_name = "Alex Newman".into();
+            account.email = "alex@example.com".into();
+        }
         let mut s = Store {
             next_id: 0,
-            account: Account::default(),
+            account,
             messages: vec![],
             events: vec![],
             has_real_mail: false,
@@ -411,53 +464,64 @@ impl Store {
 
         type Row<'a> = (Folder, &'a str, &'a str, &'a str, &'a str, NaiveDateTime, bool, bool, Vec<&'a str>, &'a str);
         let mails: Vec<Row> = vec![
-            (Folder::Inbox, "Anna Kowalska", "anna.kowalska@example.com", "Spotkanie startowe w czwartek",
-             "Cześć Aleks,\n\ndzięki za udział we wczorajszej rozmowie. Przygotowałam krótki plan czwartkowego spotkania:\n\n  1. Cele na pierwszy kwartał\n  2. Kto za co odpowiada\n  3. Terminy pierwszego przeglądu\n\nCzy możesz przynieść wstępny harmonogram? Jeśli czwartek Ci nie pasuje, daj znać, to przełożę.\n\nPozdrawiam,\nAnna",
+            (Folder::Inbox, l("Anna Kowalska", "Emma Clarke"), l("anna.kowalska@example.com", "emma.clarke@example.com"), l("Spotkanie startowe w czwartek", "Kickoff meeting on Thursday"),
+             l("Cześć Aleks,\n\ndzięki za udział we wczorajszej rozmowie. Przygotowałam krótki plan czwartkowego spotkania:\n\n  1. Cele na pierwszy kwartał\n  2. Kto za co odpowiada\n  3. Terminy pierwszego przeglądu\n\nCzy możesz przynieść wstępny harmonogram? Jeśli czwartek Ci nie pasuje, daj znać, to przełożę.\n\nPozdrawiam,\nAnna",
+               "Hi Alex,\n\nthanks for joining yesterday's call. I've put together a short plan for Thursday's meeting:\n\n  1. Goals for the first quarter\n  2. Who owns what\n  3. Dates for the first review\n\nCould you bring a draft schedule? If Thursday doesn't work for you, let me know and I'll move it.\n\nBest,\nEmma"),
              at(0, 6, 55), true, true, vec!["plan.pdf"], ""),
-            (Folder::Inbox, "Piotr Nowak", "piotr.nowak@example.org", "Re: Zdjęcia z weekendu",
-             "Wyszły świetnie! Resztę wrzuciłem do wspólnego albumu. To znad jeziora jest moje ulubione.\n\nPiotr",
-             at(1, 19, 46), false, false, vec!["jezioro.jpg", "gory.jpg"], ""),
-            (Folder::Inbox, "Zespół rozliczeń", "rozliczenia@example.net", "Twoje miesięczne zestawienie jest gotowe",
-             "Dzień dobry,\n\nzestawienie za ten miesiąc jest już dostępne. Możesz je zobaczyć po zalogowaniu się do konta.\n\nTo jest wiadomość automatyczna, prosimy na nią nie odpowiadać.",
+            (Folder::Inbox, l("Piotr Nowak", "Paul Turner"), l("piotr.nowak@example.org", "paul.turner@example.org"), l("Re: Zdjęcia z weekendu", "Re: Photos from the weekend"),
+             l("Wyszły świetnie! Resztę wrzuciłem do wspólnego albumu. To znad jeziora jest moje ulubione.\n\nPiotr",
+               "They came out great! I put the rest in the shared album. The one by the lake is my favorite.\n\nPaul"),
+             at(1, 19, 46), false, false, vec![l("jezioro.jpg", "lake.jpg"), l("gory.jpg", "mountains.jpg")], ""),
+            (Folder::Inbox, l("Zespół rozliczeń", "Billing team"), l("rozliczenia@example.net", "billing@example.net"), l("Twoje miesięczne zestawienie jest gotowe", "Your monthly statement is ready"),
+             l("Dzień dobry,\n\nzestawienie za ten miesiąc jest już dostępne. Możesz je zobaczyć po zalogowaniu się do konta.\n\nTo jest wiadomość automatyczna, prosimy na nią nie odpowiadać.",
+               "Hello,\n\nyour statement for this month is now available. You can view it after signing in to your account.\n\nThis is an automated message, please do not reply."),
              at(1, 16, 22), true, false, vec![], ""),
-            (Folder::Inbox, "Marta Wiśniewska", "marta.w@example.com", "Obiad w przyszłym tygodniu?",
-             "Hej! Dawno się nie widziałyśmy. Masz czas na obiad we wtorek albo w środę? Przy dworcu otworzyli nowe miejsce, które chcę wypróbować.\n\nMarta",
+            (Folder::Inbox, l("Marta Wiśniewska", "Martha Wells"), l("marta.w@example.com", "martha.w@example.com"), l("Obiad w przyszłym tygodniu?", "Lunch next week?"),
+             l("Hej! Dawno się nie widziałyśmy. Masz czas na obiad we wtorek albo w środę? Przy dworcu otworzyli nowe miejsce, które chcę wypróbować.\n\nMarta",
+               "Hey! It's been ages. Are you free for lunch on Tuesday or Wednesday? A new place just opened by the station and I'd like to try it.\n\nMartha"),
              at(1, 16, 14), false, false, vec![], ""),
-            (Folder::Inbox, "Ewa Lewandowska", "ewa@example.com", "Zaktualizowany budżet",
-             "Cześć,\n\nw załączniku zaktualizowany budżet z liczbami od księgowości. Główna zmiana dotyczy podróży — spadły o około dziesięć procent.\n\nDaj znać, jeśli coś się nie zgadza.\n\nEwa",
-             at(2, 11, 5), true, true, vec!["budzet-v3.xlsx"], ""),
-            (Folder::Inbox, "Newsletter osiedlowy", "news@example.org", "W tym tygodniu: dzień otwarty ogrodu i wymiana książek",
-             "Najważniejsze w tym tygodniu:\n\n- Dzień otwarty ogrodu społecznego w sobotę od 10 do 16.\n- Wymiana książek w bibliotece w niedzielę po południu.\n- Szukamy wolontariuszy do wiosennego sprzątania.\n\nDo zobaczenia!",
+            (Folder::Inbox, l("Ewa Lewandowska", "Eva Lewis"), l("ewa@example.com", "eva@example.com"), l("Zaktualizowany budżet", "Updated budget"),
+             l("Cześć,\n\nw załączniku zaktualizowany budżet z liczbami od księgowości. Główna zmiana dotyczy podróży — spadły o około dziesięć procent.\n\nDaj znać, jeśli coś się nie zgadza.\n\nEwa",
+               "Hi,\n\nattached is the updated budget with the numbers from accounting. The main change is travel — down by about ten percent.\n\nLet me know if anything looks off.\n\nEva"),
+             at(2, 11, 5), true, true, vec![l("budzet-v3.xlsx", "budget-v3.xlsx")], ""),
+            (Folder::Inbox, l("Newsletter osiedlowy", "Neighborhood newsletter"), "news@example.org", l("W tym tygodniu: dzień otwarty ogrodu i wymiana książek", "This week: garden open day and book swap"),
+             l("Najważniejsze w tym tygodniu:\n\n- Dzień otwarty ogrodu społecznego w sobotę od 10 do 16.\n- Wymiana książek w bibliotece w niedzielę po południu.\n- Szukamy wolontariuszy do wiosennego sprzątania.\n\nDo zobaczenia!",
+               "This week's highlights:\n\n- Community garden open day on Saturday from 10 to 4.\n- Book swap at the library on Sunday afternoon.\n- We're looking for volunteers for the spring cleanup.\n\nSee you there!"),
              at(3, 6, 0), true, false, vec![], ""),
-            (Folder::Inbox, "Tomasz Zieliński", "t.zielinski@example.com", "Projekt umowy do przejrzenia",
-             "Dzień dobry,\n\nw załączniku projekt umowy. Zaznaczyłem fragmenty, o których rozmawialiśmy. Chcielibyśmy podpisać do końca miesiąca.\n\nZ poważaniem,\nTomasz Zieliński",
-             at(4, 14, 20), true, false, vec!["umowa-projekt.docx"], ""),
-            (Folder::Inbox, "Kamil Wójcik", "kamil@example.net", "Slajdy z konferencji",
-             "Cześć,\n\nzgodnie z obietnicą przesyłam slajdy z mojego wystąpienia. Możesz je udostępnić zespołowi.\n\nKamil",
-             at(6, 10, 0), true, false, vec!["slajdy.pdf"], ""),
-            (Folder::Inbox, "Dział IT", "it@example.com", "Planowana przerwa techniczna w niedzielę",
-             "Informujemy, że poczta i serwer plików będą niedostępne w niedzielę między 22:00 a 2:00 z powodu aktualizacji.\n\nDziękujemy za cierpliwość.",
+            (Folder::Inbox, l("Tomasz Zieliński", "Thomas Green"), l("t.zielinski@example.com", "t.green@example.com"), l("Projekt umowy do przejrzenia", "Draft contract for review"),
+             l("Dzień dobry,\n\nw załączniku projekt umowy. Zaznaczyłem fragmenty, o których rozmawialiśmy. Chcielibyśmy podpisać do końca miesiąca.\n\nZ poważaniem,\nTomasz Zieliński",
+               "Hello,\n\nplease find the draft contract attached. I've marked the parts we discussed. We'd like to sign by the end of the month.\n\nKind regards,\nThomas Green"),
+             at(4, 14, 20), true, false, vec![l("umowa-projekt.docx", "contract-draft.docx")], ""),
+            (Folder::Inbox, l("Kamil Wójcik", "Kevin Walsh"), l("kamil@example.net", "kevin@example.net"), l("Slajdy z konferencji", "Slides from the conference"),
+             l("Cześć,\n\nzgodnie z obietnicą przesyłam slajdy z mojego wystąpienia. Możesz je udostępnić zespołowi.\n\nKamil",
+               "Hi,\n\nas promised, here are the slides from my talk. Feel free to share them with the team.\n\nKevin"),
+             at(6, 10, 0), true, false, vec![l("slajdy.pdf", "slides.pdf")], ""),
+            (Folder::Inbox, l("Dział IT", "IT department"), "it@example.com", l("Planowana przerwa techniczna w niedzielę", "Planned maintenance on Sunday"),
+             l("Informujemy, że poczta i serwer plików będą niedostępne w niedzielę między 22:00 a 2:00 z powodu aktualizacji.\n\nDziękujemy za cierpliwość.",
+               "Mail and the file server will be unavailable on Sunday between 22:00 and 2:00 for an update.\n\nThank you for your patience."),
              at(9, 16, 45), true, false, vec![], ""),
-            (Folder::Sent, "Aleks Nowicki", "aleks@example.com", "Re: Projekt umowy do przejrzenia",
-             "Dzień dobry,\n\ndziękuję, przejrzę go w tym tygodniu i wyślę uwagi do piątku.\n\nAleks",
-             at(3, 9, 0), true, false, vec![], "t.zielinski@example.com"),
-            (Folder::Sent, "Aleks Nowicki", "aleks@example.com", "Termin urlopu",
-             "Cześć Anno,\n\nuprzedzam, że pierwsze dwa tygodnie przyszłego miesiąca będę na urlopie.\n\nAleks",
-             at(8, 15, 30), true, false, vec![], "anna.kowalska@example.com"),
-            (Folder::Drafts, "Aleks Nowicki", "aleks@example.com", "Pomysły na dzień integracyjny",
-             "Na razie:\n- spacer w górach\n- warsztaty kulinarne\n- escape room",
+            (Folder::Sent, l("Aleks Nowicki", "Alex Newman"), l("aleks@example.com", "alex@example.com"), l("Re: Projekt umowy do przejrzenia", "Re: Draft contract for review"),
+             l("Dzień dobry,\n\ndziękuję, przejrzę go w tym tygodniu i wyślę uwagi do piątku.\n\nAleks",
+               "Hello,\n\nthank you, I'll review it this week and send my comments by Friday.\n\nAlex"),
+             at(3, 9, 0), true, false, vec![], l("t.zielinski@example.com", "t.green@example.com")),
+            (Folder::Sent, l("Aleks Nowicki", "Alex Newman"), l("aleks@example.com", "alex@example.com"), l("Termin urlopu", "Vacation dates"),
+             l("Cześć Anno,\n\nuprzedzam, że pierwsze dwa tygodnie przyszłego miesiąca będę na urlopie.\n\nAleks",
+               "Hi Emma,\n\njust a heads-up that I'll be on vacation for the first two weeks of next month.\n\nAlex"),
+             at(8, 15, 30), true, false, vec![], l("anna.kowalska@example.com", "emma.clarke@example.com")),
+            (Folder::Drafts, l("Aleks Nowicki", "Alex Newman"), l("aleks@example.com", "alex@example.com"), l("Pomysły na dzień integracyjny", "Team day ideas"),
+             l("Na razie:\n- spacer w górach\n- warsztaty kulinarne\n- escape room", "So far:\n- a hike in the mountains\n- a cooking class\n- an escape room"),
              at(2, 20, 12), true, false, vec![], ""),
-            (Folder::Archive, "Piotr Nowak", "piotr.nowak@example.org", "Oglądanie mieszkania potwierdzone",
-             "Oglądanie potwierdzone na sobotę na 11. Do zobaczenia!",
+            (Folder::Archive, l("Piotr Nowak", "Paul Turner"), l("piotr.nowak@example.org", "paul.turner@example.org"), l("Oglądanie mieszkania potwierdzone", "Apartment viewing confirmed"),
+             l("Oglądanie potwierdzone na sobotę na 11. Do zobaczenia!", "The viewing is confirmed for Saturday at 11. See you there!"),
              at(30, 12, 0), true, false, vec![], ""),
-            (Folder::Junk, "Biuro nagród", "wygrana@example.biz", "Zostałeś wybrany!!!",
-             "Kliknij tutaj, aby odebrać nagrodę. Tylko dziś.",
+            (Folder::Junk, l("Biuro nagród", "Prize office"), l("wygrana@example.biz", "winner@example.biz"), l("Zostałeś wybrany!!!", "You have been selected!!!"),
+             l("Kliknij tutaj, aby odebrać nagrodę. Tylko dziś.", "Click here to claim your prize. Today only."),
              at(1, 3, 33), false, false, vec![], ""),
-            (Folder::Trash, "Stary sklep", "oferty@example.biz", "Ostatnia szansa: -20%",
-             "Wyprzedaż kończy się dziś wieczorem.",
+            (Folder::Trash, l("Stary sklep", "Old shop"), l("oferty@example.biz", "offers@example.biz"), l("Ostatnia szansa: -20%", "Last chance: 20% off"),
+             l("Wyprzedaż kończy się dziś wieczorem.", "The sale ends tonight."),
              at(5, 18, 0), true, false, vec![], ""),
         ];
-        let to_me = "Aleks Nowicki <aleks@example.com>";
+        let to_me = l("Aleks Nowicki <aleks@example.com>", "Alex Newman <alex@example.com>");
         for (folder, name, addr, subject, body, date, read, flagged, att, to) in mails {
             let id = s.new_id();
             let to = if folder == Folder::Sent || folder == Folder::Drafts {
@@ -493,34 +557,35 @@ impl Store {
         }
 
         // Sample tags, like Gmail labels.
+        let (work, bills, todo, family) = (l("Praca", "Work"), l("Faktury i rachunki", "Bills"), l("Do zrobienia", "To do"), l("Rodzina", "Family"));
         for (who, tags) in [
-            ("Anna Kowalska", &["Praca"][..]),
-            ("Ewa Lewandowska", &["Praca", "Faktury i rachunki"][..]),
-            ("Tomasz Zieliński", &["Praca", "Do zrobienia"][..]),
-            ("Zespół rozliczeń", &["Faktury i rachunki"][..]),
-            ("Piotr Nowak", &["Rodzina"][..]),
-            ("Newsletter osiedlowy", &["Newsletter"][..]),
+            (l("anna.kowalska@example.com", "emma.clarke@example.com"), vec![work]),
+            (l("ewa@example.com", "eva@example.com"), vec![work, bills]),
+            (l("t.zielinski@example.com", "t.green@example.com"), vec![work, todo]),
+            (l("rozliczenia@example.net", "billing@example.net"), vec![bills]),
+            (l("piotr.nowak@example.org", "paul.turner@example.org"), vec![family]),
+            ("news@example.org", vec!["Newsletter"]),
         ] {
-            for m in s.messages.iter_mut().filter(|m| m.from_name == who && m.folder == Folder::Inbox) {
+            for m in s.messages.iter_mut().filter(|m| m.from_addr == who && m.folder == Folder::Inbox) {
                 m.labels = tags.iter().map(|t| t.to_string()).collect();
             }
         }
 
         // The newsletter also has a formatted version with a picture.
-        if let Some(m) = s.messages.iter_mut().find(|m| m.subject.starts_with("W tym tygodniu")) {
-            m.html_path = sample_newsletter_html();
+        if let Some(m) = s.messages.iter_mut().find(|m| m.from_addr == "news@example.org") {
+            m.html_path = sample_newsletter_html(pl);
         }
 
         let ev = |d: i64, h: u32, m: u32| (today + Duration::days(d), NaiveTime::from_hms_opt(h, m, 0).unwrap());
         let events = vec![
-            ("Spotkanie IT", ev(0, 9, 0), 60, "Spotkanie online", 0),
-            ("Dentysta", ev(0, 16, 0), 45, "ul. Główna 12", 2),
-            ("Spotkanie startowe", ev(2, 10, 0), 90, "Sala A", 1),
-            ("Obiad z Martą", ev(6, 12, 30), 60, "Kawiarnia przy dworcu", 3),
-            ("Przegląd budżetu", ev(8, 14, 0), 60, "Online", 0),
-            ("Wymiana książek", ev(4, 15, 0), 120, "Biblioteka", 3),
-            ("Przegląd kwartalny", ev(15, 11, 0), 120, "Sala B", 1),
-            ("Siłownia", ev(-3, 18, 0), 60, "", 2),
+            (l("Spotkanie IT", "IT meeting"), ev(0, 9, 0), 60, l("Spotkanie online", "Online meeting"), 0),
+            (l("Dentysta", "Dentist"), ev(0, 16, 0), 45, l("ul. Główna 12", "12 Main Street"), 2),
+            (l("Spotkanie startowe", "Kickoff meeting"), ev(2, 10, 0), 90, l("Sala A", "Room A"), 1),
+            (l("Obiad z Martą", "Lunch with Martha"), ev(6, 12, 30), 60, l("Kawiarnia przy dworcu", "Café by the station"), 3),
+            (l("Przegląd budżetu", "Budget review"), ev(8, 14, 0), 60, "Online", 0),
+            (l("Wymiana książek", "Book swap"), ev(4, 15, 0), 120, l("Biblioteka", "Library"), 3),
+            (l("Przegląd kwartalny", "Quarterly review"), ev(15, 11, 0), 120, l("Sala B", "Room B"), 1),
+            (l("Siłownia", "Gym"), ev(-3, 18, 0), 60, "", 2),
         ];
         for (title, (date, start), minutes, location, color) in events {
             let id = s.new_id();

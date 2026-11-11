@@ -69,7 +69,6 @@ pub const EVENT_COLORS: [Color32; 4] = [
     Color32::from_rgb(0x2E, 0x9E, 0x5B),
     Color32::from_rgb(0xE0, 0x8A, 0x1E),
 ];
-pub const EVENT_COLOR_NAMES: [&str; 4] = ["Niebieski", "Fioletowy", "Zielony", "Pomarańczowy"];
 
 /// Icons of Segoe Fluent Icons (private code points, so they never replace a letter).
 pub mod ic {
@@ -103,6 +102,7 @@ pub mod ic {
     pub const MORE: &str = "\u{E712}";
     pub const OPEN: &str = "\u{E8A7}";
     pub const SEARCH: &str = "\u{E721}";
+    pub const GLOBE: &str = "\u{E774}";
     pub const CLEAR: &str = "\u{E711}";
     pub const CHECK: &str = "\u{E8FB}";
     pub const DOWNLOAD: &str = "\u{E896}";
@@ -481,7 +481,7 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, open: &
                     let col = if resp.hovered() { TEXT() } else { MUTED() };
                     ui.painter().line_segment([c + Vec2::new(-s, -s), c + Vec2::new(s, s)], Stroke::new(1.6, col));
                     ui.painter().line_segment([c + Vec2::new(-s, s), c + Vec2::new(s, -s)], Stroke::new(1.6, col));
-                    if resp.on_hover_text("Zamknij (Esc)").clicked() {
+                    if resp.on_hover_text(t!("compose.theme.close_esc")).clicked() {
                         close = true;
                     }
                 });

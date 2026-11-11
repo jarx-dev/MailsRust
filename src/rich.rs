@@ -7,16 +7,18 @@ use eframe::egui::{self, text::LayoutJob, Color32, FontFamily, FontId, Stroke, T
 /// How wide a pasted picture is shown in the message by default (it can be resized).
 pub const DEFAULT_WIDTH: u32 = 600;
 
-/// Colours offered for text: (name, CSS colour).
-pub const COLOURS: [(&str, &str); 7] = [
-    ("Czarny", "#222222"),
-    ("Czerwony", "#c62828"),
-    ("Niebieski", "#1e6fd9"),
-    ("Zielony", "#2e7d32"),
-    ("Pomarańczowy", "#e65100"),
-    ("Fioletowy", "#6a1b9a"),
-    ("Szary", "#757575"),
-];
+/// Colours offered for text: (name in the interface language, CSS colour).
+pub fn colours() -> [(String, &'static str); 7] {
+    [
+        (t!("compose.rich.black").into_owned(), "#222222"),
+        (t!("compose.rich.red").into_owned(), "#c62828"),
+        (t!("compose.rich.blue").into_owned(), "#1e6fd9"),
+        (t!("compose.rich.green").into_owned(), "#2e7d32"),
+        (t!("compose.rich.orange").into_owned(), "#e65100"),
+        (t!("compose.rich.purple").into_owned(), "#6a1b9a"),
+        (t!("compose.rich.grey").into_owned(), "#757575"),
+    ]
+}
 
 /// The written text as HTML: Markdown (with line breaks kept as typed) plus the small HTML
 /// pieces the toolbar adds (colours, sizes, underline, pictures).
@@ -46,7 +48,7 @@ pub fn plain(md: &str) -> String {
         match after.find('>') {
             Some(j) if j < 300 && looks_like_tag(&after[..=j]) => {
                 if after[..=j].to_lowercase().starts_with("<img") {
-                    out.push_str("[obraz]");
+                    out.push_str(&t!("compose.rich.image_placeholder"));
                 }
                 rest = &after[j + 1..];
             }

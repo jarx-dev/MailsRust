@@ -23,7 +23,7 @@ pub enum NetResult {
 /// error message instead of leaving the app waiting forever.
 fn guarded<T>(job: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
-        .unwrap_or_else(|_| Err("nieoczekiwany błąd podczas synchronizacji".into()))
+        .unwrap_or_else(|_| Err(t!("core.net.unexpected_sync").into_owned()))
 }
 
 /// Watches the inbox on the server (IMAP IDLE): the server says at once when mail comes, and
@@ -148,11 +148,11 @@ pub fn google_sign_in_chat(client_id: String, client_secret: String, email: Stri
         let scopes = format!("{} {}", crate::oauth::SCOPES, crate::chat::SCOPES);
         let res = match crate::oauth::login_scopes(&client_id, &client_secret, &scopes) {
             Ok(r) if !email.is_empty() && !r.email.eq_ignore_ascii_case(&email) => {
-                NetResult::SignInFailed(format!("wybrano w przeglądarce inne konto Google ({}) niż konto poczty ({email}) — zaloguj się kontem {email}", r.email))
+                NetResult::SignInFailed(t!("core.net.wrong_google_account", got = r.email, email = email).into_owned())
             }
             // the new token replaces the mail one: without mail access (unticked on Google's page) it would cut the mail off
             Ok(r) if !r.scopes.split_whitespace().any(|s| s == "https://mail.google.com/") => {
-                NetResult::SignInFailed("na stronie Google odznaczono dostęp do poczty — zaloguj się ponownie i zostaw wszystkie pola zaznaczone".into())
+                NetResult::SignInFailed(t!("core.net.google_access_unchecked").into_owned())
             }
             Ok(r) => NetResult::SignedIn(r),
             Err(e) => NetResult::SignInFailed(e),
@@ -378,7 +378,7 @@ pub fn fetch_raw(account: &Account, uid: u32) -> Result<Vec<u8>, String> {
         let mut session = open_session(account)?;
         session.examine("INBOX").map_err(|e| e.to_string())?;
         let fetches = session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").map_err(|e| e.to_string())?;
-        let raw = fetches.iter().next().and_then(|f| f.body()).map(|b| b.to_vec()).ok_or("nie ma już tej wiadomości na serwerze")?;
+        let raw = fetches.iter().next().and_then(|f| f.body()).map(|b| b.to_vec()).ok_or_else(|| t!("core.net.message_gone").into_owned())?;
         drop(fetches);
         let _ = session.logout();
         Ok(raw)
@@ -433,14 +433,14 @@ pub fn special_mailbox(acc: &Account, f: Folder) -> Option<String> {
 pub fn fetch_full(account: Account, acct: u32, uid: u32, folder: Folder, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
     std::thread::spawn(move || {
         let res = guarded(|| {
-            let mailbox = if folder == Folder::Inbox { "INBOX".to_string() } else { special_mailbox(&account, folder).ok_or("nie znaleziono folderu na serwerze")? };
+            let mailbox = if folder == Folder::Inbox { "INBOX".to_string() } else { special_mailbox(&account, folder).ok_or_else(|| t!("core.net.folder_missing").into_owned())? };
             let mut session = open_session(&account)?;
             session.examine(&mailbox).map_err(|e| e.to_string())?;
             let fetches = session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[] FLAGS)").map_err(|e| e.to_string())?;
-            let f = fetches.iter().next().ok_or("nie ma już tej wiadomości na serwerze")?;
-            let raw = f.body().ok_or("pusta odpowiedź serwera")?;
+            let f = fetches.iter().next().ok_or_else(|| t!("core.net.message_gone").into_owned())?;
+            let raw = f.body().ok_or_else(|| t!("core.net.empty_reply").into_owned())?;
             let (seen, flagged) = flag_pair(f);
-            let m = parse(raw, seen, flagged).ok_or("nie udało się odczytać wiadomości")?;
+            let m = parse(raw, seen, flagged).ok_or_else(|| t!("core.net.unreadable_message").into_owned())?;
             let _ = session.logout();
             Ok(m)
         });
@@ -479,7 +479,7 @@ pub fn fast_tcp(host: &str, port: u16) -> Result<std::net::TcpStream, String> {
     addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
     crate::diag::took("    look up address", t, format!("{} addresses", addrs.len()));
     let t = std::time::Instant::now();
-    let mut last_err = String::from("no address");
+    let mut last_err = String::from(t!("core.net.no_address"));
     for a in addrs {
         match std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_secs(4)) {
             Ok(s) => {
@@ -648,7 +648,7 @@ pub fn run_ops(account: Account, ops: Vec<Op>, tx: Sender<NetResult>, ctx: efram
         });
         let msg = match res {
             Ok(0) => NetResult::Synced,
-            Ok(n) => NetResult::Failed { what: "Synchronizacja".into(), error: format!("{n} zmian nie zapisano na serwerze"), id: None },
+            Ok(n) => NetResult::Failed { what: "Synchronizacja".into(), error: crate::i18n::plural("core.net.changes_not_saved", n), id: None },
             Err(e) => NetResult::Failed { what: "Synchronizacja".into(), error: e, id: None },
         };
         let _ = tx.send(msg);
@@ -914,7 +914,7 @@ fn parallel_download(
                 let Some((i, uids)) = queue.lock().ok().and_then(|mut q| q.pop_front()) else { break };
                 let mut msgs = Vec::with_capacity(uids.len());
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| download(&mut session, &uids, &mut msgs)))
-                    .unwrap_or_else(|_| Err("nieoczekiwany błąd".into()));
+                    .unwrap_or_else(|_| Err(t!("core.net.unexpected").into_owned()));
                 let failed = r.is_err();
                 let _ = rtx.send((i, r.map(|_| msgs)));
                 if failed {
@@ -948,7 +948,7 @@ fn parallel_download(
     match (done, first_error) {
         (0, Some(e)) if total > 0 => Err(e),
         (_, Some(e)) if strict => Err(e),
-        (d, None) if strict && d < total => Err("pobieranie przerwane".into()),
+        (d, None) if strict && d < total => Err(t!("core.net.download_interrupted").into_owned()),
         _ => Ok(()),
     }
 }
@@ -1387,7 +1387,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         let name = p
             .attachment_name()
             .map(|n| n.to_string())
-            .unwrap_or_else(|| if p.is_message() { "wiadomość.eml".into() } else { "załącznik".into() });
+            .unwrap_or_else(|| if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
         let ext = std::path::Path::new(&name)
             .extension()
             .and_then(|e| e.to_str())
@@ -1430,7 +1430,7 @@ pub fn build_email(acc: &Account, m: &Outgoing) -> Result<lettre::Message, Strin
     use lettre::message::{Attachment, MultiPart, SinglePart};
     let from = format!("{} <{}>", acc.display_name, acc.email);
     let mut b = lettre::Message::builder()
-        .from(from.parse().map_err(|e| format!("Your address: {e}"))?)
+        .from(from.parse().map_err(|e| t!("core.net.your_address", e = e).into_owned())?)
         .subject(m.subject.clone());
     let mut any = false;
     for r in m.to.split([',', ';']).map(str::trim).filter(|s| !s.is_empty()) {
@@ -1441,7 +1441,7 @@ pub fn build_email(acc: &Account, m: &Outgoing) -> Result<lettre::Message, Strin
         b = b.cc(r.parse().map_err(|e| format!("\"{r}\": {e}"))?);
     }
     if !any {
-        return Err("Add at least one recipient.".into());
+        return Err(t!("core.net.add_recipient").into_owned());
     }
     // the message itself (plain, or formatted with its pictures)
     let content: MultiPart = match &m.html {
@@ -1472,7 +1472,7 @@ pub fn build_email(acc: &Account, m: &Outgoing) -> Result<lettre::Message, Strin
     // attached files after the message
     let mut mixed = if m.html.is_none() { MultiPart::mixed().singlepart(SinglePart::plain(m.body.clone())) } else { MultiPart::mixed().multipart(content) };
     for f in &m.files {
-        let bytes = std::fs::read(f).map_err(|e| format!("Nie można odczytać załącznika {f}: {e}"))?;
+        let bytes = std::fs::read(f).map_err(|e| t!("core.net.attachment_unreadable", file = f, e = e).into_owned())?;
         let name = std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "plik".into());
         let ct = ContentType::parse(mime_of(&name)).map_err(|e| e.to_string())?;
         mixed = mixed.singlepart(Attachment::new(name).body(bytes, ct));

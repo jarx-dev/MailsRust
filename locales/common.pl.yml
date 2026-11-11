@@ -1,0 +1,10 @@
+tray:
+  show: Pokaż Pocztę
+  quit: Zakończ
+people:
+  one: "%{n} osoba"
+  few: "%{n} osoby"
+  many: "%{n} osób"
+contacts:
+  group_of: "grupa · %{people}"
+  google_synced: "Kontakty Google: %{people}, %{when}"

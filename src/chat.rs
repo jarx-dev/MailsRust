@@ -129,7 +129,7 @@ pub enum Update {
     Sent { id: String, result: Result<(), String> },
     /// new messages from others since the last round (never from the first one)
     Fresh(Vec<Note>),
-    /// a round ended: Ok, or what went wrong (in Polish)
+    /// a round ended: Ok, or what went wrong (in the language of the moment)
     Done(Result<(), String>),
     Busy,
 }
@@ -158,7 +158,7 @@ pub fn path() -> std::path::PathBuf {
 fn open_db(gen: u64) -> Result<(), String> {
     let mut g = db();
     if GENERATION.load(Ordering::SeqCst) != gen {
-        return Err("czat zatrzymany".into());
+        return Err(t!("misc.chat.stopped").into_owned());
     }
     if g.is_some() {
         return Ok(());
@@ -184,9 +184,9 @@ pub fn close() -> bool {
 fn load(gen: u64, owner: &str) -> Result<HashMap<String, Space>, String> {
     let g = db();
     if GENERATION.load(Ordering::SeqCst) != gen {
-        return Err("czat zatrzymany".into());
+        return Err(t!("misc.chat.stopped").into_owned());
     }
-    let d = g.as_ref().ok_or("baza czatu zamknięta")?;
+    let d = g.as_ref().ok_or_else(|| t!("misc.chat.db_closed").into_owned())?;
     let stored_owner = d.begin_read().ok().and_then(|r| r.open_table(META_T).ok()?.get("owner").ok()?.map(|v| v.value().to_string()));
     if stored_owner.as_deref() != Some(owner) {
         let w = d.begin_write().map_err(|e| e.to_string())?;
@@ -270,13 +270,13 @@ fn parse_msg(v: &Value) -> Option<Msg> {
     }
     let mut text = v["text"].as_str().unwrap_or("").to_string();
     if text.is_empty() && v["cardsV2"].as_array().is_some_and(|a| !a.is_empty()) {
-        text = "[karta aplikacji — otwórz w Google Chat]".into();
+        text = t!("misc.chat.card").into_owned();
     }
     let files = v["attachment"]
         .as_array()
         .map(|a| {
             a.iter()
-                .map(|f| (f["contentName"].as_str().unwrap_or("załącznik").to_string(), f["downloadUri"].as_str().unwrap_or("").to_string()))
+                .map(|f| (f["contentName"].as_str().map(String::from).unwrap_or_else(|| t!("misc.chat.attachment").into_owned()), f["downloadUri"].as_str().unwrap_or("").to_string()))
                 .collect()
         })
         .unwrap_or_default();
@@ -300,27 +300,40 @@ fn explain(code: u16, body: &str) -> String {
     let message = serde_json::from_str::<Value>(body).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or_else(|| body.chars().take(200).collect());
     if code == 401 {
         crate::oauth::forget_tokens();
-        return "Google nie przyjął logowania — zaloguj się ponownie przez Google".into();
+        return t!("misc.chat.err_unauthorized").into_owned();
     }
     if body.contains("Google Chat app not found") {
-        return "wysyłanie wymaga skonfigurowania aplikacji Chat w Twoim projekcie Google Cloud (nazwa, ikona, opis) — zobacz instrukcję w module Czat".into();
+        return t!("misc.chat.err_app_config").into_owned();
     }
     if body.contains("SERVICE_DISABLED") || body.contains("has not been used in project") {
-        return "w Twoim projekcie Google Cloud nie jest włączone Google Chat API — włącz je, odczekaj minutę i spróbuj ponownie".into();
+        return t!("misc.chat.err_api_disabled").into_owned();
     }
     if message.contains("only available to Google Workspace") {
-        return "czat Google działa tylko dla kont Google Workspace".into();
+        return t!("misc.chat.err_workspace_only").into_owned();
     }
     if code == 403 && (body.contains("insufficient") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
-        return "brak zgody na czat — zaloguj się ponownie przez Google i zaznacz wszystkie pola".into();
+        return t!("misc.chat.err_scope").into_owned();
     }
     if code == 429 {
-        return "Google prosi o wolniejsze odpytywanie — spróbuję za chwilę".into();
+        return t!("misc.chat.err_rate_limit").into_owned();
     }
-    format!("Google Chat odpowiedział {code}: {}", message.chars().take(200).collect::<String>())
+    t!("misc.chat.err_status", code = code, message = message.chars().take(200).collect::<String>()).into_owned()
 }
 
-const NO_CONNECTION: &str = "brak połączenia z Google";
+/// The error asks for the Chat app to be set up (in either language: the text was made when the
+/// error happened, the language may have been switched since).
+pub fn needs_app_setup(e: &str) -> bool {
+    e.contains(&*t!("misc.chat.err_app_config", locale = "en")) || e.contains(&*t!("misc.chat.err_app_config", locale = "pl"))
+}
+
+fn no_connection() -> String {
+    t!("misc.chat.no_connection").into_owned()
+}
+
+/// A dropped connection (the text is in either language, see `needs_app_setup`).
+fn is_no_connection(e: &str) -> bool {
+    e.contains(&*t!("misc.chat.no_connection", locale = "en")) || e.contains(&*t!("misc.chat.no_connection", locale = "pl"))
+}
 
 /// One request. An empty or odd body is an error, never an empty answer (an empty list of
 /// conversations would wipe the stored ones).
@@ -333,14 +346,14 @@ fn call(http: &ureq::Agent, acc: &Account, method: &str, url: &str, body: Option
     };
     match resp {
         Ok(r) => {
-            let text = r.into_string().map_err(|e| format!("{NO_CONNECTION}: {e}"))?;
+            let text = r.into_string().map_err(|e| format!("{}: {e}", no_connection()))?;
             match serde_json::from_str::<Value>(&text) {
                 Ok(v) if v.is_object() => Ok(v),
-                _ => Err(format!("niezrozumiała odpowiedź Google ({} bajtów)", text.len())),
+                _ => Err(t!("misc.chat.unintelligible", bytes = text.len()).into_owned()),
             }
         }
         Err(ureq::Error::Status(code, r)) => Err(explain(code, &r.into_string().unwrap_or_default())),
-        Err(e) => Err(format!("{NO_CONNECTION}: {e}")),
+        Err(e) => Err(format!("{}: {e}", no_connection())),
     }
 }
 
@@ -599,7 +612,7 @@ impl Worker {
 
     /// A dropped connection is made again on the next request.
     fn check<T>(&mut self, r: Result<T, String>) -> Result<T, String> {
-        if r.as_ref().is_err_and(|e| e.contains(NO_CONNECTION)) {
+        if r.as_ref().is_err_and(|e| is_no_connection(e)) {
             self.http = None;
         }
         r
@@ -786,9 +799,9 @@ impl Worker {
                 }
             }
             s.title = match people.len() {
-                0 => "Rozmowa".into(),
+                0 => t!("misc.chat.conversation").into_owned(),
                 1..=3 => people.join(", "),
-                n => format!("{} i {} innych", people[..2].join(", "), n - 2),
+                n => t!("misc.chat.and_others", names = people[..2].join(", "), n = n - 2).into_owned(),
             };
         }
         notes
@@ -802,7 +815,7 @@ impl Worker {
         let behind = !s.filled || s.active > s.fetched_to;
         let http = self.agent()?;
         if behind {
-            let job = self.job(&name).ok_or("rozmowa zniknęła")?;
+            let job = self.job(&name).ok_or_else(|| t!("misc.chat.conversation_gone").into_owned())?;
             let got = download(&http, &self.acc, &self.me, &job);
             let got = self.check(got)?;
             let notes = self.apply(got);
@@ -946,7 +959,7 @@ impl Worker {
                         let text = if m.text.is_empty() { m.files.first().map(|f| format!("{} {}", crate::theme::ic::ATTACH, f.0)).unwrap_or_default() } else { m.text.lines().next().unwrap_or("").to_string() };
                         let text: String = text.chars().take(120).collect();
                         if m.sender == self.me && !self.me.is_empty() {
-                            format!("Ty: {text}")
+                            t!("misc.chat.you", text = text).into_owned()
                         } else if s.kind != "DIRECT_MESSAGE" && !m.who.is_empty() {
                             format!("{}: {text}", m.who.split_whitespace().next().unwrap_or(""))
                         } else {
@@ -955,7 +968,7 @@ impl Worker {
                     })
                     .unwrap_or_default();
                 let unread = if s.filled { s.msgs.iter().filter(|m| m.at > s.read && m.sender != self.me).count() } else { 0 };
-                Row { name: s.name.clone(), title: if s.title.is_empty() { "Rozmowa".into() } else { s.title.clone() }, kind: s.kind.clone(), external: s.external, active: s.active, last, unread, uri: s.uri.clone() }
+                Row { name: s.name.clone(), title: if s.title.is_empty() { t!("misc.chat.conversation").into_owned() } else { s.title.clone() }, kind: s.kind.clone(), external: s.external, active: s.active, last, unread, uri: s.uri.clone() }
             })
             .collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.active));
@@ -968,23 +981,27 @@ pub fn sample() -> (Vec<Row>, Vec<Msg>) {
     let t = now();
     let min = 60_000_000i64;
     let me = "users/me";
+    // in the interface language: (Polish, English)
+    let pl = crate::i18n::is_pl();
+    let l = |p: &'static str, e: &'static str| if pl { p } else { e };
+    let (anna, aleks) = (l("Anna Kowalska", "Emma Clarke"), l("Aleks Nowicki", "Alex Newman"));
     let m = |who: &str, sender: &str, ago: i64, text: &str| Msg { name: format!("m{ago}"), sender: sender.into(), who: who.into(), at: t - ago * min, edited: false, text: text.into(), files: vec![] };
     let mut msgs = vec![
-        m("Anna Kowalska", "users/anna", 1500, "Dzień dobry! Czy mogę prosić o wycenę modułu raportów?"),
-        m("Aleks Nowicki", me, 1490, "Dzień dobry, jasne — wyślę ją jutro rano."),
-        m("Anna Kowalska", "users/anna", 70, "Dziękuję za wycenę. Mamy jeszcze pytanie o termin wdrożenia."),
-        m("Anna Kowalska", "users/anna", 69, "Czy start w grudniu jest realny?"),
-        m("Aleks Nowicki", me, 40, "Tak, grudzień jest realny, jeśli akceptacja przyjdzie do piątku."),
-        m("Anna Kowalska", "users/anna", 3, "Świetnie, potwierdzę do piątku."),
+        m(anna, "users/anna", 1500, l("Dzień dobry! Czy mogę prosić o wycenę modułu raportów?", "Hello! Could I get a quote for the reports module?")),
+        m(aleks, me, 1490, l("Dzień dobry, jasne — wyślę ją jutro rano.", "Hello, sure — I'll send it tomorrow morning.")),
+        m(anna, "users/anna", 70, l("Dziękuję za wycenę. Mamy jeszcze pytanie o termin wdrożenia.", "Thanks for the quote. We have one more question about the rollout date.")),
+        m(anna, "users/anna", 69, l("Czy start w grudniu jest realny?", "Is a December start realistic?")),
+        m(aleks, me, 40, l("Tak, grudzień jest realny, jeśli akceptacja przyjdzie do piątku.", "Yes, December works if we get approval by Friday.")),
+        m(anna, "users/anna", 3, l("Świetnie, potwierdzę do piątku.", "Great, I'll confirm by Friday.")),
     ];
-    msgs[2].files = vec![("wycena-raporty.pdf".into(), String::new())];
+    msgs[2].files = vec![(l("wycena-raporty.pdf", "quote-reports.pdf").into(), String::new())];
     let row = |name: &str, title: &str, kind: &str, external: bool, ago: i64, last: &str, unread: usize| Row { name: name.into(), title: title.into(), kind: kind.into(), external, active: t - ago * min, last: last.into(), unread, uri: String::new() };
     let rows = vec![
-        row("spaces/a", "Anna Kowalska", "DIRECT_MESSAGE", true, 3, "Świetnie, potwierdzę do piątku.", 1),
-        row("spaces/b", "Piotr Nowak", "DIRECT_MESSAGE", false, 95, "Ty: Wrzuciłem poprawkę na serwer testowy", 0),
-        row("spaces/c", "Zespół wdrożeń", "SPACE", false, 260, "Marta: Jutro przegląd o 10:00", 3),
-        row("spaces/d", "Ewa Lewandowska, Tomasz Zieliński", "GROUP_CHAT", true, 2900, "Tomasz: Dzięki, wszystko działa", 0),
-        row("spaces/e", "Kamil Wójcik", "DIRECT_MESSAGE", true, 9000, &format!("{} umowa-ramowa.docx", crate::theme::ic::ATTACH), 0),
+        row("spaces/a", anna, "DIRECT_MESSAGE", true, 3, l("Świetnie, potwierdzę do piątku.", "Great, I'll confirm by Friday."), 1),
+        row("spaces/b", l("Piotr Nowak", "Paul Turner"), "DIRECT_MESSAGE", false, 95, l("Ty: Wrzuciłem poprawkę na serwer testowy", "You: I pushed the fix to the test server"), 0),
+        row("spaces/c", l("Zespół wdrożeń", "Rollout team"), "SPACE", false, 260, l("Marta: Jutro przegląd o 10:00", "Martha: Review tomorrow at 10:00"), 3),
+        row("spaces/d", l("Ewa Lewandowska, Tomasz Zieliński", "Eva Lewis, Thomas Green"), "GROUP_CHAT", true, 2900, l("Tomasz: Dzięki, wszystko działa", "Thomas: Thanks, everything works"), 0),
+        row("spaces/e", l("Kamil Wójcik", "Kevin Walsh"), "DIRECT_MESSAGE", true, 9000, &format!("{} {}", crate::theme::ic::ATTACH, l("umowa-ramowa.docx", "framework-agreement.docx")), 0),
     ];
     (rows, msgs)
 }

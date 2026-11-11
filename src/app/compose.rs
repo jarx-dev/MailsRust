@@ -103,8 +103,14 @@ impl Original {
         }
     }
 
-    pub(super) fn title(&self) -> &'static str {
-        if self.forward { "Przekazana wiadomość" } else { "Wiadomość oryginalna" }
+    pub(super) fn title(&self) -> String {
+        let title = if self.forward { t!("compose.original.forwarded") } else { t!("compose.original.original") };
+        title.into_owned()
+    }
+
+    /// Date and time as written in the quote header (the date in the interface language).
+    fn stamp(&self, seconds: bool) -> String {
+        format!("{} {}", i18n::date(self.date.date()), self.date.format(if seconds { "%H:%M:%S" } else { "%H:%M" }))
     }
 
     /// The quoted message as it looked (its formatted text under a short header), for the
@@ -124,12 +130,16 @@ impl Original {
         };
         let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
         let head = format!(
-            "<div style=\"font-family:Arial,sans-serif;font-size:13px;color:#555\">------ {} ------<br>Nadawca: \"{}\" &lt;{}&gt;<br>Do: {}<br>Data: {}<br>Temat: {}</div><br>",
+            "<div style=\"font-family:Arial,sans-serif;font-size:13px;color:#555\">------ {} ------<br>{} \"{}\" &lt;{}&gt;<br>{} {}<br>{} {}<br>{} {}</div><br>",
             self.title(),
+            t!("compose.original.sender"),
             esc(&self.from_name),
             esc(&self.from_addr),
+            t!("compose.original.to"),
             esc(&self.to),
-            self.date.format("%d-%m-%Y %H:%M:%S"),
+            t!("compose.original.date"),
+            self.stamp(true),
+            t!("compose.original.subject"),
             esc(&self.subject)
         );
         let body = if self.forward {
@@ -143,12 +153,16 @@ impl Original {
     /// Text added below the reply when it is sent or saved.
     pub(super) fn as_text(&self) -> String {
         let mut s = format!(
-            "\n\n------ {} ------\nNadawca: \"{}\" <{}>\nDo: {}\nData: {}\nTemat: {}\n\n",
+            "\n\n------ {} ------\n{} \"{}\" <{}>\n{} {}\n{} {}\n{} {}\n\n",
             self.title(),
+            t!("compose.original.sender"),
             self.from_name,
             self.from_addr,
+            t!("compose.original.to"),
             self.to,
-            self.date.format("%d-%m-%Y %H:%M:%S"),
+            t!("compose.original.date"),
+            self.stamp(true),
+            t!("compose.original.subject"),
             self.subject
         );
         for l in self.body.lines() {
@@ -263,7 +277,7 @@ impl MailApp {
                             .flatten()
                             .map(|h| crate::compose_view::show_cids(&crate::compose_view::body_of(&h), &o.inline));
                         let from = if o.from_name.is_empty() { o.from_addr.clone() } else { format!("{} <{}>", o.from_name, o.from_addr) };
-                        crate::compose_view::quote_html(o.title(), &from, &o.to, &o.date.format("%d-%m-%Y %H:%M").to_string(), &o.subject, html, &o.body)
+                        crate::compose_view::quote_html(&o.title(), &from, &o.to, &o.stamp(false), &o.subject, html, &o.body)
                     });
                     let text = if body.trim().is_empty() { String::new() } else { crate::signature::text_to_html(&body) };
                     crate::compose_view::start_content(&text, sig, quote)
@@ -352,7 +366,7 @@ impl MailApp {
         let mut composers = std::mem::take(&mut self.composers);
         for (i, c) in composers.iter_mut().enumerate() {
             let mut open = true;
-            let title = if c.subject.trim().is_empty() { "Nowa wiadomość".to_string() } else { c.subject.clone() };
+            let title = if c.subject.trim().is_empty() { t!("compose.window.new_message").into_owned() } else { c.subject.clone() };
             let mut outcome: Option<&'static str> = None;
             let from_acc = self.account_for(c.account);
             let from_line = format!("{} <{}>", from_acc.display_name, from_acc.email);
@@ -465,11 +479,11 @@ impl MailApp {
                     // Line 1: send, from, save / discard, window buttons.
                     ui.horizontal(|ui| {
                         let send = ui.add(
-                            egui::Button::new(RichText::new("➤  Wyślij").color(Color32::WHITE).size(14.0))
+                            egui::Button::new(RichText::new(t!("compose.window.send")).color(Color32::WHITE).size(14.0))
                                 .fill(PRIMARY)
                                 .min_size(Vec2::new(92.0, 30.0)),
                         );
-                        let send = if can_send { send } else { send.on_hover_text("Offline: wiadomość poczeka w skrzynce nadawczej") };
+                        let send = if can_send { send } else { send.on_hover_text(t!("compose.window.offline_hint")) };
                         if send.clicked() {
                             outcome = Some("send");
                         }
@@ -478,27 +492,27 @@ impl MailApp {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             let maxed = ui.ctx().input(|inp| inp.viewport().maximized.unwrap_or(false));
-                            if window_button(ui, WinButton::Close).on_hover_text("Zamknij").clicked() {
+                            if window_button(ui, WinButton::Close).on_hover_text(t!("compose.window.close")).clicked() {
                                 open = false;
                             }
                             let kind = if maxed { WinButton::Restore } else { WinButton::Maximize };
                             if window_button(ui, kind).clicked() {
                                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
                             }
-                            if window_button(ui, WinButton::Minimize).on_hover_text("Minimalizuj").clicked() {
+                            if window_button(ui, WinButton::Minimize).on_hover_text(t!("compose.window.minimize")).clicked() {
                                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                             }
                             ui.add_space(10.0);
                             ui.spacing_mut().item_spacing.x = 6.0;
-                            if ui.add(egui::Button::new("🗑").frame(false)).on_hover_text("Odrzuć").clicked() {
+                            if ui.add(egui::Button::new("🗑").frame(false)).on_hover_text(t!("compose.window.discard")).clicked() {
                                 outcome = Some("discard");
                             }
-                            if ui.add(egui::Button::new("💾").frame(false)).on_hover_text("Zapisz szkic").clicked() {
+                            if ui.add(egui::Button::new("💾").frame(false)).on_hover_text(t!("compose.window.save_draft")).clicked() {
                                 outcome = Some("draft");
                             }
                             ui.add_space(8.0);
-                            let clip = ui.add_enabled(c.picking.is_none(), egui::Button::new(RichText::new("📎 Załącz").size(13.5)).frame(false));
-                            if clip.on_hover_text("Załącz pliki (możesz je też przeciągnąć na to okno)").clicked() {
+                            let clip = ui.add_enabled(c.picking.is_none(), egui::Button::new(RichText::new(t!("compose.window.attach")).size(13.5)).frame(false));
+                            if clip.on_hover_text(t!("compose.window.attach_tip")).clicked() {
                                 let owner = crate::compose_view::find_window(&crate::compose_view::marker(c.key));
                                 let (tx, rx) = std::sync::mpsc::channel();
                                 let rctx = ui.ctx().clone();
@@ -533,7 +547,7 @@ impl MailApp {
                         });
                     });
                     // Lines 2–3: recipients and subject, each on one line.
-                    let label_w = 52.0;
+                    let label_w = if i18n::is_pl() { 52.0 } else { 60.0 };
                     let field = |ui: &mut Ui, label: &str, text: &mut String, hint: &str, extra: f32| {
                         ui.horizontal(|ui| {
                             ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new(label).color(MUTED())));
@@ -541,31 +555,31 @@ impl MailApp {
                         });
                     };
                     ui.horizontal(|ui| {
-                        ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new("Do:").color(MUTED())));
+                        ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new(t!("compose.window.to")).color(MUTED())));
                         let extra = if c.show_cc {
                             0.0
                         } else {
-                            text_width(ui, "Dodaj DW", FontId::proportional(13.5)) + ui.spacing().item_spacing.x + 4.0
+                            text_width(ui, &t!("compose.window.add_cc"), FontId::proportional(13.5)) + ui.spacing().item_spacing.x + 4.0
                         };
                         let w = ui.available_width() - extra;
-                        let r = crate::contacts::recipients_field(ui, &mut c.to, "Wpisz imię lub adres…", w, &contacts, ("to", c.key));
+                        let r = crate::contacts::recipients_field(ui, &mut c.to, &t!("compose.window.type_name"), w, &contacts, ("to", c.key));
                         if start == "suggest" {
                             // test picture: typing in the recipients box
                             c.focused = true;
                             r.request_focus();
                         }
-                        if !c.show_cc && ui.link("Dodaj DW").clicked() {
+                        if !c.show_cc && ui.link(t!("compose.window.add_cc")).clicked() {
                             c.show_cc = true;
                         }
                     });
                     if c.show_cc {
                         ui.horizontal(|ui| {
-                            ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new("DW:").color(MUTED())));
+                            ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new(t!("compose.window.cc")).color(MUTED())));
                             let w = ui.available_width();
                             crate::contacts::recipients_field(ui, &mut c.cc, "", w, &contacts, ("cc", c.key));
                         });
                     }
-                    field(ui, "Temat:", &mut c.subject, "", 0.0);
+                    field(ui, &t!("compose.window.subject"), &mut c.subject, "", 0.0);
                     if let Some(chosen) = c.picking.as_ref().and_then(|rx| rx.try_recv().ok()) {
                         add_files(&mut c.files, chosen);
                         c.picking = None;
@@ -591,7 +605,7 @@ impl MailApp {
                     if !c.files.is_empty() || hovering {
                         let mut remove: Option<usize> = None;
                         ui.horizontal_wrapped(|ui| {
-                            ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new("Pliki:").color(MUTED())));
+                            ui.add_sized([label_w, 24.0], egui::Label::new(RichText::new(t!("compose.window.files")).color(MUTED())));
                             for (k, f) in c.files.iter().enumerate() {
                                 let name = std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                                 let size = std::fs::metadata(f).map(|m| human_size(m.len())).unwrap_or_default();
@@ -603,17 +617,17 @@ impl MailApp {
                                     .show(ui, |ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
                                         let label = ui.add(egui::Label::new(RichText::new(format!("📎 {name}")).size(13.0).color(TEXT())).sense(Sense::click()));
-                                        if label.on_hover_text(format!("{f}\nKliknij, aby otworzyć")).clicked() {
+                                        if label.on_hover_text(t!("compose.window.open_file", path = f)).clicked() {
                                             let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", f]).spawn();
                                         }
                                         ui.label(RichText::new(size).size(11.5).color(MUTED()));
-                                        if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(MUTED())).frame(false)).on_hover_text("Usuń załącznik").clicked() {
+                                        if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(MUTED())).frame(false)).on_hover_text(t!("compose.window.remove_attachment")).clicked() {
                                             remove = Some(k);
                                         }
                                     });
                             }
                             if hovering {
-                                ui.label(RichText::new("Upuść, aby załączyć").size(13.0).color(ACCENT()));
+                                ui.label(RichText::new(t!("compose.window.drop_to_attach")).size(13.0).color(ACCENT()));
                             }
                         });
                         if let Some(k) = remove {
@@ -728,7 +742,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                                                 h.contains("<h2"),
                                                 h.contains("<strong>gotowe"),
                                                 h.contains("Nowicki"),
-                                                h.contains("Wiadomość oryginalna")
+                                                h.contains("pz-quote-head")
                                             ));
                                         }
                                         if std::env::var("POCZTA_FOCUS_LOG").is_ok() && text.contains("XYZQ") {
@@ -885,7 +899,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         let strip_h = if pics.is_empty() { 0.0 } else { 66.0 };
                         let free = (ui.available_height() - footer - orig_head - sig_h - 32.0 - strip_h).max(80.0);
                         let editor_h = if c.original.is_some() && c.show_original { (free * 0.42).max(90.0) } else { free };
-                        let hint = if c.original.as_ref().map(|o| !o.forward).unwrap_or(false) { "Napisz odpowiedź…" } else { "Napisz wiadomość…" };
+                        let hint = if c.original.as_ref().map(|o| !o.forward).unwrap_or(false) { t!("compose.window.hint_reply") } else { t!("compose.window.hint_message") };
                         let edit_id = id(("cedit", c.key));
                         let n_chars = c.body.chars().count();
                         let sel = egui::text_edit::TextEditState::load(ui.ctx(), edit_id)
@@ -940,27 +954,27 @@ Wpisy są **gotowe** i *sprawdzone*:
                             let tool = |ui: &mut Ui, label: RichText, tip: &str| -> bool {
                                 ui.add(egui::Button::new(label).frame(false).min_size(Vec2::new(28.0, 26.0))).on_hover_text(tip).clicked()
                             };
-                            if tool(ui, RichText::new("B").font(semibold(15.0)).color(TEXT()), "Pogrubienie (Ctrl+B)") {
+                            if tool(ui, RichText::new("B").font(semibold(15.0)).color(TEXT()), &t!("compose.view.bold")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "**", "**"));
                             }
-                            if tool(ui, RichText::new("I").italics().size(15.0).color(TEXT()), "Kursywa (Ctrl+I)") {
+                            if tool(ui, RichText::new("I").italics().size(15.0).color(TEXT()), &t!("compose.view.italic")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "*", "*"));
                             }
-                            if tool(ui, RichText::new("U").underline().size(15.0).color(TEXT()), "Podkreślenie") {
+                            if tool(ui, RichText::new("U").underline().size(15.0).color(TEXT()), &t!("compose.view.underline")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "<u>", "</u>"));
                             }
-                            if tool(ui, RichText::new("S").strikethrough().size(15.0).color(TEXT()), "Przekreślenie") {
+                            if tool(ui, RichText::new("S").strikethrough().size(15.0).color(TEXT()), &t!("compose.view.strike")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "~~", "~~"));
                             }
                             ui.add_space(6.0);
-                            if tool(ui, RichText::new("A−").size(12.0).color(TEXT()), "Mniejszy tekst") {
+                            if tool(ui, RichText::new("A−").size(12.0).color(TEXT()), &t!("compose.view.smaller")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "<span style=\"font-size:12px\">", "</span>"));
                             }
-                            if tool(ui, RichText::new("A+").size(16.0).color(TEXT()), "Większy tekst") {
+                            if tool(ui, RichText::new("A+").size(16.0).color(TEXT()), &t!("compose.view.larger")) {
                                 new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, "<span style=\"font-size:18px\">", "</span>"));
                             }
                             ui.menu_button(RichText::new("A").font(semibold(15.0)).color(Color32::from_rgb(0xC6, 0x28, 0x28)), |ui| {
-                                for (name, css) in crate::rich::COLOURS {
+                                for (name, css) in crate::rich::colours() {
                                     let col = u32::from_str_radix(&css[1..], 16).map(|n| Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)).unwrap_or(TEXT());
                                     if ui.button(RichText::new(format!("■  {name}")).color(col)).clicked() {
                                         new_sel = Some(crate::rich::wrap(&mut c.body, sel.0, sel.1, &format!("<span style=\"color:{css}\">"), "</span>"));
@@ -969,20 +983,20 @@ Wpisy są **gotowe** i *sprawdzone*:
                                 }
                             })
                             .response
-                            .on_hover_text("Kolor tekstu");
+                            .on_hover_text(t!("compose.view.colour"));
                             ui.add_space(6.0);
-                            if tool(ui, RichText::new("H").font(semibold(15.0)).color(TEXT()), "Nagłówek") {
+                            if tool(ui, RichText::new("H").font(semibold(15.0)).color(TEXT()), &t!("compose.view.heading")) {
                                 let e = crate::rich::prefix_lines(&mut c.body, sel.0, sel.1, "## ");
                                 new_sel = Some((e, e));
                             }
-                            if tool(ui, RichText::new("•").size(18.0).color(TEXT()), "Lista") {
+                            if tool(ui, RichText::new("•").size(18.0).color(TEXT()), &t!("compose.view.list")) {
                                 let e = crate::rich::prefix_lines(&mut c.body, sel.0, sel.1, "- ");
                                 new_sel = Some((e, e));
                             }
                             ui.add_space(8.0);
-                            ui.label(RichText::new("Markdown · obraz: Ctrl+V lub przeciągnij").size(11.5).color(MUTED()));
+                            ui.label(RichText::new(t!("compose.view.markdown_hint")).size(11.5).color(MUTED()));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let label = if c.preview { "✏  Edytuj" } else { "👁  Podgląd" };
+                                let label = if c.preview { t!("compose.view.edit") } else { t!("compose.view.preview") };
                                 if ui.add(egui::Button::new(RichText::new(label).size(12.5)).min_size(Vec2::new(0.0, 24.0))).clicked() {
                                     c.preview = !c.preview;
                                 }
@@ -1045,13 +1059,13 @@ Wpisy są **gotowe** i *sprawdzone*:
                                                 ui.vertical(|ui| {
                                                     ui.label(RichText::new(format!("{w} px")).size(11.5).color(MUTED()));
                                                     ui.horizontal(|ui| {
-                                                        if ui.small_button("−").on_hover_text("Mniejszy").clicked() {
+                                                        if ui.small_button("−").on_hover_text(t!("compose.view.pic_smaller")).clicked() {
                                                             change = Some((range.clone(), Some(((*w as f32) * 0.8) as u32).map(|x| x.max(60))));
                                                         }
-                                                        if ui.small_button("+").on_hover_text("Większy").clicked() {
+                                                        if ui.small_button("+").on_hover_text(t!("compose.view.pic_larger")).clicked() {
                                                             change = Some((range.clone(), Some((((*w as f32) * 1.25) as u32).min(1400))));
                                                         }
-                                                        if ui.small_button("✕").on_hover_text("Usuń obraz").clicked() {
+                                                        if ui.small_button("✕").on_hover_text(t!("compose.view.pic_remove")).clicked() {
                                                             change = Some((range.clone(), None));
                                                         }
                                                     });
@@ -1073,7 +1087,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         // the signature (from Gmail's sent mail), added when sending; can be left out
                         if !sig_text.trim().is_empty() {
                             ui.add_space(2.0);
-                            ui.checkbox(&mut c.signature, RichText::new("Dodaj podpis").size(12.5).color(MUTED()));
+                            ui.checkbox(&mut c.signature, RichText::new(t!("compose.view.add_signature")).size(12.5).color(MUTED()));
                             if c.signature {
                                 // as it will be sent: with its look and graphics
                                 egui::ScrollArea::vertical().id_salt(("csig", c.key)).max_height(sig_box).show(ui, |ui| {
@@ -1088,7 +1102,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         // The original message, compact and foldable.
                         if let Some(o) = &c.original {
                             ui.add_space(4.0);
-                            let when = format!("{} {}", pl::short_day_month(o.date.date()), o.date.format("%H:%M"));
+                            let when = format!("{} {}", i18n::short_day_month(o.date.date()), o.date.format("%H:%M"));
                             let head = format!(
                                 "{}  {}  ·  {}  ·  {}",
                                 if c.show_original { "⌄" } else { "›" },
@@ -1101,7 +1115,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                                 ui.painter().rect_filled(hr, CornerRadius::same(3), HOVER());
                             }
                             line(ui.painter(), Pos2::new(hr.left() + 4.0, hr.top() + 3.0), &head, 13.0, MUTED(), hr.width() - 8.0);
-                            if hresp.on_hover_text(if c.show_original { "Zwiń" } else { "Pokaż" }).clicked() {
+                            if hresp.on_hover_text(if c.show_original { t!("compose.view.fold") } else { t!("compose.view.unfold") }).clicked() {
                                 c.show_original = !c.show_original;
                             }
                             if c.show_original {
@@ -1119,15 +1133,11 @@ Wpisy są **gotowe** i *sprawdzone*:
                                                 ui.spacing_mut().item_spacing.y = 2.0;
                                                 let to = if o.to.is_empty() { "—".to_string() } else { o.to.clone() };
                                                 ui.label(
-                                                    RichText::new(format!("Od: {} <{}>   Do: {}", o.from_name, o.from_addr, to))
+                                                    RichText::new(t!("compose.original.from_to_line", name = o.from_name, addr = o.from_addr, to = to))
                                                         .small()
                                                         .color(MUTED()),
                                                 );
-                                                let mut meta = format!(
-                                                    "Data: {}   Temat: {}",
-                                                    o.date.format("%d-%m-%Y %H:%M"),
-                                                    o.subject
-                                                );
+                                                let mut meta = t!("compose.original.date_subject_line", date = o.stamp(false), subject = o.subject).into_owned();
                                                 if !o.attachments.is_empty() {
                                                     meta.push_str(&format!("   📎 {}", o.attachments.join(", ")));
                                                 }
@@ -1156,19 +1166,19 @@ Wpisy są **gotowe** i *sprawdzone*:
                         .shadow(egui::epaint::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(70) });
                     let asked = egui::Modal::new(id(("ask-close", c.key))).frame(frame).show(root.ctx(), |ui| {
                         ui.set_width(400.0);
-                        ui.label(RichText::new(if existing { "Zapisać zmiany w szkicu?" } else { "Zachować wiadomość jako szkic?" }).font(semibold(17.0)).color(TEXT()));
+                        ui.label(RichText::new(if existing { t!("compose.ask.save_changes_q") } else { t!("compose.ask.keep_q") }).font(semibold(17.0)).color(TEXT()));
                         ui.add_space(4.0);
-                        ui.label(RichText::new("Ta wiadomość nie została wysłana.").color(MUTED()));
+                        ui.label(RichText::new(t!("compose.ask.not_sent")).color(MUTED()));
                         ui.add_space(14.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 8.0;
-                            if ui.add(egui::Button::new(RichText::new(if existing { "Zapisz zmiany" } else { "Zapisz szkic" }).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                            if ui.add(egui::Button::new(RichText::new(if existing { t!("compose.ask.save_changes") } else { t!("compose.window.save_draft") }).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0))).clicked() {
                                 choice = Some("draft");
                             }
-                            if ui.add(egui::Button::new(if existing { "Odrzuć zmiany" } else { "Odrzuć" }).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                            if ui.add(egui::Button::new(if existing { t!("compose.ask.discard_changes") } else { t!("compose.window.discard") }).min_size(Vec2::new(0.0, 30.0))).clicked() {
                                 choice = Some(if existing { "close" } else { "discard" });
                             }
-                            if ui.add(egui::Button::new("Wróć do pisania").min_size(Vec2::new(0.0, 30.0))).clicked() {
+                            if ui.add(egui::Button::new(t!("compose.ask.back")).min_size(Vec2::new(0.0, 30.0))).clicked() {
                                 choice = Some("back");
                             }
                         });
@@ -1245,14 +1255,14 @@ Wpisy są **gotowe** i *sprawdzone*:
                 };
             }
             if outcome == Some("send") && c.to.trim().is_empty() {
-                c.error = Some("Dodaj co najmniej jednego odbiorcę.".into());
+                c.error = Some(t!("compose.error.no_recipient").into_owned());
                 outcome = None;
             }
             if outcome == Some("send") {
                 // the files are looked at on disk only when sending, not on every redraw
                 let total: u64 = c.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
                 if total > 25 * 1024 * 1024 {
-                    c.error = Some(format!("Załączniki są za duże ({}) — Gmail przyjmuje razem do 25 MB.", human_size(total)));
+                    c.error = Some(t!("compose.error.too_big", size = human_size(total)).into_owned());
                     outcome = None;
                 }
             }
@@ -1362,7 +1372,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                 m.from_addr = acc.email.clone();
                 m.to = c.to.clone();
                 m.cc = c.cc.clone();
-                m.subject = if c.subject.trim().is_empty() { "(bez tematu)".into() } else { c.subject.clone() };
+                m.subject = if c.subject.trim().is_empty() { t!("compose.no_subject").into_owned() } else { c.subject.clone() };
                 m.body = c.body.clone();
                 m.body_path.clear();
                 m.date = Local::now().naive_local();
@@ -1377,12 +1387,12 @@ Wpisy są **gotowe** i *sprawdzone*:
                 if can_send {
                     self.busy += 1;
                     net::send(acc, Outgoing { id, to: c.to, cc: c.cc, subject: c.subject, body: c.body, html, inline, files: c.files }, self.tx.clone(), self.ctx.clone());
-                    self.set_status("Wysyłanie…");
+                    self.set_status(t!("compose.status.sending"));
                 } else {
-                    self.set_status("Zapisano w skrzynce nadawczej — zostanie wysłana po zalogowaniu");
+                    self.set_status(t!("compose.status.saved_outbox"));
                 }
             } else {
-                self.set_status("Szkic zapisany");
+                self.set_status(t!("compose.status.draft_saved"));
             }
         }
     }
