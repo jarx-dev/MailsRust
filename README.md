@@ -8,8 +8,6 @@
 
 **A fast email client for Windows, written from scratch in Rust.**
 
-**[Download the latest release](https://github.com/jarx-dev/MailsRust/releases/latest)**
-
 Mail, calendar and contacts in one window · starts in a fraction of a second · search by keyword and by meaning · AI at hand
 
 ![Rust](https://img.shields.io/badge/Rust-egui%200.37-orange?logo=rust)

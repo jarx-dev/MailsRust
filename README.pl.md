@@ -8,8 +8,6 @@
 
 **Szybki klient poczty dla Windows, napisany od zera w Rust.**
 
-**[Pobierz najnowszą wersję](https://github.com/jarx-dev/MailsRust/releases/latest)**
-
 Poczta, kalendarz i kontakty w jednym oknie · start w ułamku sekundy · wyszukiwanie po słowach i po znaczeniu · AI pod ręką
 
 ![Rust](https://img.shields.io/badge/Rust-egui%200.37-orange?logo=rust)
