@@ -1,6 +1,6 @@
 # Poczta
 
-A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, redb, WebView2). One EXE; Polish UI.
+A native Windows mail, calendar and contacts client in Rust (eframe/egui 0.37, redb, WebView2). One EXE; English and Polish UI (`locales/*.yml` through `t!`, see `src/i18n.rs`).
 
 ## What we never compromise on
 

@@ -1,5 +1,5 @@
 use crate::model::{Event, Store};
-use crate::pl;
+use crate::i18n;
 use crate::theme::*;
 use chrono::{Datelike, Duration, Months, NaiveDate, NaiveTime, Timelike};
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -89,7 +89,7 @@ pub fn month_grid(ui: &mut Ui, store: &Store, sel: NaiveDate, today: NaiveDate) 
     let cw = full.width() / 7.0;
     let ch = (full.height() - header_h) / 6.0;
     let painter = ui.painter_at(full);
-    for (i, n) in pl::WD_MIN.iter().enumerate() {
+    for (i, n) in i18n::wd_min().iter().enumerate() {
         painter.text(
             Pos2::new(full.left() + cw * i as f32 + 8.0, full.top() + header_h / 2.0),
             Align2::LEFT_CENTER,
@@ -145,7 +145,7 @@ pub fn month_grid(ui: &mut Ui, store: &Store, sel: NaiveDate, today: NaiveDate) 
                     painter.text(
                         Pos2::new(rect.left() + 8.0, y + 2.0),
                         Align2::LEFT_TOP,
-                        format!("+{} więcej", evs.len() - k),
+                        t!("cal.calendar.more", n = evs.len() - k),
                         FontId::proportional(11.5),
                         MUTED(),
                     );
@@ -290,7 +290,7 @@ pub fn week_grid(ui: &mut Ui, store: &Store, sel: NaiveDate, today: NaiveDate) -
             action = Some(CalAction::Select(day));
         }
         let col = if day == today { ACCENT() } else { TEXT() };
-        p.text(Pos2::new(x + 8.0, hdr.top() + 4.0), Align2::LEFT_TOP, pl::wd_short(day), FontId::proportional(11.5), MUTED());
+        p.text(Pos2::new(x + 8.0, hdr.top() + 4.0), Align2::LEFT_TOP, i18n::wd_short(day), FontId::proportional(11.5), MUTED());
         p.text(Pos2::new(x + 8.0, hdr.top() + 18.0), Align2::LEFT_TOP, day.day().to_string(), FontId::proportional(16.0), col);
         if day == sel {
             p.hline(r.x_range().shrink(4.0), r.bottom() - 1.5, Stroke::new(3.0, ACCENT()));
@@ -318,7 +318,7 @@ pub fn mini_month(ui: &mut Ui, salt: &str, store: &Store, shown: NaiveDate, sel:
     let cell = (w / 7.0).floor().min(34.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(cell * 7.0, cell * 0.8 + cell * 6.0), Sense::hover());
     let p = ui.painter();
-    for (i, n) in pl::WD_MIN.iter().enumerate() {
+    for (i, n) in i18n::wd_min().iter().enumerate() {
         p.text(
             Pos2::new(rect.left() + cell * (i as f32 + 0.5), rect.top() + cell * 0.4),
             Align2::CENTER_CENTER,
@@ -419,18 +419,18 @@ pub enum EditorResult {
 pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) -> EditorResult {
     let mut res = EditorResult::Keep;
     let mut open = true;
-    let title = if ed.id.is_some() { "Edytuj wydarzenie" } else { "Nowe wydarzenie" };
-    crate::theme::dialog(ctx, "event_editor", title, 420.0, &mut open, |ui| {
+    let title = if ed.id.is_some() { t!("cal.calendar.edit_event") } else { t!("cal.calendar.new_event") };
+    crate::theme::dialog(ctx, "event_editor", &title, 420.0, &mut open, |ui| {
             egui::Grid::new("evgrid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
-                ui.label("Tytuł");
-                ui.add(egui::TextEdit::singleline(&mut ed.title).hint_text("Co się dzieje?").desired_width(260.0));
+                ui.label(t!("cal.calendar.title"));
+                ui.add(egui::TextEdit::singleline(&mut ed.title).hint_text(t!("cal.calendar.title_hint")).desired_width(260.0));
                 ui.end_row();
-                ui.label("Data");
+                ui.label(t!("cal.calendar.date"));
                 ui.horizontal(|ui| {
                     if ui.small_button(ic::PREV).clicked() {
                         ed.date -= Duration::days(1);
                     }
-                    if ui.button(format!("📅 {} {}", pl::wd_short(ed.date), pl::day_month(ed.date))).clicked() {
+                    if ui.button(format!("📅 {} {}", i18n::wd_short(ed.date), i18n::day_month(ed.date))).clicked() {
                         ed.picking = !ed.picking;
                         ed.shown = ed.date;
                     }
@@ -447,7 +447,7 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                             if ui.small_button(ic::PREV).clicked() {
                                 ed.shown = shift(ed.shown, CalView::Month, -1);
                             }
-                            ui.label(pl::month_year(ed.shown));
+                            ui.label(i18n::month_year(ed.shown));
                             if ui.small_button(ic::NEXT).clicked() {
                                 ed.shown = shift(ed.shown, CalView::Month, 1);
                             }
@@ -460,23 +460,23 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                     });
                     ui.end_row();
                 }
-                ui.label("Początek");
+                ui.label(t!("cal.calendar.start"));
                 ui.add(egui::TextEdit::singleline(&mut ed.start).hint_text("09:00").desired_width(70.0));
                 ui.end_row();
-                ui.label("Czas trwania");
+                ui.label(t!("cal.calendar.duration"));
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut ed.minutes).range(5..=1440).speed(5).suffix(" min"));
-                    for (lbl, m) in [("30 min", 30), ("1 godz.", 60), ("2 godz.", 120)] {
+                    for (lbl, m) in [("30 min".to_string(), 30), (t!("cal.calendar.hours_1").into_owned(), 60), (t!("cal.calendar.hours_2").into_owned(), 120)] {
                         if ui.small_button(lbl).clicked() {
                             ed.minutes = m;
                         }
                     }
                 });
                 ui.end_row();
-                ui.label("Miejsce");
-                ui.add(egui::TextEdit::singleline(&mut ed.location).hint_text("Opcjonalnie").desired_width(260.0));
+                ui.label(t!("cal.calendar.location"));
+                ui.add(egui::TextEdit::singleline(&mut ed.location).hint_text(t!("cal.calendar.optional")).desired_width(260.0));
                 ui.end_row();
-                ui.label("Kolor");
+                ui.label(t!("cal.calendar.color"));
                 ui.horizontal(|ui| {
                     for (i, c) in EVENT_COLORS.iter().enumerate() {
                         let (r, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
@@ -484,7 +484,13 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                         if ed.color == i {
                             ui.painter().circle_stroke(r.center(), 10.0, Stroke::new(2.0, TEXT()));
                         }
-                        if resp.on_hover_text(EVENT_COLOR_NAMES[i]).clicked() {
+                        let name = match i {
+                            0 => t!("cal.calendar.color_blue"),
+                            1 => t!("cal.calendar.color_purple"),
+                            2 => t!("cal.calendar.color_green"),
+                            _ => t!("cal.calendar.color_orange"),
+                        };
+                        if resp.on_hover_text(name).clicked() {
                             ed.color = i;
                         }
                     }
@@ -496,15 +502,15 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(egui::RichText::new("Zapisz").color(Color32::WHITE)).fill(ACCENT())).clicked() {
+                if ui.add(egui::Button::new(egui::RichText::new(t!("cal.calendar.save")).color(Color32::WHITE)).fill(ACCENT())).clicked() {
                     res = EditorResult::Save;
                 }
-                if ui.button("Anuluj").clicked() {
+                if ui.button(t!("cal.calendar.cancel")).clicked() {
                     res = EditorResult::Close;
                 }
                 if ed.id.is_some() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🗑 Usuń").clicked() {
+                        if ui.button(t!("cal.calendar.delete")).clicked() {
                             res = EditorResult::Delete;
                         }
                     });

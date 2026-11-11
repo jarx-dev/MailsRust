@@ -106,15 +106,15 @@ impl MailApp {
                     self.ensure_body(id);
                     if let Some(m) = self.msg(id) {
                         self.ctx.copy_text(crate::share::Shared::of(m).plain());
-                        self.flash("Treść e-maila skopiowana do schowka — wklej ją w czacie z AI");
-                        self.set_status("Skopiowano treść e-maila — wklej ją w czacie z AI");
+                        self.flash(&t!("ui.actions.text_copied_flash"));
+                        self.set_status(t!("ui.actions.text_copied"));
                     }
                 }
                 Action::StopAiSharing => {
                     self.hub.clear();
                     self.prefs.ai_shares.clear();
                     self.save_now = true;
-                    self.set_status("Linki dla AI wyłączone");
+                    self.set_status(t!("ui.actions.ai_links_off"));
                 }
                 Action::AddTag(id, tag) => {
                     let tag = tag.trim().to_string();
@@ -194,7 +194,7 @@ impl MailApp {
                         // deleted for good, also on the server
                         self.queue_op(id, |uid| net::Op::Expunge { uid });
                         self.store.messages.retain(|m| m.id != id);
-                        self.set_status("Wiadomość usunięta na stałe");
+                        self.set_status(t!("ui.actions.deleted_forever"));
                     } else {
                         // also into the server's Trash (Gmail: Kosz)
                         self.queue_op(id, |uid| net::Op::Trash { uid });
@@ -202,7 +202,7 @@ impl MailApp {
                             m.folder = Folder::Trash;
                             m.uid = None;
                         }
-                        self.set_status("Przeniesiono do kosza");
+                        self.set_status(t!("ui.actions.to_trash"));
                     }
                     if self.selected == Some(id) {
                         self.go_to_neighbour(next);
@@ -228,7 +228,7 @@ impl MailApp {
                         }
                         m.folder = f;
                     }
-                    self.set_status(format!("Przeniesiono do: {}", f.name()));
+                    self.set_status(t!("ui.actions.moved_to", folder = f.name()));
                     // moved out of the list: the next one is shown, like after deleting
                     if leaves && self.selected == Some(id) && !self.visible_ids().contains(&id) {
                         self.go_to_neighbour(next);
@@ -254,7 +254,7 @@ impl MailApp {
                         self.queue_op(*id, |uid| net::Op::Seen { uid, on: true });
                     }
                     self.save_now = true;
-                    self.set_status(format!("Oznaczono jako przeczytane: {}", ids.len()));
+                    self.set_status(t!("ui.actions.marked_read", n = ids.len()));
                 }
                 Action::SetRead(id, r) => {
                     if let Some(m) = self.msg_mut(id) {
@@ -351,7 +351,7 @@ impl MailApp {
                     }
                     self.touched = true;
                     self.save_now = true;
-                    self.set_status(if on { "Oznaczono: nie wymaga odpowiedzi" } else { "Oznaczono: wymaga odpowiedzi" });
+                    self.set_status(if on { t!("ui.actions.no_reply_needed") } else { t!("ui.actions.reply_needed") });
                 }
                 Action::NewMessage => {
                     // a new message goes from the account whose folders are shown
@@ -367,7 +367,7 @@ impl MailApp {
                     let Some(m) = self.msg(id) else { continue };
                     let name = safe_name(m.attachments.get(i).map(String::as_str).unwrap_or("załącznik"));
                     let Some(src) = m.attachment_files.get(i).filter(|f| std::path::Path::new(f).exists()).cloned() else {
-                        self.set_status("Tego załącznika nie ma jeszcze na dysku — kliknij Odśwież, aby go pobrać");
+                        self.set_status(t!("ui.actions.attachment_missing"));
                         continue;
                     };
                     // a copy with its real name (the viewer and "Otwórz w programie" use it)
@@ -375,7 +375,7 @@ impl MailApp {
                     let _ = std::fs::create_dir_all(&dir);
                     let dest = dir.join(&name);
                     if std::fs::copy(&src, &dest).is_err() {
-                        self.set_status("Nie udało się otworzyć załącznika");
+                        self.set_status(t!("ui.actions.open_failed"));
                         continue;
                     }
                     let key = self.next_key;
@@ -387,7 +387,7 @@ impl MailApp {
                     let Some(m) = self.msg(id) else { continue };
                     let name = safe_name(m.attachments.get(i).map(String::as_str).unwrap_or("załącznik"));
                     let Some(src) = m.attachment_files.get(i).filter(|f| std::path::Path::new(f).exists()).cloned() else {
-                        self.set_status("Tego załącznika nie ma jeszcze na dysku — kliknij Odśwież, aby go pobrać");
+                        self.set_status(t!("ui.actions.attachment_missing"));
                         continue;
                     };
                     if save {
@@ -407,12 +407,12 @@ impl MailApp {
                         match std::fs::copy(&src, &dest) {
                             Ok(_) => {
                                 let shown = dest.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-                                self.set_status(format!("Zapisano w Pobranych: {shown}"));
+                                self.set_status(t!("ui.actions.saved_in_downloads", name = shown));
                                 let _ = std::process::Command::new("explorer.exe")
                                     .arg(format!("/select,{}", dest.display()))
                                     .spawn();
                             }
-                            Err(e) => self.set_status(format!("Nie udało się zapisać załącznika: {e}")),
+                            Err(e) => self.set_status(t!("ui.actions.save_failed", e = e)),
                         }
                     } else {
                         // Open a copy with its real name, so the right program opens it.
@@ -421,7 +421,7 @@ impl MailApp {
                         let dest = dir.join(&name);
                         match std::fs::copy(&src, &dest) {
                             Ok(_) => open_with_windows(&dest),
-                            Err(e) => self.set_status(format!("Nie udało się otworzyć załącznika: {e}")),
+                            Err(e) => self.set_status(t!("ui.actions.open_failed_e", e = e)),
                         }
                     }
                 }

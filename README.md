@@ -22,7 +22,7 @@ Mail, calendar and contacts in one window · starts in a fraction of a second ·
 
 ---
 
-*"Poczta" is Polish for "Mail". The interface is currently in Polish only; Polish UI labels are quoted below with their English meaning in parentheses.*
+*"Poczta" is Polish for "Mail". The interface is in English or Polish (☰ menu → "Language / Język", switches at once).*
 
 ## Why
 
@@ -39,7 +39,7 @@ background threads, so the interface never waits.
 - New mail arrives instantly (IMAP IDLE), with a sound, a counter on the icon, a notification
   in the corner of the screen and background operation from the system tray.
 - Conversations in one place: the open message is expanded, earlier ones are collapsed into cards.
-- Views for "Nieprzeczytane" (Unread), "Oznaczone" (Flagged), "Bez odpowiedzi (7 dni)" (No reply, 7 days),
+- Views for "Unread", "Flagged", "Unanswered (7 days)",
   Gmail labels and favorites.
 - HTML messages rendered with the Edge engine (WebView2), with a built-in fallback renderer.
 - Compose in Markdown with a live preview, sent as HTML. Inline images are supported, and your
@@ -59,12 +59,12 @@ background threads, so the interface never waits.
 <img src="docs/screenshots/calendar.png" alt="Calendar: month view and day panel">
 
 **AI (optional, bring your own key)**
-- "Popraw z AI" (Improve with AI) in several styles, and translation of received messages into Polish.
+- "Fix with AI" in several styles, and translation of received messages into the interface language.
 - Works with APIs compatible with the Anthropic Messages API (`/v1/messages`). The address and key are set
-  in the ☰ menu → "Ustawienia AI" (AI settings).
-- "Kopiuj link dla AI" (Copy link for AI): a single message can be shared with an AI agent on your private
-  Tailscale network. The agent reads it as text or JSON and can leave a draft reply in Drafts
-  ("Szkice"), but it never sends anything on its own.
+  in the ☰ menu → "AI settings".
+- "Copy link for AI": a single message can be shared with an AI agent on your private
+  Tailscale network. The agent reads it as text or JSON and can leave a draft reply in Drafts,
+  but it never sends anything on its own.
 
 **Look and feel**
 - Light and dark themes, a single icon set (Segoe Fluent), and a layout like classic mail
@@ -149,7 +149,7 @@ src/
 ## About the author
 
 Poczta was written by **Jarosław Hartwich** ([github.com/jarx-dev](https://github.com/jarx-dev)).
-You can find the same in the program: ☰ menu → "O programie" (About).
+You can find the same in the program: ☰ menu → "About".
 
 If you find Poczta useful, you can [buy me a coffee](https://buymeacoffee.com/jarx) ☕
 

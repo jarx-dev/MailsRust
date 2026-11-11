@@ -21,7 +21,7 @@ fn read_line<R: BufRead>(r: &mut R) -> Result<String, String> {
         let mut line = Vec::new();
         let n = r.read_until(b'\n', &mut line).map_err(|e| e.to_string())?;
         if n == 0 {
-            return Err("serwer zamknął połączenie".into());
+            return Err(t!("core.net.server_closed").into_owned());
         }
         let trimmed = String::from_utf8_lossy(&line).trim_end_matches(['\r', '\n']).to_string();
         out.extend_from_slice(&line);

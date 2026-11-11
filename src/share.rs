@@ -224,7 +224,7 @@ impl Hub {
                 None
             }
         });
-        let listener = listener.ok_or_else(|| format!("nie można otworzyć połączenia na adresie {ip}: {last_err}"))?;
+        let listener = listener.ok_or_else(|| t!("cal.share.cannot_listen", ip = ip, err = last_err).into_owned())?;
         let addr = listener.local_addr().map_err(|e| e.to_string())?;
         let shares = self.shares.clone();
         let drafts = self.drafts_tx.clone();

@@ -129,7 +129,7 @@ pub enum Update {
     Sent { id: String, result: Result<(), String> },
     /// new messages from others since the last round (never from the first one)
     Fresh(Vec<Note>),
-    /// a round ended: Ok, or what went wrong (in Polish)
+    /// a round ended: Ok, or what went wrong (in the language of the moment)
     Done(Result<(), String>),
     Busy,
 }
@@ -270,13 +270,13 @@ fn parse_msg(v: &Value) -> Option<Msg> {
     }
     let mut text = v["text"].as_str().unwrap_or("").to_string();
     if text.is_empty() && v["cardsV2"].as_array().is_some_and(|a| !a.is_empty()) {
-        text = "[karta aplikacji — otwórz w Google Chat]".into();
+        text = t!("misc.chat.card").into_owned();
     }
     let files = v["attachment"]
         .as_array()
         .map(|a| {
             a.iter()
-                .map(|f| (f["contentName"].as_str().unwrap_or("załącznik").to_string(), f["downloadUri"].as_str().unwrap_or("").to_string()))
+                .map(|f| (f["contentName"].as_str().map(String::from).unwrap_or_else(|| t!("misc.chat.attachment").into_owned()), f["downloadUri"].as_str().unwrap_or("").to_string()))
                 .collect()
         })
         .unwrap_or_default();
@@ -300,27 +300,40 @@ fn explain(code: u16, body: &str) -> String {
     let message = serde_json::from_str::<Value>(body).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or_else(|| body.chars().take(200).collect());
     if code == 401 {
         crate::oauth::forget_tokens();
-        return "Google nie przyjął logowania — zaloguj się ponownie przez Google".into();
+        return t!("misc.chat.err_unauthorized").into_owned();
     }
     if body.contains("Google Chat app not found") {
-        return "wysyłanie wymaga skonfigurowania aplikacji Chat w Twoim projekcie Google Cloud (nazwa, ikona, opis) — zobacz instrukcję w module Czat".into();
+        return t!("misc.chat.err_app_config").into_owned();
     }
     if body.contains("SERVICE_DISABLED") || body.contains("has not been used in project") {
-        return "w Twoim projekcie Google Cloud nie jest włączone Google Chat API — włącz je, odczekaj minutę i spróbuj ponownie".into();
+        return t!("misc.chat.err_api_disabled").into_owned();
     }
     if message.contains("only available to Google Workspace") {
-        return "czat Google działa tylko dla kont Google Workspace".into();
+        return t!("misc.chat.err_workspace_only").into_owned();
     }
     if code == 403 && (body.contains("insufficient") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
-        return "brak zgody na czat — zaloguj się ponownie przez Google i zaznacz wszystkie pola".into();
+        return t!("misc.chat.err_scope").into_owned();
     }
     if code == 429 {
-        return "Google prosi o wolniejsze odpytywanie — spróbuję za chwilę".into();
+        return t!("misc.chat.err_rate_limit").into_owned();
     }
-    format!("Google Chat odpowiedział {code}: {}", message.chars().take(200).collect::<String>())
+    t!("misc.chat.err_status", code = code, message = message.chars().take(200).collect::<String>()).into_owned()
 }
 
-const NO_CONNECTION: &str = "brak połączenia z Google";
+/// The error asks for the Chat app to be set up (in either language: the text was made when the
+/// error happened, the language may have been switched since).
+pub fn needs_app_setup(e: &str) -> bool {
+    e.contains(&*t!("misc.chat.err_app_config", locale = "en")) || e.contains(&*t!("misc.chat.err_app_config", locale = "pl"))
+}
+
+fn no_connection() -> String {
+    t!("misc.chat.no_connection").into_owned()
+}
+
+/// A dropped connection (the text is in either language, see `needs_app_setup`).
+fn is_no_connection(e: &str) -> bool {
+    e.contains(&*t!("misc.chat.no_connection", locale = "en")) || e.contains(&*t!("misc.chat.no_connection", locale = "pl"))
+}
 
 /// One request. An empty or odd body is an error, never an empty answer (an empty list of
 /// conversations would wipe the stored ones).
@@ -333,14 +346,14 @@ fn call(http: &ureq::Agent, acc: &Account, method: &str, url: &str, body: Option
     };
     match resp {
         Ok(r) => {
-            let text = r.into_string().map_err(|e| format!("{NO_CONNECTION}: {e}"))?;
+            let text = r.into_string().map_err(|e| format!("{}: {e}", no_connection()))?;
             match serde_json::from_str::<Value>(&text) {
                 Ok(v) if v.is_object() => Ok(v),
-                _ => Err(format!("niezrozumiała odpowiedź Google ({} bajtów)", text.len())),
+                _ => Err(t!("misc.chat.unintelligible", bytes = text.len()).into_owned()),
             }
         }
         Err(ureq::Error::Status(code, r)) => Err(explain(code, &r.into_string().unwrap_or_default())),
-        Err(e) => Err(format!("{NO_CONNECTION}: {e}")),
+        Err(e) => Err(format!("{}: {e}", no_connection())),
     }
 }
 
@@ -599,7 +612,7 @@ impl Worker {
 
     /// A dropped connection is made again on the next request.
     fn check<T>(&mut self, r: Result<T, String>) -> Result<T, String> {
-        if r.as_ref().is_err_and(|e| e.contains(NO_CONNECTION)) {
+        if r.as_ref().is_err_and(|e| is_no_connection(e)) {
             self.http = None;
         }
         r
@@ -786,9 +799,9 @@ impl Worker {
                 }
             }
             s.title = match people.len() {
-                0 => "Rozmowa".into(),
+                0 => t!("misc.chat.conversation").into_owned(),
                 1..=3 => people.join(", "),
-                n => format!("{} i {} innych", people[..2].join(", "), n - 2),
+                n => t!("misc.chat.and_others", names = people[..2].join(", "), n = n - 2).into_owned(),
             };
         }
         notes
@@ -946,7 +959,7 @@ impl Worker {
                         let text = if m.text.is_empty() { m.files.first().map(|f| format!("{} {}", crate::theme::ic::ATTACH, f.0)).unwrap_or_default() } else { m.text.lines().next().unwrap_or("").to_string() };
                         let text: String = text.chars().take(120).collect();
                         if m.sender == self.me && !self.me.is_empty() {
-                            format!("Ty: {text}")
+                            t!("misc.chat.you", text = text).into_owned()
                         } else if s.kind != "DIRECT_MESSAGE" && !m.who.is_empty() {
                             format!("{}: {text}", m.who.split_whitespace().next().unwrap_or(""))
                         } else {
@@ -955,7 +968,7 @@ impl Worker {
                     })
                     .unwrap_or_default();
                 let unread = if s.filled { s.msgs.iter().filter(|m| m.at > s.read && m.sender != self.me).count() } else { 0 };
-                Row { name: s.name.clone(), title: if s.title.is_empty() { "Rozmowa".into() } else { s.title.clone() }, kind: s.kind.clone(), external: s.external, active: s.active, last, unread, uri: s.uri.clone() }
+                Row { name: s.name.clone(), title: if s.title.is_empty() { t!("misc.chat.conversation").into_owned() } else { s.title.clone() }, kind: s.kind.clone(), external: s.external, active: s.active, last, unread, uri: s.uri.clone() }
             })
             .collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.active));

@@ -50,19 +50,24 @@ fn explain(e: ureq::Error, what: &str) -> String {
             let body = resp.into_string().unwrap_or_default();
             if body.contains("SERVICE_DISABLED") || body.contains("has not been used in project") || body.contains("is disabled") {
                 let api = if what == "kalendarz" { "Google Calendar API" } else { "People API" };
-                return format!("w Twoim projekcie Google Cloud nie jest włączone {api} — włącz je (przycisk w tym oknie), odczekaj minutę i spróbuj ponownie");
+                return t!("cal.google.api_disabled", api = api).into_owned();
             }
             if code == 403 && (body.contains("insufficient") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") || body.contains("PERMISSION_DENIED")) {
-                return "brak zgody na dostęp — kliknij „Zaloguj ponownie przez Google” i zaznacz dostęp do kalendarza i kontaktów".into();
+                return t!("cal.google.no_consent").into_owned();
             }
             if code == 401 {
                 crate::oauth::forget_tokens();
-                return "Google nie przyjął logowania — zaloguj się ponownie przez Google".into();
+                return t!("cal.google.login_refused").into_owned();
             }
             let msg = serde_json::from_str::<Value>(&body).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or(body);
-            format!("Google ({what}) odpowiedział {code}: {}", msg.chars().take(200).collect::<String>())
+            let what = match what {
+                "kalendarz" => t!("cal.google.what_calendar"),
+                "kontakty" => t!("cal.google.what_contacts"),
+                _ => t!("cal.google.what_account"),
+            };
+            t!("cal.google.http_status", what = what, code = code, msg = msg.chars().take(200).collect::<String>()).into_owned()
         }
-        other => format!("brak połączenia z Google: {other}"),
+        other => t!("cal.google.no_connection", err = other).into_owned(),
     }
 }
 
@@ -145,7 +150,7 @@ pub fn calendar_events(acc: &Account) -> Result<Vec<Event>, String> {
                 }
                 let (Some((s, all_day)), Some((en, _))) = (when(&e["start"]), when(&e["end"])) else { continue };
                 let gid = e["id"].as_str().unwrap_or_default().to_string();
-                let title = e["summary"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("(bez tytułu)").to_string();
+                let title = e["summary"].as_str().filter(|t| !t.trim().is_empty()).map(String::from).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
                 let location = e["location"].as_str().unwrap_or_default().to_string();
                 let editable = primary && e["recurringEventId"].is_null() && !all_day;
                 let days = if all_day { (en.date() - s.date()).num_days().clamp(1, 31) } else { 1 };
@@ -189,7 +194,7 @@ pub fn save_event(acc: &Account, gid: &str, title: &str, location: &str, start: 
     } else {
         send(&token, "PATCH", &format!("{CAL}/calendars/primary/events/{}", enc(gid)), Some(body), "kalendarz")?
     };
-    v["id"].as_str().map(String::from).ok_or_else(|| "Google nie potwierdził zapisu wydarzenia".into())
+    v["id"].as_str().map(String::from).ok_or_else(|| t!("cal.google.event_unconfirmed").into_owned())
 }
 
 pub fn delete_event(acc: &Account, gid: &str) -> Result<(), String> {
@@ -254,7 +259,7 @@ pub fn contacts(token: &str) -> Result<(Vec<(String, String)>, Vec<(String, Stri
 pub fn save_group(token: &str, id: &str, name: &str) -> Result<String, String> {
     if id.is_empty() {
         let v = send(token, "POST", &format!("{PEOPLE}/contactGroups"), Some(json!({"contactGroup": {"name": name}})), "kontakty")?;
-        return v["resourceName"].as_str().map(String::from).ok_or_else(|| "Google nie potwierdził utworzenia grupy".into());
+        return v["resourceName"].as_str().map(String::from).ok_or_else(|| t!("cal.google.group_unconfirmed").into_owned());
     }
     let cur = get(token, &format!("{PEOPLE}/{id}"), "kontakty")?;
     send(token, "PUT", &format!("{PEOPLE}/{id}"), Some(json!({"contactGroup": {"name": name, "etag": cur["etag"]}})), "kontakty")?;
@@ -276,7 +281,7 @@ pub fn save_person(token: &str, id: &str, name: &str, emails: &[String], groups:
     });
     if id.is_empty() {
         let v = send(token, "POST", &format!("{PEOPLE}/people:createContact"), Some(body), "kontakty")?;
-        return v["resourceName"].as_str().map(String::from).ok_or_else(|| "Google nie potwierdził zapisu kontaktu".into());
+        return v["resourceName"].as_str().map(String::from).ok_or_else(|| t!("cal.google.contact_unconfirmed").into_owned());
     }
     let cur = get(token, &format!("{PEOPLE}/{id}?personFields=metadata"), "kontakty")?;
     body["etag"] = cur["etag"].clone();
@@ -296,16 +301,8 @@ pub fn check(acc: &Account) -> (Result<String, String>, Result<String, String>) 
     };
     let cal = get(&token, &format!("{CAL}/users/me/calendarList?minAccessRole=reader"), "kalendarz").map(|v| {
         let n = v["items"].as_array().map(|a| a.len()).unwrap_or(0);
-        format!("kalendarz działa ({n} {})", pl(n, "kalendarz", "kalendarze", "kalendarzy"))
+        t!("cal.google.calendar_ok", calendars = crate::i18n::plural("cal.gcal.calendars", n)).into_owned()
     });
-    let people = contacts(&token).map(|(g, p)| format!("kontakty działają ({} {}, {} {})", p.len(), pl(p.len(), "kontakt", "kontakty", "kontaktów"), g.len(), pl(g.len(), "grupa", "grupy", "grup")));
+    let people = contacts(&token).map(|(g, p)| t!("cal.gcal.contacts_ok", people = crate::i18n::plural("cal.gcal.people", p.len()), groups = crate::i18n::plural("cal.gcal.groups", g.len())).into_owned());
     (cal, people)
-}
-
-fn pl(n: usize, one: &'static str, few: &'static str, many: &'static str) -> &'static str {
-    match n {
-        1 => one,
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => few,
-        _ => many,
-    }
 }

@@ -96,7 +96,7 @@ pub fn translate_email(settings: &crate::ai::Settings, html: Option<String>, tex
     let page = html.unwrap_or_else(|| text_page(text));
     let found = pieces(&page);
     if found.is_empty() {
-        return Err("w tej wiadomości nie ma tekstu do przetłumaczenia".into());
+        return Err(t!("cal.translate.no_text").into_owned());
     }
     let texts: Vec<String> = found.iter().map(|(a, b)| page[*a..*b].to_string()).collect();
     // parts of up to ~4000 characters (and 120 pieces)
@@ -118,7 +118,7 @@ pub fn translate_email(settings: &crate::ai::Settings, html: Option<String>, tex
         for chunk in parts.chunks(8) {
             let handles: Vec<_> = chunk.iter().map(|r| sc.spawn(|| crate::ai::translate_texts(settings, &texts[r.clone()]))).collect();
             for h in handles {
-                out.push(h.join().unwrap_or_else(|_| Err("nieoczekiwany błąd".into())));
+                out.push(h.join().unwrap_or_else(|_| Err(t!("cal.translate.unexpected").into_owned())));
             }
         }
         out

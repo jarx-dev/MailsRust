@@ -130,7 +130,7 @@ impl MailApp {
         }
         if !key.ends_with('/') {
             resp.context_menu(|ui| {
-                if ui.button(format!("Odepnij „{shown}” od wszystkich wiadomości")).clicked() {
+                if ui.button(t!("ui.sidebar.untag", name = shown)).clicked() {
                     let ids: Vec<u64> = self.store.messages.iter().filter(|m| m.labels.contains(&key)).map(|m| m.id).collect();
                     for id in ids {
                         self.actions.push(Action::RemoveTag(id, key.clone()));
@@ -154,9 +154,9 @@ impl MailApp {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let r = ui.add(egui::TextEdit::singleline(&mut self.new_tag).hint_text("Nowy tag…").desired_width(140.0));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.new_tag).hint_text(t!("ui.sidebar.new_tag")).desired_width(140.0));
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if (ui.button("Dodaj").clicked() || enter) && !self.new_tag.trim().is_empty() {
+            if (ui.button(t!("ui.sidebar.add")).clicked() || enter) && !self.new_tag.trim().is_empty() {
                 self.actions.push(Action::AddTag(id, self.new_tag.trim().to_string()));
                 self.new_tag.clear();
                 ui.close();
@@ -178,85 +178,94 @@ impl MailApp {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.menu_button(RichText::new(ic::MENU).size(16.0), |ui| {
-                if ui.button("✉  Nowa wiadomość").clicked() {
+                if ui.button(t!("ui.sidebar.menu.new_message")).clicked() {
                     self.actions.push(Action::NewMessage);
                     ui.close();
                 }
-                if ui.button("📅  Nowe wydarzenie").clicked() {
+                if ui.button(t!("ui.sidebar.menu.new_event")).clicked() {
                     self.editor = Some(EventEditor::new(self.cal_day, None));
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("⟳  Wyślij / odbierz").clicked() {
+                if ui.button(t!("ui.sidebar.menu.send_receive")).clicked() {
                     self.actions.push(Action::SendReceive);
                     ui.close();
                 }
-                if ui.button("👤  Konta…").clicked() {
+                if ui.button(t!("ui.sidebar.menu.accounts")).clicked() {
                     self.account_open = true;
                     ui.close();
                 }
-                ui.checkbox(&mut self.show_side, "Panel kalendarza po prawej");
+                ui.checkbox(&mut self.show_side, t!("ui.sidebar.menu.calendar_panel"));
                 if !self.prefs.ai_shares.is_empty()
                     && ui
-                        .button(format!("🔗  Wyłącz linki dla AI ({})", self.prefs.ai_shares.len()))
-                        .on_hover_text("Wszystkie udostępnione e-maile przestają być dostępne dla agentów")
+                        .button(t!("ui.sidebar.menu.stop_ai", n = self.prefs.ai_shares.len()))
+                        .on_hover_text(t!("ui.sidebar.menu.stop_ai_hint"))
                         .clicked()
                 {
                     self.actions.push(Action::StopAiSharing);
                     ui.close();
                 }
                 let mut dark = self.prefs.dark;
-                if ui.checkbox(&mut dark, "Ciemny motyw").changed() {
+                if ui.checkbox(&mut dark, t!("ui.sidebar.menu.dark_theme")).changed() {
                     self.set_dark(dark);
                 }
-                if ui.button("➕  Dodaj konto pocztowe…").on_hover_text("Kolejna skrzynka (tylko poczta, logowanie hasłem)").clicked() {
+                // in both languages, so it is found whichever one is on
+                ui.menu_button(format!("{}  Language / Język", ic::GLOBE), |ui| {
+                    for (code, name) in crate::i18n::LANGS {
+                        if ui.radio(self.prefs.lang == code, name).clicked() {
+                            self.set_lang(code);
+                            ui.close();
+                        }
+                    }
+                });
+                if ui.button(t!("ui.sidebar.menu.add_account")).on_hover_text(t!("ui.sidebar.menu.add_account_hint")).clicked() {
                     self.extra_edit = Some((None, crate::model::Account { imap_port: 993, smtp_port: 465, ..Default::default() }));
                     ui.close();
                 }
-                if ui.button("✨  Ustawienia AI…").on_hover_text("Poprawianie tekstu i tłumaczenie: CLIProxy, modele, poziom myślenia").clicked() {
+                if ui.button(t!("ui.sidebar.menu.ai_settings")).on_hover_text(t!("ui.sidebar.menu.ai_settings_hint")).clicked() {
                     self.ai_open = true;
                     ui.close();
                 }
-                if ui.button("📅  Kalendarz i kontakty Google…").on_hover_text("Synchronizacja z Kalendarzem i Kontaktami Google").clicked() {
+                if ui.button(t!("ui.sidebar.menu.google")).on_hover_text(t!("ui.sidebar.menu.google_hint")).clicked() {
                     self.gcal_open = true;
                     ui.close();
                 }
                 if ui
-                    .checkbox(&mut self.prefs.notify, "Powiadamiaj o nowych wiadomościach")
-                    .on_hover_text("Dźwięk, miganie ikony na pasku zadań i okienko w rogu ekranu")
+                    .checkbox(&mut self.prefs.notify, t!("ui.sidebar.menu.notify"))
+                    .on_hover_text(t!("ui.sidebar.menu.notify_hint"))
                     .changed()
                 {
                     self.save_now = true;
                 }
                 let mut autostart = crate::autostart::is_on();
                 if ui
-                    .checkbox(&mut autostart, "Uruchamiaj razem z Windows")
-                    .on_hover_text("Po zalogowaniu do Windows Poczta startuje zminimalizowana i odbiera pocztę w tle")
+                    .checkbox(&mut autostart, t!("ui.sidebar.menu.autostart"))
+                    .on_hover_text(t!("ui.sidebar.menu.autostart_hint"))
                     .changed()
                 {
                     if let Err(e) = crate::autostart::set(autostart) {
-                        self.flash(&format!("Autostart: {e}"));
+                        self.flash(&t!("ui.sidebar.menu.autostart_error", e = e));
                     }
                 }
-                if ui.button("⏱  Diagnostyka synchronizacji").clicked() {
+                if ui.button(t!("ui.sidebar.menu.diagnostics")).clicked() {
                     self.diag_open = true;
                     ui.close();
                 }
-                if ui.button("ℹ  O programie…").clicked() {
+                if ui.button(t!("ui.sidebar.menu.about")).clicked() {
                     self.about_open = true;
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Zakończ").on_hover_text("Kończy działanie programu (zamknięcie okna tylko je minimalizuje)").clicked() {
+                if ui.button(t!("ui.sidebar.menu.quit")).on_hover_text(t!("ui.sidebar.menu.quit_hint")).clicked() {
                     self.quit();
                 }
                 let (version, build) = crate::update::version();
                 ui.label(RichText::new(version).size(11.5).color(MUTED()))
-                    .on_hover_text(format!("Wersja z datą i godziną zbudowania (rr.mmdd.ggmm): po aktualizacji jest wyższa. Build {build}"));
+                    .on_hover_text(t!("ui.sidebar.menu.version_hint", build = build));
             });
             ui.add_space(6.0);
-            let new_label = if self.module == Module::Calendar { "Nowe" } else { "Nowy" };
-            if primary_button(ui, new_label) {
+            let new_label = if self.module == Module::Calendar { t!("ui.sidebar.toolbar.new_event") } else { t!("ui.sidebar.toolbar.new") };
+            if primary_button(ui, &new_label) {
                 match self.module {
                     Module::Mail => self.actions.push(Action::NewMessage),
                     Module::Calendar => self.editor = Some(EventEditor::new(self.cal_day, None)),
@@ -267,25 +276,25 @@ impl MailApp {
             }
             ui.add_space(8.0);
             let compact = ui.available_width() < 1060.0;
-            let l = |s: &'static str| if compact { "" } else { s };
+            let l = |s: String| if compact { String::new() } else { s };
             match self.module {
                 Module::Mail => {
-                    if tool_button(ui, ic::REFRESH, l("Odśwież"), true) {
+                    if tool_button(ui, ic::REFRESH, &l(t!("ui.sidebar.toolbar.refresh").into_owned()), true) {
                         self.actions.push(Action::SendReceive);
                     }
                     // (what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}
                 Module::Chat => {
-                    if tool_button(ui, ic::REFRESH, l("Odśwież"), self.chat_ready() && !self.chat.demo) {
+                    if tool_button(ui, ic::REFRESH, &l(t!("ui.sidebar.toolbar.refresh").into_owned()), self.chat_ready() && !self.chat.demo) {
                         self.chat_refresh();
                     }
-                    if tool_button(ui, ic::OPEN, l("Google Chat"), true) {
+                    if tool_button(ui, ic::OPEN, &l("Google Chat".to_string()), true) {
                         crate::oauth::open_url(crate::chat::WEB_URL);
                     }
                 }
                 Module::Calendar => {
-                    if tool_button(ui, "◎", "Dziś", true) {
+                    if tool_button(ui, "◎", &t!("ui.sidebar.toolbar.today"), true) {
                         self.cal_day = Local::now().date_naive();
                         self.mini_shown = self.cal_day;
                     }
@@ -298,10 +307,10 @@ impl MailApp {
                         self.mini_shown = self.cal_day;
                     }
                     tool_sep(ui);
-                    if tool_button(ui, "▦", "Miesiąc", true) {
+                    if tool_button(ui, "▦", &t!("ui.sidebar.toolbar.month"), true) {
                         self.cal_view = CalView::Month;
                     }
-                    if tool_button(ui, "▥", "Tydzień", true) {
+                    if tool_button(ui, "▥", &t!("ui.sidebar.toolbar.week"), true) {
                         self.cal_view = CalView::Week;
                     }
                 }
@@ -309,22 +318,22 @@ impl MailApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                if window_button(ui, WinButton::Close).on_hover_text("Zamknij (program działa dalej w zasobniku)").clicked() {
+                if window_button(ui, WinButton::Close).on_hover_text(t!("ui.sidebar.toolbar.close_hint")).clicked() {
                     self.send_to_tray(ui.ctx());
                 }
                 let max_kind = if maximized { WinButton::Restore } else { WinButton::Maximize };
                 if window_button(ui, max_kind)
-                    .on_hover_text(if maximized { "Przywróć" } else { "Maksymalizuj" })
+                    .on_hover_text(if maximized { t!("ui.sidebar.toolbar.restore") } else { t!("ui.sidebar.toolbar.maximize") })
                     .clicked()
                 {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-                if window_button(ui, WinButton::Minimize).on_hover_text("Minimalizuj").clicked() {
+                if window_button(ui, WinButton::Minimize).on_hover_text(t!("ui.sidebar.toolbar.minimize")).clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
                 ui.add_space(6.0);
                 // the theme switch: a moon in the light theme, a sun in the dark one
-                let (icon, tip) = if self.prefs.dark { (ic::SUN, "Jasny motyw") } else { (ic::MOON, "Ciemny motyw") };
+                let (icon, tip) = if self.prefs.dark { (ic::SUN, t!("ui.sidebar.menu.light_theme")) } else { (ic::MOON, t!("ui.sidebar.menu.dark_theme")) };
                 let (tr, tresp) = ui.allocate_exact_size(Vec2::new(32.0, 30.0), Sense::click());
                 if tresp.hovered() {
                     ui.painter().rect_filled(tr, CornerRadius::same(4), HOVER());
@@ -341,11 +350,11 @@ impl MailApp {
                     let was_empty = self.search.trim().is_empty();
                     let hint = if !self.store.extra.is_empty() {
                         let a = self.account_ref(self.view_account);
-                        format!("Szukaj w: {}", if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() })
+                        t!("ui.sidebar.toolbar.search_in", name = if a.display_name.trim().is_empty() { a.email.trim() } else { a.display_name.trim() }).into_owned()
                     } else if self.finder.meaning_ready() {
-                        "Szukaj — słowa lub znaczenie".to_string()
+                        t!("ui.sidebar.toolbar.search_meaning").into_owned()
                     } else {
-                        "Szukaj".to_string()
+                        t!("ui.sidebar.toolbar.search").into_owned()
                     };
                     // room on the left for the magnifier and on the right for the clearing ×
                     let r = ui.add(
@@ -367,7 +376,7 @@ impl MailApp {
                             ui.painter().rect_filled(x, CornerRadius::same(4), HOVER());
                         }
                         ui.painter().text(x.center(), Align2::CENTER_CENTER, ic::CLEAR, FontId::proportional(11.0), MUTED());
-                        if xr.on_hover_text("Wyczyść wyszukiwanie (Esc)").clicked() {
+                        if xr.on_hover_text(t!("ui.sidebar.toolbar.search_clear")).clicked() {
                             self.search.clear();
                             cleared = true;
                         }
@@ -402,14 +411,14 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let unread = self.counts().inbox_unread_all;
-                    let mut tabs = vec![(Module::Mail, ic::MAIL, "Poczta", unread), (Module::Calendar, ic::CALENDAR, "Kalendarz", 0), (Module::Contacts, ic::PERSON, "Kontakty", 0)];
+                    let mut tabs = vec![(Module::Mail, ic::MAIL, t!("ui.sidebar.nav.mail"), unread), (Module::Calendar, ic::CALENDAR, t!("ui.sidebar.nav.calendar"), 0), (Module::Contacts, ic::PERSON, t!("ui.sidebar.nav.contacts"), 0)];
                     if self.chat_visible() {
-                        tabs.push((Module::Chat, ic::CHAT, "Czat", self.chat.unread));
+                        tabs.push((Module::Chat, ic::CHAT, t!("ui.sidebar.nav.chat"), self.chat.unread));
                     }
                     // four tabs fit the narrowest panel too
                     let w = (ui.available_width() / tabs.len() as f32).floor().min(64.0);
                     for (m, icon, tip, unread) in tabs {
-                        let tip = if unread > 0 { format!("{tip} — {}", crate::notify::unread_text(unread)) } else { tip.to_string() };
+                        let tip = if unread > 0 { format!("{tip} — {}", crate::notify::unread_text(unread)) } else { tip.into_owned() };
                         let resp = icon_tab(ui, icon, self.module == m, w);
                         if unread > 0 {
                             count_badge(ui.painter(), resp.rect.center() + Vec2::new(9.0, -9.0), unread);
@@ -424,7 +433,7 @@ impl MailApp {
         let mut notes: Vec<String> = Vec::new();
         if self.store.has_real_mail && self.preview.is_none() && self.store.sync.map(|s| !s.complete).unwrap_or(false) {
             let n = self.counts().folder_count.get(&Folder::Inbox).copied().unwrap_or(0);
-            notes.push(format!("Pobieranie całej skrzynki… ({n} wiadomości offline)"));
+            notes.push(i18n::plural("ui.sidebar.downloading", n));
         }
         if let Some(s) = self.finder.status() {
             notes.push(s);
@@ -446,7 +455,7 @@ impl MailApp {
                             ui.add(egui::Label::new(RichText::new(n).size(11.5).color(MUTED())).wrap());
                         });
                     }
-                    if failed && ui.link(RichText::new("Spróbuj ponownie").size(11.5)).clicked() {
+                    if failed && ui.link(RichText::new(t!("ui.sidebar.retry")).size(11.5)).clicked() {
                         self.finder.retry();
                     }
                 });
@@ -463,7 +472,7 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Poczta").font(semibold(16.0)).color(TEXT()));
+            ui.label(RichText::new(t!("ui.sidebar.nav.mail")).font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         // dense rows, as in eM Client: one row every 27 px
@@ -501,7 +510,7 @@ impl MailApp {
         }
         let favs = counts.tags.get(FAVOURITES).copied().unwrap_or(0);
         let on = self.view == MailView::Label && self.label_filter == FAVOURITES && self.search.is_empty();
-        if folder_row(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), FAVOURITES, favs, on, 28.0) {
+        if folder_row(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), &t!("ui.sidebar.favourites"), favs, on, 28.0) {
             self.label_filter = FAVOURITES.to_string();
             self.view = MailView::Label;
             self.search.clear();
@@ -524,14 +533,14 @@ impl MailApp {
             3.5,
             if online { Color32::from_rgb(0x2E, 0x9E, 0x5B) } else { BORDER() },
         );
-        if resp.on_hover_text(if online { "Połączono" } else { "Offline — kliknij ⚙, aby się zalogować" }).clicked() {
+        if resp.on_hover_text(if online { t!("ui.sidebar.connected") } else { t!("ui.sidebar.offline") }).clicked() {
             self.account_expanded = !self.account_expanded;
             self.save_now = true;
         }
         let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
         let gr = ui.interact(gear, id("acc-gear"), Sense::click());
         ui.painter().text(gear.center(), Align2::CENTER_CENTER, ic::SETTINGS, FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
-        if gr.on_hover_text("Ustawienia konta").clicked() {
+        if gr.on_hover_text(t!("ui.sidebar.account_settings")).clicked() {
             self.account_open = true;
         }
         if self.account_expanded {
@@ -586,7 +595,7 @@ impl MailApp {
             let gear = Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(24.0));
             let gr = ui.interact(gear, id(("extra-gear", k)), Sense::click());
             ui.painter().text(gear.center(), Align2::CENTER_CENTER, ic::SETTINGS, FontId::proportional(14.0), if gr.hovered() { ACCENT() } else { MUTED() });
-            if gr.on_hover_text("Ustawienia tego konta").clicked() {
+            if gr.on_hover_text(t!("ui.sidebar.this_account_settings")).clicked() {
                 self.extra_edit = Some((Some(k), x.clone()));
             }
             if open {
@@ -627,7 +636,7 @@ impl MailApp {
             let p = ui.painter();
             chevron(p, Pos2::new(r.left() + 14.0, r.center().y), self.tags_open, MUTED());
             draw_tag_icon(p, Pos2::new(r.left() + 33.0, r.center().y), MUTED());
-            let tr = p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, "Tagi", FontId::proportional(14.0), TEXT());
+            let tr = p.text(Pos2::new(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, t!("ui.sidebar.tags"), FontId::proportional(14.0), TEXT());
             if !self.store.extra.is_empty() {
                 // several accounts: whose tags these are
                 let a = self.account_ref(self.view_account);
@@ -672,7 +681,7 @@ impl MailApp {
                         ui.painter().rect_filled(arrow, CornerRadius::same(4), HOVER());
                     }
                     chevron(ui.painter(), arrow.center(), !folded, if ar.hovered() { ACCENT() } else { MUTED() });
-                    if ar.on_hover_text(if folded { "Rozwiń" } else { "Zwiń" }).clicked() {
+                    if ar.on_hover_text(if folded { t!("ui.sidebar.expand") } else { t!("ui.sidebar.collapse") }).clicked() {
                         if folded {
                             self.prefs.folded_groups.retain(|g| *g != parent);
                         } else {
@@ -697,12 +706,12 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
+            ui.label(RichText::new(t!("ui.sidebar.nav.calendar")).font(semibold(16.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(pl::month_year(self.mini_shown)).color(TEXT()));
+                ui.label(RichText::new(i18n::month_year(self.mini_shown)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.add(egui::Button::new(RichText::new(ic::NEXT).size(12.0)).frame(false)).clicked() {
                         self.mini_shown = calendar::shift(self.mini_shown, CalView::Month, 1);
@@ -716,11 +725,12 @@ impl MailApp {
                 self.cal_day = d;
             }
             ui.add_space(12.0);
-            for (i, n) in ["Osobiste", "Praca", "Zdrowie", "Spotkania"].iter().enumerate() {
+            let cats = [t!("ui.sidebar.categories.personal"), t!("ui.sidebar.categories.work"), t!("ui.sidebar.categories.health"), t!("ui.sidebar.categories.meetings")];
+            for (i, n) in cats.iter().enumerate() {
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
                     ui.painter().rect_stroke(r.shrink(1.0), CornerRadius::same(3), Stroke::new(1.5, EVENT_COLORS[i]), egui::StrokeKind::Inside);
-                    ui.label(*n);
+                    ui.label(n.as_ref());
                 });
             }
         });
@@ -738,19 +748,19 @@ impl MailApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let w = ui.available_width() / 2.0;
-                    if icon_tab(ui, ic::CALENDAR, self.side_mode == SideMode::Day, w).on_hover_text("Dzień").clicked() {
+                    if icon_tab(ui, ic::CALENDAR, self.side_mode == SideMode::Day, w).on_hover_text(t!("ui.sidebar.day")).clicked() {
                         self.side_mode = SideMode::Day;
                     }
-                    if icon_tab(ui, ic::LIST, self.side_mode == SideMode::Agenda, w).on_hover_text("Nadchodzące").clicked() {
+                    if icon_tab(ui, ic::LIST, self.side_mode == SideMode::Agenda, w).on_hover_text(t!("ui.sidebar.upcoming")).clicked() {
                         self.side_mode = SideMode::Agenda;
                     }
                 });
             });
         Frame::new().inner_margin(Margin { left: 14, right: 10, top: 10, bottom: 0 }).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Kalendarz").font(semibold(16.0)).color(TEXT()));
+                ui.label(RichText::new(t!("ui.sidebar.nav.calendar")).font(semibold(16.0)).color(TEXT()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if fold_button(ui, true).on_hover_text("Zwiń kalendarz na bok").clicked() {
+                    if fold_button(ui, true).on_hover_text(t!("ui.sidebar.fold_calendar")).clicked() {
                         self.show_side = false;
                         self.save_now = true;
                     }
@@ -767,9 +777,9 @@ impl MailApp {
                 }
                 ui.add_space(6.0);
                 let label = if self.side_mode == SideMode::Day {
-                    format!("{}  ⌄", pl::day_month(self.side_day))
+                    format!("{}  ⌄", i18n::day_month(self.side_day))
                 } else {
-                    format!("od {}  ⌄", pl::day_month(self.side_day))
+                    t!("ui.sidebar.from_date", date = i18n::day_month(self.side_day)).into_owned()
                 };
                 if ui.add(egui::Button::new(RichText::new(label).font(semibold(13.5))).frame(false)).clicked() {
                     self.side_picker = !self.side_picker;
@@ -777,7 +787,7 @@ impl MailApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
                         .add(egui::Button::new(RichText::new("+").size(20.0)).frame(false))
-                        .on_hover_text("Nowe wydarzenie")
+                        .on_hover_text(t!("ui.sidebar.new_event_hint"))
                         .clicked()
                     {
                         self.editor = Some(EventEditor::new(self.side_day, None));
@@ -796,7 +806,7 @@ impl MailApp {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("Cały dzień").small().color(MUTED()));
+                    ui.label(RichText::new(t!("ui.sidebar.all_day_head")).small().color(MUTED()));
                 });
                 if let Some(a) = calendar::all_day_row(ui, &self.store, self.side_day, 1, 12.0) {
                     self.cal_action(a);
@@ -818,11 +828,11 @@ impl MailApp {
                                 continue;
                             }
                             let label = if d == today {
-                                "Dzisiaj".to_string()
+                                t!("ui.sidebar.today").into_owned()
                             } else if d == today + Duration::days(1) {
-                                "Jutro".to_string()
+                                t!("ui.sidebar.tomorrow").into_owned()
                             } else {
-                                format!("{}, {}", pl::wd_full(d), pl::day_month(d))
+                                format!("{}, {}", i18n::wd_full(d), i18n::day_month(d))
                             };
                             ui.add_space(6.0);
                             ui.label(RichText::new(label).small().color(MUTED()));
@@ -834,7 +844,7 @@ impl MailApp {
                                 }
                                 let c = EVENT_COLORS[e.color % EVENT_COLORS.len()];
                                 p.circle_filled(Pos2::new(r.left() + 6.0, r.center().y), 3.5, c);
-                                let t = if e.all_day { format!("cały dzień  {}", e.title) } else { format!("{}  {}", e.start.format("%H:%M"), e.title) };
+                                let t = if e.all_day { t!("ui.sidebar.all_day_title", title = e.title).into_owned() } else { format!("{}  {}", e.start.format("%H:%M"), e.title) };
                                 line(p, Pos2::new(r.left() + 16.0, r.center().y - 9.0), &t, 13.0, TEXT(), r.width() - 20.0);
                                 if resp.clicked() {
                                     self.cal_action(CalAction::Edit(e.id));
@@ -844,7 +854,7 @@ impl MailApp {
                         }
                         if shown == 0 {
                             ui.add_space(10.0);
-                            ui.label(RichText::new("Brak zaplanowanych wydarzeń").color(MUTED()));
+                            ui.label(RichText::new(t!("ui.sidebar.no_events")).color(MUTED()));
                         }
                     });
                 });
@@ -865,9 +875,9 @@ impl MailApp {
             CalAction::Edit(id) => {
                 if let Some(e) = self.store.events.iter().find(|e| e.id == id) {
                     if e.google && e.gid.is_empty() {
-                        let when = if e.all_day { "cały dzień".to_string() } else { format!("{} – {}", e.start.format("%H:%M"), (e.start + Duration::minutes(e.minutes)).format("%H:%M")) };
+                        let when = if e.all_day { t!("ui.sidebar.all_day").into_owned() } else { format!("{} – {}", e.start.format("%H:%M"), (e.start + Duration::minutes(e.minutes)).format("%H:%M")) };
                         let place = if e.location.is_empty() { String::new() } else { format!(" · {}", e.location) };
-                        self.set_status(format!("{} ({when}{place}) — z Kalendarza Google (powtarzające się, całodniowe albo z innego kalendarza zmienisz w Google)", e.title));
+                        self.set_status(t!("ui.sidebar.google_event", title = e.title, when = when, place = place));
                     } else {
                         self.editor = Some(EventEditor::from_event(e));
                     }
@@ -893,15 +903,15 @@ impl MailApp {
                     }
                 }
                 self.editor = None;
-                self.set_status("Wydarzenie usunięte");
+                self.set_status(t!("ui.sidebar.event_deleted"));
             }
             EditorResult::Save => {
                 let Some(start) = calendar::parse_time(&ed.start) else {
-                    ed.error = Some("Godzina powinna wyglądać tak: 14:30".into());
+                    ed.error = Some(t!("ui.sidebar.bad_time").into_owned());
                     return;
                 };
                 if ed.title.trim().is_empty() {
-                    ed.error = Some("Nadaj wydarzeniu tytuł".into());
+                    ed.error = Some(t!("ui.sidebar.need_title").into_owned());
                     return;
                 }
                 let ev = Event {
@@ -946,7 +956,7 @@ impl MailApp {
                 self.cal_day = date;
                 self.side_day = date;
                 self.editor = None;
-                self.set_status("Wydarzenie zapisane");
+                self.set_status(t!("ui.sidebar.event_saved"));
             }
         }
     }
@@ -962,7 +972,7 @@ pub(super) fn folder_row(ui: &mut Ui, icon: &str, icon_col: Color32, name: &str,
 pub(super) fn mark_all_menu(resp: &egui::Response, unread: usize) -> bool {
     let mut chosen = false;
     resp.context_menu(|ui| {
-        if ui.add_enabled(unread > 0, egui::Button::new("✓  Oznacz wszystkie jako przeczytane")).clicked() {
+        if ui.add_enabled(unread > 0, egui::Button::new(t!("ui.sidebar.mark_all_read"))).clicked() {
             chosen = true;
             ui.close();
         }

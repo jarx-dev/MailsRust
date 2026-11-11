@@ -69,7 +69,7 @@ impl MailApp {
                     }
                     self.book.save();
                     let n = self.book.people().count();
-                    self.book_said = Some(Ok(format!("Kontakty Google: {n} {}, {}", crate::pl_people(n), self.book.synced)));
+                    self.book_said = Some(Ok(t!("contacts.google_synced", people = crate::i18n::plural("people", n), when = self.book.synced).into_owned()));
                     crate::diag::log(format!("contacts: in step with Google ({} sent, {n} people)", done.sent));
                 }
                 Err(e) => {
@@ -121,7 +121,7 @@ impl MailApp {
     pub(super) fn write_to_group(&mut self, group: &str) {
         let to = self.book.group_addresses(group).join(", ");
         if to.is_empty() {
-            self.set_status("W tej grupie nie ma jeszcze nikogo z adresem e-mail");
+            self.set_status(t!("compose.contacts.group_empty_status"));
             return;
         }
         self.module = Module::Mail;
@@ -134,24 +134,24 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Kontakty").font(semibold(18.0)).color(TEXT()));
+            ui.label(RichText::new(t!("compose.contacts.title")).font(semibold(18.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         let everyone = self.book.people().count();
-        if folder_row(ui, ic::PERSON, MUTED(), "Wszystkie kontakty", everyone, self.book_group.is_none(), 28.0) {
+        if folder_row(ui, ic::PERSON, MUTED(), &t!("compose.contacts.all"), everyone, self.book_group.is_none(), 28.0) {
             self.book_group = None;
         }
         let from_mail = self.mail_people().len();
-        if folder_row(ui, ic::MAIL, MUTED(), "Z poczty", from_mail, self.book_group.as_deref() == Some(MAIL_PEOPLE), 28.0) {
+        if folder_row(ui, ic::MAIL, MUTED(), &t!("compose.contacts.from_mail"), from_mail, self.book_group.as_deref() == Some(MAIL_PEOPLE), 28.0) {
             self.book_group = Some(MAIL_PEOPLE.into());
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            ui.label(RichText::new("Grupy").small().color(MUTED()));
+            ui.label(RichText::new(t!("compose.contacts.groups")).small().color(MUTED()));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(8.0);
-                if ui.add(egui::Button::new(RichText::new("+ Nowa grupa").size(12.5).color(ACCENT())).frame(false)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(t!("compose.contacts.new_group")).size(12.5).color(ACCENT())).frame(false)).clicked() {
                     self.book_new_group = Some(String::new());
                 }
             });
@@ -160,7 +160,7 @@ impl MailApp {
             let (mut done, mut cancel) = (false, false);
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
-                let r = ui.add(egui::TextEdit::singleline(name).hint_text("Nazwa grupy").desired_width(ui.available_width() - 70.0));
+                let r = ui.add(egui::TextEdit::singleline(name).hint_text(t!("compose.contacts.group_name")).desired_width(ui.available_width() - 70.0));
                 r.request_focus();
                 if (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) || ui.button("OK").clicked() {
                     done = true;
@@ -190,13 +190,13 @@ impl MailApp {
         ui.add_space(14.0);
         Frame::new().inner_margin(Margin::symmetric(14, 0)).show(ui, |ui| {
             if !self.google_contacts() {
-                ui.label(RichText::new("Kontakty są na tym komputerze. Aby mieć je wspólne z Kontaktami Google:").small().color(MUTED()));
-                if ui.link(RichText::new("☰ → Kalendarz i kontakty Google").small()).clicked() {
+                ui.label(RichText::new(t!("compose.contacts.local_only")).small().color(MUTED()));
+                if ui.link(RichText::new(t!("compose.contacts.open_google")).small()).clicked() {
                     self.gcal_open = true;
                 }
             } else {
                 if self.book_rx.is_some() {
-                    ui.label(RichText::new("⟳ synchronizacja z Kontaktami Google…").small().color(MUTED()));
+                    ui.label(RichText::new(t!("compose.contacts.syncing")).small().color(MUTED()));
                 } else {
                     match &self.book_said {
                         Some(Ok(m)) => {
@@ -210,9 +210,9 @@ impl MailApp {
                 }
                 let waiting = self.book.dirty_count();
                 if waiting > 0 {
-                    ui.label(RichText::new(format!("{waiting} zmian czeka na wysłanie do Google")).small().color(MUTED()));
+                    ui.label(RichText::new(crate::i18n::plural("compose.contacts.waiting", waiting)).small().color(MUTED()));
                 }
-                if self.book_rx.is_none() && ui.link(RichText::new("Synchronizuj teraz").small()).clicked() {
+                if self.book_rx.is_none() && ui.link(RichText::new(t!("compose.contacts.sync_now")).small()).clicked() {
                     self.book_last = -1e9;
                     self.book_said = None;
                 }
@@ -235,14 +235,14 @@ impl MailApp {
         let group = self.book_group.clone();
         let in_group = group.clone().filter(|g| g != MAIL_PEOPLE);
         let title = match group.as_deref() {
-            None => "Wszystkie kontakty".to_string(),
-            Some(MAIL_PEOPLE) => "Z poczty — osoby, które do Ciebie pisały albo do których pisałeś".to_string(),
+            None => t!("compose.contacts.all").into_owned(),
+            Some(MAIL_PEOPLE) => t!("compose.contacts.mail_title").into_owned(),
             Some(g) => self.book.groups.iter().find(|x| x.id == g).map(|x| x.name.clone()).unwrap_or_default(),
         };
         ui.horizontal(|ui| {
             if let (Some(g), Some(name)) = (in_group.clone(), self.book_rename.as_mut()) {
                 let r = ui.add(egui::TextEdit::singleline(name).desired_width(260.0).font(FontId::proportional(18.0)));
-                if (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) || ui.button("Zapisz").clicked() {
+                if (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) || ui.button(t!("compose.contacts.save")).clicked() {
                     let n = self.book_rename.take().unwrap_or_default();
                     if !n.trim().is_empty() {
                         self.book.put_group(Some(&g), n.trim());
@@ -254,24 +254,24 @@ impl MailApp {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if let Some(g) = in_group.clone() {
-                    if ui.button("🗑 Usuń grupę").on_hover_text("Osoby zostają w kontaktach, znika tylko grupa").clicked() {
+                    if ui.button(t!("compose.contacts.delete_group")).on_hover_text(t!("compose.contacts.delete_group_tip")).clicked() {
                         self.book.delete_group(&g);
                         self.book_group = None;
                         self.book_changed();
                     }
-                    if ui.button("✏ Zmień nazwę").clicked() {
+                    if ui.button(t!("compose.contacts.rename")).clicked() {
                         self.book_rename = Some(title.clone());
                     }
                     let n = self.book.group_addresses(&g).len();
                     if ui
-                        .add(egui::Button::new(RichText::new(format!("✉  Napisz do grupy ({n})")).color(Color32::WHITE)).fill(ACCENT()))
-                        .on_hover_text("Nowa wiadomość do wszystkich osób z tej grupy")
+                        .add(egui::Button::new(RichText::new(t!("compose.contacts.write_group", n = n)).color(Color32::WHITE)).fill(ACCENT()))
+                        .on_hover_text(t!("compose.contacts.write_group_tip"))
                         .clicked()
                     {
                         self.write_to_group(&g);
                     }
                 }
-                if ui.button("+ Nowy kontakt").clicked() {
+                if ui.button(t!("compose.contacts.new_contact")).clicked() {
                     self.book_new_person();
                 }
             });
@@ -281,10 +281,10 @@ impl MailApp {
         if let Some(g) = in_group.clone() {
             let contacts = self.mail_contacts();
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Dodaj do grupy:").color(MUTED()));
+                ui.label(RichText::new(t!("compose.contacts.add_to_group")).color(MUTED()));
                 let w = (ui.available_width() - 90.0).min(520.0);
-                crate::contacts::recipients_field(ui, &mut self.book_add, "Wpisz imię lub adres…", w, &contacts, ("book-add", 0));
-                if ui.button("Dodaj").clicked() {
+                crate::contacts::recipients_field(ui, &mut self.book_add, &t!("compose.window.type_name"), w, &contacts, ("book-add", 0));
+                if ui.button(t!("compose.contacts.add")).clicked() {
                     let text = std::mem::take(&mut self.book_add);
                     for part in text.split([',', ';']).map(str::trim).filter(|p| p.contains('@')) {
                         let (name, addr) = crate::model::split_address(part);
@@ -295,7 +295,7 @@ impl MailApp {
             });
             ui.add_space(6.0);
         }
-        ui.add(egui::TextEdit::singleline(&mut self.book_search).hint_text("🔍 Szukaj w kontaktach").desired_width(320.0));
+        ui.add(egui::TextEdit::singleline(&mut self.book_search).hint_text(t!("compose.contacts.search")).desired_width(320.0));
         ui.add_space(6.0);
         let q = self.book_search.trim().to_lowercase();
         // (id, name, first address, group names, from the mailbox)
@@ -326,7 +326,7 @@ impl MailApp {
             ui.allocate_ui_with_layout(Vec2::new(list_w, avail.height()), Layout::top_down(Align::Min), |ui| {
                 if rows.is_empty() {
                     ui.add_space(20.0);
-                    ui.label(RichText::new(if in_group.is_some() { "W tej grupie nikogo jeszcze nie ma — dodaj osoby polem powyżej." } else { "Brak kontaktów" }).color(MUTED()));
+                    ui.label(RichText::new(if in_group.is_some() { t!("compose.contacts.group_empty") } else { t!("compose.contacts.none") }).color(MUTED()));
                 }
                 egui::ScrollArea::vertical().id_salt("book-list").auto_shrink([false, false]).show_rows(ui, 52.0, rows.len(), |ui, range| {
                     for (id, name, addr, gnames, from_mail) in &rows[range] {
@@ -351,7 +351,7 @@ impl MailApp {
                         }
                         if in_group.is_some() && !from_mail {
                             resp.context_menu(|ui| {
-                                if ui.button("Usuń z grupy").clicked() {
+                                if ui.button(t!("compose.contacts.remove_from_group")).clicked() {
                                     if let Some(g) = in_group.clone() {
                                         self.book.remove_from_group(&g, id);
                                         self.book_changed();
@@ -374,24 +374,24 @@ impl MailApp {
         let groups: Vec<(String, String)> = self.book.groups().iter().map(|g| (g.id.clone(), g.name.clone())).collect();
         let Some(e) = self.book_edit.as_mut() else {
             ui.add_space(30.0);
-            ui.label(RichText::new("Wybierz osobę z listy albo dodaj nowy kontakt.").color(MUTED()));
+            ui.label(RichText::new(t!("compose.contacts.pick_person")).color(MUTED()));
             return;
         };
         let (mut save, mut delete, mut write) = (false, false, false);
         ui.add_space(4.0);
-        ui.label(RichText::new(if e.new { "Nowy kontakt" } else { "Kontakt" }).font(semibold(16.0)).color(TEXT()));
+        ui.label(RichText::new(if e.new { t!("compose.contacts.new_contact_title") } else { t!("compose.contacts.contact") }).font(semibold(16.0)).color(TEXT()));
         ui.add_space(6.0);
         egui::Grid::new("person").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            ui.label("Imię i nazwisko");
+            ui.label(t!("compose.contacts.full_name"));
             ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(320.0));
             ui.end_row();
-            ui.label("E-mail");
-            ui.add(egui::TextEdit::multiline(&mut e.emails).hint_text("adres@firma.pl\n(kilka adresów: każdy w osobnej linii)").desired_rows(2).desired_width(320.0));
+            ui.label(t!("compose.contacts.email"));
+            ui.add(egui::TextEdit::multiline(&mut e.emails).hint_text(t!("compose.contacts.email_hint")).desired_rows(2).desired_width(320.0));
             ui.end_row();
-            ui.label("Grupy");
+            ui.label(t!("compose.contacts.groups"));
             ui.vertical(|ui| {
                 if groups.is_empty() {
-                    ui.label(RichText::new("Brak grup — utwórz grupę po lewej („+ Nowa grupa”).").small().color(MUTED()));
+                    ui.label(RichText::new(t!("compose.contacts.no_groups")).small().color(MUTED()));
                 }
                 for (id, name) in &groups {
                     let mut on = e.groups.contains(id);
@@ -408,13 +408,13 @@ impl MailApp {
         });
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(RichText::new(if e.new { "Zapisz w kontaktach" } else { "Zapisz" }).color(Color32::WHITE)).fill(ACCENT())).clicked() {
+            if ui.add(egui::Button::new(RichText::new(if e.new { t!("compose.contacts.save_new") } else { t!("compose.contacts.save") }).color(Color32::WHITE)).fill(ACCENT())).clicked() {
                 save = true;
             }
-            if !e.emails.trim().is_empty() && ui.button("✉ Napisz").clicked() {
+            if !e.emails.trim().is_empty() && ui.button(t!("compose.contacts.write")).clicked() {
                 write = true;
             }
-            if !e.new && ui.button("🗑 Usuń kontakt").clicked() {
+            if !e.new && ui.button(t!("compose.contacts.delete_contact")).clicked() {
                 delete = true;
             }
         });
@@ -423,21 +423,21 @@ impl MailApp {
         if save {
             let emails: Vec<String> = e.emails.lines().map(str::trim).filter(|l| l.contains('@')).map(String::from).collect();
             if emails.is_empty() && e.name.trim().is_empty() {
-                self.set_status("Wpisz imię i nazwisko albo adres e-mail");
+                self.set_status(t!("compose.contacts.need_name"));
             } else {
                 self.book.put_person(crate::book::Person { id: e.id.clone(), name: e.name.trim().to_string(), emails, groups: e.groups.clone(), ..Default::default() });
                 if let Some(x) = self.book_edit.as_mut() {
                     x.new = false;
                 }
                 self.book_changed();
-                self.set_status("Kontakt zapisany");
+                self.set_status(t!("compose.contacts.saved"));
             }
         }
         if delete {
             self.book.delete_person(&e.id);
             self.book_edit = None;
             self.book_changed();
-            self.set_status("Kontakt usunięty");
+            self.set_status(t!("compose.contacts.deleted"));
         }
         if write {
             let to = if e.name.trim().is_empty() { first } else { format!("{} <{}>", e.name.trim(), first) };

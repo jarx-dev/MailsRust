@@ -47,8 +47,8 @@ pub fn is_picture(path: &str) -> bool {
 pub fn pick_files(owner: Option<isize>) -> Vec<String> {
     use windows_sys::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_ALLOWMULTISELECT, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW};
     let mut buf = vec![0u16; 65536];
-    let title: Vec<u16> = "Załącz pliki".encode_utf16().chain(Some(0)).collect();
-    let filter: Vec<u16> = "Wszystkie pliki\0*.*\0\0".encode_utf16().collect();
+    let title: Vec<u16> = t!("compose.view.attach_files").encode_utf16().chain(Some(0)).collect();
+    let filter: Vec<u16> = format!("{}\0*.*\0\0", t!("compose.view.all_files")).encode_utf16().collect();
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
     ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
     ofn.hwndOwner = owner.map(|h| h as *mut std::ffi::c_void).unwrap_or(std::ptr::null_mut());
@@ -553,32 +553,32 @@ html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font
 ::-webkit-scrollbar{{width:10px;height:10px}}::-webkit-scrollbar-thumb{{background:#cfd3d8;border-radius:5px;border:2px solid #fff}}::-webkit-scrollbar-thumb:hover{{background:#aeb4bb}}::-webkit-scrollbar-button{{display:none}}
 </style></head><body>
 <div id="pz-bar">
-<button data-c="bold" title="Pogrubienie (Ctrl+B)"><b>B</b></button>
-<button data-c="italic" title="Kursywa (Ctrl+I)"><i>I</i></button>
-<button data-c="underline" title="Podkreślenie (Ctrl+U)"><u>U</u></button>
-<button data-c="strikeThrough" title="Przekreślenie"><s>S</s></button>
+<button data-c="bold" title="{t_bold}"><b>B</b></button>
+<button data-c="italic" title="{t_italic}"><i>I</i></button>
+<button data-c="underline" title="{t_underline}"><u>U</u></button>
+<button data-c="strikeThrough" title="{t_strike}"><s>S</s></button>
 <span class="sep"></span>
-<button data-size="-1" title="Mniejszy tekst" style="font-size:12px">A−</button>
-<button data-size="1" title="Większy tekst" style="font-size:17px">A+</button>
-<button id="pz-col" title="Kolor tekstu" style="color:#c62828;font-weight:700;text-decoration:underline">A</button>
+<button data-size="-1" title="{t_smaller}" style="font-size:12px">A−</button>
+<button data-size="1" title="{t_larger}" style="font-size:17px">A+</button>
+<button id="pz-col" title="{t_colour}" style="color:#c62828;font-weight:700;text-decoration:underline">A</button>
 <span class="sep"></span>
-<button data-block="h2" title="Nagłówek" style="font-weight:700">H</button>
-<button data-c="insertUnorderedList" title="Lista">• ≡</button>
-<button data-c="insertOrderedList" title="Lista numerowana">1.</button>
-<button id="pz-link" title="Wstaw link">🔗</button>
-<button data-c="removeFormat" title="Usuń formatowanie" style="font-size:13px">T̸</button>
+<button data-block="h2" title="{t_heading}" style="font-weight:700">H</button>
+<button data-c="insertUnorderedList" title="{t_list}">• ≡</button>
+<button data-c="insertOrderedList" title="{t_numbered}">1.</button>
+<button id="pz-link" title="{t_link}">🔗</button>
+<button data-c="removeFormat" title="{t_clear}" style="font-size:13px">T̸</button>
 <span class="sep"></span>
-<button id="pz-ai" title="Popraw z AI: błędy i styl tekstu (podpis i cytat zostają bez zmian)">✨ Popraw z AI ▾</button>
-<button id="pz-undo" title="Przywróć tekst sprzed poprawki">↶ Cofnij poprawkę</button>
-<span class="hint">obraz: Ctrl+V lub przeciągnij · Markdown → format</span>
+<button id="pz-ai" title="{t_ai_tip}">{t_ai}</button>
+<button id="pz-undo" title="{t_undo_tip}">{t_undo}</button>
+<span class="hint">{t_hint}</span>
 </div>
 <div id="pz-colors"></div>
-<div id="pz-aimenu"><div class="head">Popraw z AI — styl</div>{aimenu}</div>
+<div id="pz-aimenu"><div class="head">{t_ai_style}</div>{aimenu}</div>
 <div id="pz-toast"></div>
-<div id="pz-drop"><div>📎 Upuść pliki tutaj<small>obrazy trafią do treści, pozostałe pliki zostaną załączone</small></div></div>
+<div id="pz-drop"><div>{t_drop}<small>{t_drop_note}</small></div></div>
 <div id="pz-ed" contenteditable="true" spellcheck="true" lang="pl">{content}</div>
-<div id="pz-img"><button data-w="-" title="Mniejszy">−</button><span id="pz-w"></span><button data-w="+" title="Większy">+</button><button data-w="fit" title="Dopasuj do szerokości wiadomości">Dopasuj</button><button data-w="orig" title="Oryginalny rozmiar">100%</button><button data-w="del" title="Usuń obraz">🗑</button></div>
-<div id="pz-handle" title="Przeciągnij, aby zmienić rozmiar"></div>
+<div id="pz-img"><button data-w="-" title="{t_pic_smaller}">−</button><span id="pz-w"></span><button data-w="+" title="{t_pic_larger}">+</button><button data-w="fit" title="{t_pic_fit_tip}">{t_pic_fit}</button><button data-w="orig" title="{t_pic_orig}">100%</button><button data-w="del" title="{t_pic_remove}">🗑</button></div>
+<div id="pz-handle" title="{t_drag}"></div>
 <script>
 var pzPtr=0;
 document.addEventListener('pointerdown',function(){{pzPtr=Date.now();try{{location.href='pzfocus://in'}}catch(e){{}}}},true);
@@ -607,7 +607,7 @@ bar.addEventListener('click',e=>{{
  if(b.dataset.c){{document.execCommand(b.dataset.c,false,null);}}
  else if(b.dataset.size){{let cur=parseInt(document.queryCommandValue('fontSize'))||3;document.execCommand('fontSize',false,Math.max(1,Math.min(7,cur+parseInt(b.dataset.size))));}}
  else if(b.dataset.block){{const cur=(document.queryCommandValue('formatBlock')||'').toLowerCase();document.execCommand('formatBlock',false,cur===b.dataset.block?'div':b.dataset.block);}}
- else if(b.id==='pz-link'){{const u=prompt('Adres linku:','https://');if(u)document.execCommand('createLink',false,u);}}
+ else if(b.id==='pz-link'){{const u=prompt('{t_link_prompt}','https://');if(u)document.execCommand('createLink',false,u);}}
  else if(b.id==='pz-col'){{const r=b.getBoundingClientRect();cols.style.left=r.left+'px';cols.style.top=(r.bottom+4)+'px';cols.style.display=cols.style.display==='flex'?'none':'flex';return;}}
  sync();
 }});
@@ -624,18 +624,18 @@ function clean(root){{root.querySelectorAll('script,style,iframe,object,embed,li
 function setOwn(h){{ownNodes().forEach(n=>n.remove());const t=document.createElement('template');t.innerHTML=h;clean(t.content);const anchor=Array.from(ed.childNodes).find(isTail)||null;ed.insertBefore(t.content,anchor);
  if(anchor){{const p=anchor.previousSibling;const empty=p&&p.nodeType===1&&p.tagName==='DIV'&&!p.textContent.trim()&&!p.querySelector('img');if(!empty)ed.insertBefore(Object.assign(document.createElement('div'),{{innerHTML:'<br>'}}),anchor);}}}}
 function say(m){{toast.textContent=m;toast.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>{{toast.style.display='none';}},8000);}}
-function busy(on){{aiBusy=on;ed.contentEditable=on?'false':'true';aibtn.classList.toggle('busy',on);aibtn.textContent=on?'⏳ Poprawiam…':'✨ Popraw z AI ▾';}}
+function busy(on){{aiBusy=on;ed.contentEditable=on?'false':'true';aibtn.classList.toggle('busy',on);aibtn.textContent=on?'{t_ai_busy}':'{t_ai}';}}
 aibtn.addEventListener('click',()=>{{if(aiBusy)return;if(aimenu.style.display==='flex'){{aimenu.style.display='none';return;}}const r=aibtn.getBoundingClientRect();aimenu.style.left=Math.min(r.left,innerWidth-280)+'px';aimenu.style.top=(r.bottom+4)+'px';aimenu.style.display='flex';}});
 aimenu.addEventListener('click',e=>{{const it=e.target.closest('.it');if(!it)return;aimenu.style.display='none';
  aimenu.querySelectorAll('.ck').forEach(c=>c.textContent='');it.querySelector('.ck').textContent='✓';
- const d=ownHtml();if(!d.innerText.trim()){{say('Najpierw napisz tekst do poprawienia.');return;}}
+ const d=ownHtml();if(!d.innerText.trim()){{say('{t_ai_empty}');return;}}
  aiBefore=d.innerHTML;aiImgs=[];d.querySelectorAll('img').forEach((im,i)=>{{im.classList.remove('pz-sel');aiImgs.push(im.outerHTML);im.replaceWith('[['+'obrazek-'+(i+1)+']]');}});
  toast.style.display='none';select(null);busy(true);Q.push({{t:'ai',style:it.dataset.s,html:d.innerHTML}});}});
 const img=n=>aiImgs[Number(n)-1]||'';
 window.pzAiDone=function(h){{busy(false);
  h=h.replace(/<img\b[^>]*>/gi,'').replace(/<p>\s*\[\[obrazek-(\d+)\]\]\s*<\/p>/g,(_,n)=>img(n)).replace(/\[\[obrazek-(\d+)\]\]/g,(_,n)=>img(n));
  setOwn(h);undo.style.display='inline-block';sync();ed.focus();}};
-window.pzAiFail=function(m){{busy(false);aiBefore=null;say('Nie udało się poprawić tekstu: '+m);}};
+window.pzAiFail=function(m){{busy(false);aiBefore=null;say('{t_ai_fail}'+m);}};
 undo.addEventListener('click',()=>{{if(aiBefore!==null){{setOwn(aiBefore);aiBefore=null;sync();}}undo.style.display='none';}});
 ed.addEventListener('input',()=>{{if(!aiBusy){{undo.style.display='none';aiBefore=null;}}}});
 function looksMd(s){{return /(^|\n)\s{{0,3}}(#{{1,6}}\s|[-*+]\s|\d+\.\s|>\s|```)|\*\*[^*\n]+\*\*|__[^_\n]+__|\[[^\]\n]+\]\([^)\n]+\)|\|\s*:?-{{3,}}/.test(s);}}
@@ -700,14 +700,46 @@ window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,bloc
 }})();
 </script></body></html>"##,
         content = content,
+        // the texts of the page (made when the window opens: a language switch reaches new windows)
+        t_bold = t!("compose.view.bold"),
+        t_italic = t!("compose.view.italic"),
+        t_underline = t!("compose.page.underline"),
+        t_strike = t!("compose.view.strike"),
+        t_smaller = t!("compose.view.smaller"),
+        t_larger = t!("compose.view.larger"),
+        t_colour = t!("compose.view.colour"),
+        t_heading = t!("compose.view.heading"),
+        t_list = t!("compose.view.list"),
+        t_numbered = t!("compose.page.numbered"),
+        t_link = t!("compose.page.link"),
+        t_clear = t!("compose.page.clear"),
+        t_ai_tip = t!("compose.page.ai_tip"),
+        t_ai = t!("compose.page.ai"),
+        t_ai_busy = t!("compose.page.ai_busy"),
+        t_ai_style = t!("compose.page.ai_style"),
+        t_ai_empty = t!("compose.page.ai_empty"),
+        t_ai_fail = t!("compose.page.ai_fail"),
+        t_undo_tip = t!("compose.page.undo_tip"),
+        t_undo = t!("compose.page.undo"),
+        t_hint = t!("compose.page.hint"),
+        t_drop = t!("compose.page.drop"),
+        t_drop_note = t!("compose.page.drop_note"),
+        t_pic_smaller = t!("compose.view.pic_smaller"),
+        t_pic_larger = t!("compose.view.pic_larger"),
+        t_pic_fit_tip = t!("compose.page.pic_fit_tip"),
+        t_pic_fit = t!("compose.page.pic_fit"),
+        t_pic_orig = t!("compose.page.pic_orig"),
+        t_pic_remove = t!("compose.view.pic_remove"),
+        t_drag = t!("compose.page.drag"),
+        t_link_prompt = t!("compose.page.link_prompt"),
         maxw = crate::rich::DEFAULT_WIDTH,
         aimenu = {
             let last = crate::ai::load().style;
             crate::ai::STYLES
                 .iter()
-                .map(|(k, l, h, _)| {
+                .map(|(k, _, _, _)| {
                     let tick = if *k == last { "✓" } else { "" };
-                    format!("<div class=\"it\" data-s=\"{k}\"><span class=\"ck\">{tick}</span><span><span class=\"l\" style=\"display:block\">{}</span><span class=\"h\" style=\"display:block\">{}</span></span></div>", esc(l), esc(h))
+                    format!("<div class=\"it\" data-s=\"{k}\"><span class=\"ck\">{tick}</span><span><span class=\"l\" style=\"display:block\">{}</span><span class=\"h\" style=\"display:block\">{}</span></span></div>", esc(&crate::ai::style_label(k)), esc(&crate::ai::style_hint(k)))
                 })
                 .collect::<String>()
         },
@@ -734,11 +766,15 @@ pub fn start_content(text_html: &str, signature: Option<String>, quote: Option<S
 #[allow(clippy::too_many_arguments)]
 pub fn quote_html(title: &str, from: &str, to: &str, date: &str, subject: &str, html: Option<String>, text: &str) -> String {
     let head = format!(
-        "<div class=\"pz-quote-head\">------ {} ------<br>Od: {}<br>Do: {}<br>Data: {}<br>Temat: {}</div>",
+        "<div class=\"pz-quote-head\">------ {} ------<br>{} {}<br>{} {}<br>{} {}<br>{} {}</div>",
         esc(title),
+        t!("compose.original.from"),
         esc(from),
+        t!("compose.original.to"),
         esc(to),
+        t!("compose.original.date"),
         esc(date),
+        t!("compose.original.subject"),
         esc(subject)
     );
     let body = match html {

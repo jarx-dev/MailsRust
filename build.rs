@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=assets/WebView2Loader.dll");
     println!("cargo:rerun-if-changed=assets/poczta.ico");
+    // the interface texts are built into the program (rust-i18n reads them while compiling)
+    println!("cargo:rerun-if-changed=locales");
     build_identity();
     if std::env::var("CARGO_CFG_WINDOWS").is_err() {
         return;

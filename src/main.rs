@@ -1,5 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+extern crate rust_i18n;
+// the interface texts in English and Polish (src/i18n.rs)
+i18n!("locales", fallback = "en");
+
 mod ai;
 mod app;
 mod autostart;
@@ -15,13 +20,13 @@ mod finder;
 mod gcal;
 mod google;
 mod html;
+mod i18n;
 mod htmlview;
 mod icon;
 mod model;
 mod net;
 mod notify;
 mod oauth;
-mod pl;
 mod popup;
 mod prof;
 mod rawimap;
@@ -203,11 +208,3 @@ fn forget_tiny_window(text: &str) -> Option<String> {
     Some(format!("{}{}", &text[..line_start], &text[line_end..]))
 }
 
-/// "osoba / osoby / osób" for a number of people.
-pub fn pl_people(n: usize) -> &'static str {
-    match n {
-        1 => "osoba",
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => "osoby",
-        _ => "osób",
-    }
-}

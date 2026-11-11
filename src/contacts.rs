@@ -19,7 +19,7 @@ pub struct Contact {
 impl Contact {
     /// A group of the address book, offered while writing: choosing it writes to everyone.
     pub fn group(name: &str, members: Vec<String>) -> Contact {
-        Contact { name: name.to_string(), addr: String::new(), score: f32::MAX, key: fold(&format!("{name} grupa")), members }
+        Contact { name: name.to_string(), addr: String::new(), score: f32::MAX, key: fold(&format!("{name} grupa group")), members }
     }
 
     /// A person from the address book.
@@ -186,7 +186,7 @@ pub fn recipients_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, 
         let origin = ui.ctx().input(|i| i.viewport().inner_rect).map(|r| r.min).unwrap_or(egui::Pos2::ZERO);
         let at = origin + resp.rect.left_bottom().to_vec2() + Vec2::new(0.0, 2.0);
         let builder = egui::ViewportBuilder::default()
-            .with_title("Podpowiedzi")
+            .with_title(t!("compose.contacts.suggestions").into_owned())
             .with_decorations(false)
             .with_resizable(false)
             .with_taskbar(false)
@@ -213,7 +213,7 @@ pub fn recipients_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, 
                         } else {
                             c.name.clone()
                         };
-                        let second = if group { format!("grupa · {} {}", c.members.len(), crate::pl_people(c.members.len())) } else { c.addr.clone() };
+                        let second = if group { t!("contacts.group_of", people = crate::i18n::plural("people", c.members.len())).into_owned() } else { c.addr.clone() };
                         ui.painter().text(r.left_top() + Vec2::new(10.0, 3.0), Align2::LEFT_TOP, &name, FontId::proportional(13.5), crate::theme::TEXT());
                         ui.painter().text(
                             r.left_top() + Vec2::new(10.0, 20.0),

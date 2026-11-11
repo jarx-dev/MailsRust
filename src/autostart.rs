@@ -30,7 +30,7 @@ pub fn is_on() -> bool {
 }
 
 pub fn set(on: bool) -> Result<(), String> {
-    let result = if on { command().ok_or_else(|| "nie znam ścieżki programu".to_string()).and_then(|c| imp::write(&c)) } else { imp::delete() };
+    let result = if on { command().ok_or_else(|| t!("core.autostart.unknown_path").into_owned()).and_then(|c| imp::write(&c)) } else { imp::delete() };
     STATE.store(0, Ordering::Relaxed);
     result
 }
@@ -63,7 +63,7 @@ mod imp {
         if r == ERROR_SUCCESS {
             Ok(())
         } else {
-            Err(format!("zapis do rejestru: błąd {r}"))
+            Err(t!("core.autostart.registry_write", code = r).into_owned())
         }
     }
 
@@ -71,7 +71,7 @@ mod imp {
         let (key, name) = (wide(KEY), wide(NAME));
         match unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) } {
             ERROR_SUCCESS | ERROR_FILE_NOT_FOUND => Ok(()),
-            r => Err(format!("usunięcie z rejestru: błąd {r}")),
+            r => Err(t!("core.autostart.registry_delete", code = r).into_owned()),
         }
     }
 }
@@ -82,7 +82,7 @@ mod imp {
         None
     }
     pub fn write(_: &str) -> Result<(), String> {
-        Err("tylko w Windows".into())
+        Err(t!("core.autostart.windows_only").into_owned())
     }
     pub fn delete() -> Result<(), String> {
         Ok(())

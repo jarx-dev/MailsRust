@@ -152,7 +152,7 @@ pub fn open_url(url: &str) {
 fn open_browser(url: &str) -> Result<(), String> {
     // a test run never opens a browser on the screen of whoever uses the machine
     if crate::unseen() {
-        return Err("przebieg testowy nie otwiera przeglądarki (POCZTA_VISIBLE=1)".into());
+        return Err(t!("cal.oauth.no_browser_test").into_owned());
     }
     // rundll32 hands the address to the default browser without going through a shell,
     // so the "&" characters in it are safe.
@@ -160,7 +160,7 @@ fn open_browser(url: &str) -> Result<(), String> {
         .args(["url.dll,FileProtocolHandler", url])
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("Nie udało się otworzyć przeglądarki: {e}"))
+        .map_err(|e| t!("cal.oauth.browser_failed", err = e).into_owned())
 }
 
 fn error_text(e: ureq::Error) -> String {
@@ -174,7 +174,7 @@ fn error_text(e: ureq::Error) -> String {
                     a.or_else(|| v.get("error").and_then(|x| x.as_str()).map(String::from))
                 })
                 .unwrap_or(body);
-            format!("Google odpowiedział {code}: {msg}")
+            t!("cal.oauth.http_status", code = code, msg = msg).into_owned()
         }
         other => other.to_string(),
     }
@@ -189,7 +189,7 @@ pub fn login(client_id: &str, client_secret: &str) -> Result<LoginResult, String
 pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Result<LoginResult, String> {
     let client_id = client_id.trim();
     if client_id.is_empty() {
-        return Err("Wpisz identyfikator klienta (Client ID) z Google Cloud.".into());
+        return Err(t!("cal.oauth.client_id_missing").into_owned());
     }
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
@@ -212,7 +212,7 @@ pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Resul
     let deadline = Instant::now() + Duration::from_secs(300);
     let code = loop {
         if Instant::now() > deadline {
-            return Err("Upłynął czas na zalogowanie w przeglądarce.".into());
+            return Err(t!("cal.oauth.timeout").into_owned());
         }
         let (mut stream, _) = match listener.accept() {
             Ok(s) => s,
@@ -249,9 +249,9 @@ pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Resul
         }
         let ok = got_error.is_none() && got_state.as_deref() == Some(state.as_str());
         let page = if ok {
-            "<html><head><meta charset=utf-8><title>Poczta</title></head><body style=\"font-family:Segoe UI,sans-serif;text-align:center;padding-top:80px;color:#222\"><h2 style=\"color:#1E6FD9\">Zalogowano ✓</h2><p>Możesz zamknąć tę kartę i wrócić do aplikacji Poczta.</p></body></html>"
+            format!("<html><head><meta charset=utf-8><title>Poczta</title></head><body style=\"font-family:Segoe UI,sans-serif;text-align:center;padding-top:80px;color:#222\"><h2 style=\"color:#1E6FD9\">{}</h2><p>{}</p></body></html>", t!("cal.oauth.page_ok_title"), t!("cal.oauth.page_ok_text"))
         } else {
-            "<html><head><meta charset=utf-8><title>Poczta</title></head><body style=\"font-family:Segoe UI,sans-serif;text-align:center;padding-top:80px;color:#222\"><h2 style=\"color:#E03E3E\">Logowanie nie powiodło się</h2><p>Wróć do aplikacji Poczta i spróbuj ponownie.</p></body></html>"
+            format!("<html><head><meta charset=utf-8><title>Poczta</title></head><body style=\"font-family:Segoe UI,sans-serif;text-align:center;padding-top:80px;color:#222\"><h2 style=\"color:#E03E3E\">{}</h2><p>{}</p></body></html>", t!("cal.oauth.page_fail_title"), t!("cal.oauth.page_fail_text"))
         };
         let resp = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -261,10 +261,10 @@ pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Resul
         let _ = stream.write_all(resp.as_bytes());
         let _ = stream.flush();
         if let Some(e) = got_error {
-            return Err(if e == "access_denied" { "Odmówiono dostępu w Google.".into() } else { format!("Google: {e}") });
+            return Err(if e == "access_denied" { t!("cal.oauth.access_denied").into_owned() } else { t!("cal.oauth.google_error", err = e).into_owned() });
         }
         if got_state.as_deref() != Some(state.as_str()) {
-            return Err("Odpowiedź z przeglądarki nie pasuje do tego logowania.".into());
+            return Err(t!("cal.oauth.state_mismatch").into_owned());
         }
         break got_code.unwrap_or_default();
     };
@@ -291,7 +291,7 @@ pub fn login_scopes(client_id: &str, client_secret: &str, scopes: &str) -> Resul
         .unwrap_or("")
         .to_string();
     if refresh_token.is_empty() {
-        return Err("Google nie zwrócił trwałego dostępu (refresh token). Spróbuj ponownie.".into());
+        return Err(t!("cal.oauth.no_refresh_token").into_owned());
     }
     // The id_token tells us which Google account was used.
     let (email, name, hd, sub) = v
@@ -341,14 +341,14 @@ pub fn access_token(client_id: &str, client_secret: &str, refresh_token: &str) -
         .map_err(|e| {
             let t = error_text(e);
             if t.contains("invalid_grant") || t.contains("expired") || t.contains("revoked") {
-                format!("{t} — zaloguj się ponownie przez Google w ustawieniach konta.")
+                t!("cal.oauth.login_again", err = t).into_owned()
             } else {
                 t
             }
         })?
         .into_json()
         .map_err(|e| e.to_string())?;
-    let token: String = v.get("access_token").and_then(|x| x.as_str()).map(String::from).ok_or("Google nie zwrócił tokenu dostępu.")?;
+    let token: String = v.get("access_token").and_then(|x| x.as_str()).map(String::from).ok_or_else(|| t!("cal.oauth.no_access_token").into_owned())?;
     let life = v.get("expires_in").and_then(|x| x.as_u64()).unwrap_or(3600);
     // handed out only while it has 30 minutes left: a connection waiting for new mail lives 25
     // minutes on the token it signed in with

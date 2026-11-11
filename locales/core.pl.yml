@@ -1,0 +1,59 @@
+core:
+  app:
+    show_calendar: "Pokaż kalendarz"
+  sync:
+    already_open: "Poczta jest już otwarta w innym oknie — zamknij to okno"
+    ai_draft: "AI przygotowało szkic odpowiedzi — znajdziesz go w Szkicach"
+    toast_head:
+      one: "Nowa wiadomość"
+      few: "%{n} nowe wiadomości"
+      many: "%{n} nowych wiadomości"
+    no_subject: "(bez tematu)"
+    configure_first: "Najpierw skonfiguruj konto"
+    sign_in_google_to_connect: "Zaloguj się przez Google, aby się połączyć"
+    enter_password_to_connect: "Wpisz hasło (dla Gmaila: hasło aplikacji), aby się połączyć"
+    new_messages:
+      one: "1 nowa wiadomość"
+      few: "%{n} nowe wiadomości"
+      many: "%{n} nowych wiadomości"
+    up_to_date: "Wszystko aktualne"
+    sent: "Wiadomość wysłana"
+    failed: "%{what} nie powiodło się: %{error}"
+    what_sending: "Wysyłanie"
+    what_saving: "Zapisywanie zmian na serwerze"
+    what_receiving: "Odbieranie"
+    stays_in_outbox: " (zostaje w skrzynce nadawczej)"
+    signed_in: "Zalogowano przez Google jako %{who}"
+    sign_in_failed: "Logowanie przez Google nie powiodło się: %{e}"
+  net:
+    unexpected_sync: "nieoczekiwany błąd podczas synchronizacji"
+    unexpected: "nieoczekiwany błąd"
+    wrong_google_account: "wybrano w przeglądarce inne konto Google (%{got}) niż konto poczty (%{email}) — zaloguj się kontem %{email}"
+    google_access_unchecked: "na stronie Google odznaczono dostęp do poczty — zaloguj się ponownie i zostaw wszystkie pola zaznaczone"
+    message_gone: "nie ma już tej wiadomości na serwerze"
+    folder_missing: "nie znaleziono folderu na serwerze"
+    empty_reply: "pusta odpowiedź serwera"
+    unreadable_message: "nie udało się odczytać wiadomości"
+    download_interrupted: "pobieranie przerwane"
+    no_address: "brak adresu"
+    your_address: "Twój adres: %{e}"
+    add_recipient: "Dodaj co najmniej jednego odbiorcę."
+    attachment_unreadable: "Nie można odczytać załącznika %{file}: %{e}"
+    changes_not_saved:
+      one: "%{n} zmian nie zapisano na serwerze"
+      few: "%{n} zmian nie zapisano na serwerze"
+      many: "%{n} zmian nie zapisano na serwerze"
+    server_closed: "serwer zamknął połączenie"
+  notify:
+    no_unread: "brak nieprzeczytanych"
+    unread:
+      one: "1 nieprzeczytana"
+      few: "%{n} nieprzeczytane"
+      many: "%{n} nieprzeczytanych"
+  update:
+    local_build: "lokalna"
+  autostart:
+    unknown_path: "nie znam ścieżki programu"
+    registry_write: "zapis do rejestru: błąd %{code}"
+    registry_delete: "usunięcie z rejestru: błąd %{code}"
+    windows_only: "tylko w Windows"

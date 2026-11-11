@@ -234,7 +234,7 @@ mod imp {
             SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut RECT as *mut std::ffi::c_void, 0);
             let margin = (14.0 * scale) as i32;
             let (x, y) = (work.right - w - margin, work.bottom - h - margin);
-            let title = wide("Nowa poczta");
+            let title = wide(&t!("compose.popup.title"));
             let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class.as_ptr(),

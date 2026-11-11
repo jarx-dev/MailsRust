@@ -196,12 +196,11 @@ pub fn png(img: &RgbaImage) -> Vec<u8> {
     out.into_inner()
 }
 
-/// How "N unread" reads in Polish.
+/// How "N unread" reads in the current language.
 pub fn unread_text(n: usize) -> String {
-    match n {
-        0 => "brak nieprzeczytanych".into(),
-        1 => "1 nieprzeczytana".into(),
-        n if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) => format!("{n} nieprzeczytane"),
-        n => format!("{n} nieprzeczytanych"),
+    if n == 0 {
+        t!("core.notify.no_unread").into_owned()
+    } else {
+        crate::i18n::plural("core.notify.unread", n)
     }
 }

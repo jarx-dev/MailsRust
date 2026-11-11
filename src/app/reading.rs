@@ -463,7 +463,7 @@ impl MailApp {
         drop(p_clone);
         let Some(m) = m_opt else {
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new("Wybierz wiadomość, aby ją przeczytać").color(MUTED()));
+                ui.label(RichText::new(t!("mail.reading.pick_message")).color(MUTED()));
             });
             return;
         };
@@ -480,21 +480,22 @@ impl MailApp {
             let (hr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
             let mut right = hr.right();
             if m.flagged {
-                let txt = "Ważne  ✕";
-                let w = text_width(ui, txt, FontId::proportional(13.0)) + 18.0;
+                let txt = t!("mail.reading.important_chip");
+                let w = text_width(ui, &txt, FontId::proportional(13.0)) + 18.0;
                 // (the same height and corners as the tag chips and "+ Tag" beside it)
                 let chip = Rect::from_min_size(Pos2::new(right - w, hr.top() + 5.0), Vec2::new(w, 22.0));
                 let cr = ui.interact(chip, id(("chip", m.id)), Sense::click());
                 ui.painter().rect_filled(chip, CornerRadius::same(4), IMPORTANT());
-                ui.painter().text(chip.center(), Align2::CENTER_CENTER, txt, FontId::proportional(13.0), if crate::theme::is_dark() { Color32::from_rgb(0xFF, 0xDF, 0x80) } else { Color32::from_rgb(0x22, 0x22, 0x22) });
-                if cr.on_hover_text("Usuń oznaczenie").clicked() {
+                ui.painter().text(chip.center(), Align2::CENTER_CENTER, &*txt, FontId::proportional(13.0), if crate::theme::is_dark() { Color32::from_rgb(0xFF, 0xDF, 0x80) } else { Color32::from_rgb(0x22, 0x22, 0x22) });
+                if cr.on_hover_text(t!("mail.reading.remove_flag")).clicked() {
                     self.actions.push(Action::ToggleFlag(m.id));
                 }
                 right -= w + 8.0;
             }
             // "+ Tag": choose this message's tags.
             {
-                let w = text_width(ui, "+ Tag", FontId::proportional(13.0)) + 14.0;
+                let add_tag = t!("mail.reading.add_tag");
+                let w = text_width(ui, &add_tag, FontId::proportional(13.0)) + 14.0;
                 let r = Rect::from_min_size(Pos2::new(right - w, hr.top() + 5.0), Vec2::new(w, 22.0));
                 let resp = ui.interact(r, id(("add-tag", m.id)), Sense::click());
                 let p = ui.painter();
@@ -504,8 +505,8 @@ impl MailApp {
                     Stroke::new(1.0, if resp.hovered() { ACCENT() } else { BORDER() }),
                     egui::StrokeKind::Inside,
                 );
-                p.text(r.center(), Align2::CENTER_CENTER, "+ Tag", FontId::proportional(13.0), if resp.hovered() { ACCENT() } else { MUTED() });
-                let resp = resp.on_hover_text("Dodaj lub usuń tagi tej wiadomości");
+                p.text(r.center(), Align2::CENTER_CENTER, &*add_tag, FontId::proportional(13.0), if resp.hovered() { ACCENT() } else { MUTED() });
+                let resp = resp.on_hover_text(t!("mail.reading.add_tag_tip"));
                 let mid = m.id;
                 egui::Popup::menu(&resp).show(|ui| self.tag_menu(ui, mid));
                 right -= w + 6.0;
@@ -522,10 +523,10 @@ impl MailApp {
                 let used = tag_chip(ui.painter(), pos, &shown, 13.0, 192.0);
                 let x_rect = Rect::from_min_size(Pos2::new(pos.x + used - 20.0, pos.y), Vec2::new(20.0, 20.0));
                 let name_rect = Rect::from_min_size(pos, Vec2::new(used - 20.0, 20.0));
-                if ui.interact(x_rect, id(("tag-x", m.id, l.as_str())), Sense::click()).on_hover_text("Odepnij ten tag od wiadomości").clicked() {
+                if ui.interact(x_rect, id(("tag-x", m.id, l.as_str())), Sense::click()).on_hover_text(t!("mail.reading.tag_remove_tip")).clicked() {
                     self.actions.push(Action::RemoveTag(m.id, l.clone()));
                 }
-                if ui.interact(name_rect, id(("tag", m.id, l.as_str())), Sense::click()).on_hover_text("Pokaż wiadomości z tym tagiem").clicked() {
+                if ui.interact(name_rect, id(("tag", m.id, l.as_str())), Sense::click()).on_hover_text(t!("mail.reading.tag_show_tip")).clicked() {
                     self.label_filter = l.clone();
                     self.view = MailView::Label;
                     self.search.clear();
@@ -559,7 +560,7 @@ impl MailApp {
                 .forwarded
                 .get(&m.id)
                 .and_then(|f| self.msg(*f))
-                .map(|f| format!("➦  Przekazano {} {} do: {}", pl::short_day_month(f.date.date()), f.date.format("%H:%M"), short_people(&f.to)));
+                .map(|f| t!("mail.reading.forwarded_note", date = i18n::short_day_month(f.date.date()), time = f.date.format("%H:%M"), to = short_people(&f.to)).into_owned());
             let to_people = people_in(&m.to);
             let cc_people = people_in(&m.cc);
             let has_notes = answered_at.is_some() || forward_note.is_some();
@@ -580,7 +581,7 @@ impl MailApp {
                     ui.painter().text(
                         Pos2::new(sr.center().x, sr.bottom() - 2.0),
                         Align2::CENTER_BOTTOM,
-                        "⌃ Zwiń",
+                        t!("mail.reading.fold_hint"),
                         FontId::proportional(11.5),
                         MUTED(),
                     );
@@ -591,8 +592,8 @@ impl MailApp {
             }
             self.avatar_or_logo(ui, Pos2::new(sr.left() + 24.0, sr.top() + 26.0), 24.0, &m.from_name, &m.from_addr);
             // one way of writing it, whatever the day: "09-11-2026 19:46" (as the owner wants)
-            let when = m.date.format("%d-%m-%Y %H:%M").to_string();
-            let tw = text_width(ui, &when, FontId::proportional(15.0));
+            let when = format!("{} {}", i18n::date(m.date.date()), m.date.format("%H:%M"));
+            let tw =text_width(ui, &when, FontId::proportional(15.0));
             ui.painter().text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(15.0), TEXT());
             let text_w = sr.width() - 70.0 - tw - 12.0;
             let full_w = sr.width() - 70.0;
@@ -605,7 +606,7 @@ impl MailApp {
             // the smaller tools as icons on the right.
             let marked = self.prefs.no_reply_needed.contains(&m.id);
             let offer = marked || self.waits_for_reply(&m);
-            let nr_tip = if marked { "Oznaczono: nie wymaga odpowiedzi — kliknij, aby cofnąć" } else { "Nie wymaga odpowiedzi (ukryj na liście „Bez odpowiedzi”)" };
+            let nr_tip = if marked { t!("mail.reading.no_reply_marked") } else { t!("mail.reading.no_reply_offer") };
             let icon_rect = Rect::from_min_max(Pos2::new(sr.right() - 420.0, sr.top() + 26.0), Pos2::new(sr.right() + 6.0, sr.top() + 56.0));
             let buttons = ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect).layout(Layout::right_to_left(Align::Center)), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -627,7 +628,7 @@ impl MailApp {
                         hint_above(ui, &resp, tip);
                         resp
                     };
-                    let more = icon(ui, 0, ic::MORE, "Więcej");
+                    let more = icon(ui, 0, ic::MORE, &t!("mail.reading.more"));
                     let (mid, read, flagged) = (m.id, m.read, m.flagged);
                     if std::env::var("POCZTA_START").as_deref() == Ok("menu") && self.clock() > 4.0 {
                         // test picture: the menu open over the email
@@ -639,21 +640,21 @@ impl MailApp {
                     }
                     egui::Popup::menu(&more).show(|ui| self.message_menu(ui, mid, read, flagged));
                     // what to do with the message (once on the top bar), next to "more"
-                    if icon(ui, 8, ic::DELETE, "Usuń (Delete)").clicked() {
+                    if icon(ui, 8, ic::DELETE, &t!("mail.reading.delete_tip")).clicked() {
                         self.actions.push(Action::Delete(mid));
                     }
-                    if icon(ui, 9, ic::ARCHIVE, "Archiwum").clicked() {
+                    if icon(ui, 9, ic::ARCHIVE, &t!("mail.reading.archive")).clicked() {
                         self.actions.push(Action::Move(mid, Folder::Archive));
                     }
-                    if icon(ui, 7, ic::FLAG, if flagged { "Usuń oznaczenie" } else { "Oznacz" }).clicked() {
+                    if icon(ui, 7, ic::FLAG, &if flagged { t!("mail.reading.remove_flag") } else { t!("mail.reading.flag") }).clicked() {
                         self.actions.push(Action::ToggleFlag(mid));
                     }
-                    let (g, t) = if read { (ic::MAIL, "Oznacz jako nieprzeczytaną") } else { (ic::MAIL_OPEN, "Oznacz jako przeczytaną") };
-                    if icon(ui, 10, g, t).clicked() {
+                    let (g, t) = if read { (ic::MAIL, t!("mail.reading.mark_unread")) } else { (ic::MAIL_OPEN, t!("mail.reading.mark_read")) };
+                    if icon(ui, 10, g, &t).clicked() {
                         self.actions.push(Action::SetRead(mid, !read));
                     }
                     // (link for AI and translation: in "more", so the row never changes with the width)
-                    if offer && icon(ui, 5, "", nr_tip).clicked() {
+                    if offer && icon(ui, 5, "", &nr_tip).clicked() {
                         self.actions.push(Action::NoReplyNeeded(m.id, !marked));
                     }
                     // answering apart from the rest, so a quick reply never hits "delete"
@@ -661,14 +662,14 @@ impl MailApp {
                     let (sep, _) = ui.allocate_exact_size(Vec2::new(1.0, 18.0), Sense::hover());
                     ui.painter().vline(sep.center().x, sep.y_range(), Stroke::new(1.0, BORDER()));
                     ui.add_space(6.0);
-                    if icon(ui, 2, ic::FORWARD, "Prześlij dalej").clicked() {
+                    if icon(ui, 2, ic::FORWARD, &t!("mail.reading.forward")).clicked() {
                         self.actions.push(Action::Forward(m.id));
                     }
-                    if icon(ui, 1, ic::REPLY_ALL, "Odpowiedz wszystkim").clicked() {
+                    if icon(ui, 1, ic::REPLY_ALL, &t!("mail.reading.reply_all")).clicked() {
                         self.actions.push(Action::Reply(m.id, true));
                     }
                     // replying: a plain icon like the others, the first of the row
-                    let reply = icon(ui, 6, ic::REPLY, "Odpowiedz (Ctrl+R)");
+                    let reply = icon(ui, 6, ic::REPLY, &t!("mail.reading.reply_ctrl"));
                     if reply.clicked() {
                         self.actions.push(Action::Reply(m.id, false));
                     }
@@ -679,8 +680,8 @@ impl MailApp {
             // the address line (and when you answered) up to the buttons, never under them
             let buttons_left = buttons.inner.min(buttons.response.rect.left());
             let room = if narrow { sr.right() - (sr.left() + 60.0) } else { (buttons_left - (sr.left() + 60.0) - 12.0).max(40.0) };
-            let to_line = fit_names(ui, "do ", &to_people, room);
-            let cc_line = fit_names(ui, "DW: ", &cc_people, room);
+            let to_line = fit_names(ui, &t!("mail.reading.to_lower"), &to_people, room);
+            let cc_line = fit_names(ui, &t!("mail.reading.cc_label"), &cc_people, room);
             line(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 28.0 + addr_dy), &to_line, 13.5, MUTED(), room);
             let mut rows = vec![(sr.top() + 26.0 + addr_dy, &to_line, &to_people)];
             let mut next_y = sr.top() + 50.0 + addr_dy;
@@ -698,7 +699,7 @@ impl MailApp {
                 let r = ui.interact(area, id(("rcpt-line", m.id, k)), if more { Sense::click() } else { Sense::hover() });
                 let mut hint = people.iter().map(|(n, a)| if n == a { a.clone() } else { format!("{n} — {a}") }).collect::<Vec<_>>().join("\n");
                 if more {
-                    hint += if rcpt_open { "\n(kliknij, aby zwinąć listę)" } else { "\n(kliknij, aby pokazać wszystkich)" };
+                    hint += &if rcpt_open { t!("mail.reading.rcpt_fold") } else { t!("mail.reading.rcpt_unfold") };
                 }
                 hint_above(ui, &r, &hint);
                 if more && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -708,7 +709,7 @@ impl MailApp {
             // a line of its own under the address: when you answered, when you forwarded it and to whom
             let mut notes: Vec<String> = vec![];
             if let Some(when) = answered_at {
-                notes.push(format!("↶  Odpowiedziano {} {}", pl::short_day_month(when.date()), when.format("%H:%M")));
+                notes.push(t!("mail.reading.replied_note", date = i18n::short_day_month(when.date()), time = when.format("%H:%M")).into_owned());
             }
             if let Some(n) = forward_note {
                 notes.push(n);
@@ -722,7 +723,7 @@ impl MailApp {
             }
             if m.folder == Folder::Drafts {
                 ui.add_space(4.0);
-                if ui.add(egui::Button::new(RichText::new("✏  Edytuj szkic").color(Color32::WHITE)).fill(ACCENT())).clicked() {
+                if ui.add(egui::Button::new(RichText::new(t!("mail.reading.edit_draft")).color(Color32::WHITE)).fill(ACCENT())).clicked() {
                     self.actions.push(Action::EditDraft(m.id));
                 }
             }
@@ -771,12 +772,12 @@ impl MailApp {
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     let can_preview = previewable(&name);
                                     let open = ui.add(egui::Button::new(RichText::new(&label).color(TEXT())).frame(false).wrap_mode(egui::TextWrapMode::Extend));
-                                    let tip = if can_preview { format!("{name} — podgląd") } else { format!("{name} — tego pliku nie da się podejrzeć, kliknij, aby zapisać w Pobranych") };
+                                    let tip = if can_preview { t!("mail.reading.attach_preview", name = name) } else { t!("mail.reading.attach_no_preview", name = name) };
                                     hint_above(ui, &open, &tip);
                                     let (sep, _) = ui.allocate_exact_size(Vec2::new(9.0, 18.0), Sense::hover());
                                     ui.painter().vline(sep.center().x, sep.y_range(), Stroke::new(1.0, BORDER()));
                                     let save = ui.add(egui::Button::new(RichText::new(ic::DOWNLOAD).size(14.0).color(ACCENT())).frame(false));
-                                    hint_above(ui, &save, "Zapisz w folderze Pobrane");
+                                    hint_above(ui, &save, &t!("mail.reading.save_downloads"));
                                     if open.clicked() {
                                         self.actions.push(if can_preview { Action::PreviewAttachment(m.id, i) } else { Action::SaveAttachment(m.id, i) });
                                     }
@@ -787,7 +788,7 @@ impl MailApp {
                         }
                         // the rest of the files: behind "+N więcej" (and back with "Zwiń")
                         if last && (hidden > 0 || (files_open && total_rows > 2)) {
-                            let more = if hidden > 0 { format!("+{hidden} więcej") } else { "Zwiń".to_string() };
+                            let more = if hidden > 0 { t!("mail.reading.more_hidden", n = hidden) } else { t!("mail.reading.collapse") };
                             let r = ui.add(egui::Label::new(RichText::new(more).size(13.0).color(ACCENT()).underline()).sense(Sense::click()));
                             if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 flip = true;
@@ -805,7 +806,7 @@ impl MailApp {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Spinner::new().size(14.0).color(ACCENT()));
-                    ui.label(RichText::new("Pobieranie pełnej treści wiadomości…").color(MUTED()));
+                    ui.label(RichText::new(t!("mail.reading.downloading_full")).color(MUTED()));
                 });
                 return;
             }
@@ -816,15 +817,15 @@ impl MailApp {
             if busy || shown_tr || failed.is_some() {
                 ui.horizontal(|ui| {
                     if busy {
-                        ui.label(RichText::new("🌐  Tłumaczę wiadomość na polski…").size(13.0).color(ACCENT()));
+                        ui.label(RichText::new(t!("mail.reading.translating")).size(13.0).color(ACCENT()));
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
                     } else if shown_tr {
-                        ui.label(RichText::new("🌐  Przetłumaczono na polski (AI)").size(13.0).color(Color32::from_rgb(0x8E, 0x5B, 0xD0)));
-                        if ui.link(RichText::new("Pokaż oryginał").size(13.0)).clicked() {
+                        ui.label(RichText::new(t!("mail.reading.translated")).size(13.0).color(Color32::from_rgb(0x8E, 0x5B, 0xD0)));
+                        if ui.link(RichText::new(t!("mail.reading.show_original")).size(13.0)).clicked() {
                             self.actions.push(Action::Translate(m.id));
                         }
                     } else if let Some(e) = &failed {
-                        ui.label(RichText::new(format!("Nie udało się przetłumaczyć: {e}")).size(13.0).color(FLAG));
+                        ui.label(RichText::new(t!("mail.reading.translate_failed", error = e)).size(13.0).color(FLAG));
                     }
                 });
                 ui.add_space(6.0);
@@ -924,7 +925,7 @@ impl MailApp {
                     ui.horizontal(|ui| {
                         ui.add_space(20.0);
                         ui.add(egui::Spinner::new().size(14.0).color(ACCENT()));
-                        ui.label(RichText::new("Wczytywanie wiadomości…").color(MUTED()));
+                        ui.label(RichText::new(t!("mail.reading.loading")).color(MUTED()));
                     });
                     return;
                 };
@@ -951,12 +952,12 @@ impl MailApp {
                         clicked = resp.interact_pointer_pos().map(|p| p - origin);
                     }
                     resp.context_menu(|ui| {
-                        if ui.button("📋  Kopiuj tekst wiadomości").clicked() {
+                        if ui.button(t!("mail.reading.copy_text")).clicked() {
                             ui.ctx().copy_text(m.body.clone());
                             ui.close();
                         }
                         if let Some(h) = self.email_hover.1.clone().filter(|_| self.email_hover.0 == pic.key) {
-                            if ui.button("🔗  Kopiuj adres linku").clicked() {
+                            if ui.button(t!("mail.reading.copy_link")).clicked() {
                                 ui.ctx().copy_text(h);
                                 ui.close();
                             }
@@ -1008,7 +1009,7 @@ impl MailApp {
         let mut closed: Vec<u64> = vec![];
         for (i, r) in readers.iter_mut().enumerate() {
             let m = r.msg.clone();
-            let title = if m.subject.trim().is_empty() { "(bez tematu)".to_string() } else { m.subject.clone() };
+            let title = if m.subject.trim().is_empty() { t!("mail.reading.no_subject").into_owned() } else { m.subject.clone() };
             let mut builder = egui::ViewportBuilder::default()
                 .with_title(format!("{title}{}", reader_marker(r.key)))
                 .with_inner_size([860.0, 720.0])
@@ -1044,14 +1045,14 @@ impl MailApp {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 let maxed = ui.ctx().input(|inp| inp.viewport().maximized.unwrap_or(false));
-                                if window_button(ui, WinButton::Close).on_hover_text("Zamknij").clicked() {
+                                if window_button(ui, WinButton::Close).on_hover_text(t!("mail.reading.close")).clicked() {
                                     open = false;
                                 }
                                 let kind = if maxed { WinButton::Restore } else { WinButton::Maximize };
                                 if window_button(ui, kind).clicked() {
                                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
                                 }
-                                if window_button(ui, WinButton::Minimize).on_hover_text("Minimalizuj").clicked() {
+                                if window_button(ui, WinButton::Minimize).on_hover_text(t!("mail.reading.minimize")).clicked() {
                                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                                 }
                             });
@@ -1061,14 +1062,20 @@ impl MailApp {
                         let (sr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 10.0, 50.0), Sense::hover());
                         self.avatar_or_logo(ui, Pos2::new(sr.left() + 22.0, sr.center().y), 22.0, &m.from_name, &m.from_addr);
                         let who = if m.from_name.is_empty() { m.from_addr.clone() } else { format!("{} <{}>", m.from_name, m.from_addr) };
-                        let when = m.date.format("%d-%m-%Y %H:%M").to_string();
+                        let when = format!("{} {}", i18n::date(m.date.date()), m.date.format("%H:%M"));
                         let p = ui.painter();
                         line_f(p, Pos2::new(sr.left() + 56.0, sr.top() + 4.0), &who, semibold(14.5), ACCENT(), sr.width() - 330.0);
                         let first = people_in(&m.to).into_iter().next().map(|x| x.0).unwrap_or_else(|| "—".into());
-                        line(p, Pos2::new(sr.left() + 56.0, sr.top() + 26.0), &format!("do {first}"), 13.0, MUTED(), sr.width() - 330.0);
+                        line(p, Pos2::new(sr.left() + 56.0, sr.top() + 26.0), &t!("mail.reading.to_name", name = first), 13.0, MUTED(), sr.width() - 330.0);
                         p.text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(13.5), TEXT());
                         let mut x = sr.right() - 12.0;
-                        for (k, (icon, tip)) in [(ic::LINK, "Kopiuj link dla AI"), (ic::FORWARD, "Prześlij dalej"), (ic::REPLY_ALL, "Odpowiedz wszystkim"), (ic::REPLY, "Odpowiedz")].iter().enumerate() {
+                        let acts = [
+                            (ic::LINK, t!("mail.reading.copy_for_ai")),
+                            (ic::FORWARD, t!("mail.reading.forward")),
+                            (ic::REPLY_ALL, t!("mail.reading.reply_all")),
+                            (ic::REPLY, t!("mail.reading.reply")),
+                        ];
+                        for (k, (icon, tip)) in acts.iter().enumerate() {
                             let rr = Rect::from_center_size(Pos2::new(x, sr.top() + 36.0), Vec2::splat(26.0));
                             let resp = ui.interact(rr, id(("reader-act", r.key, k)), Sense::click());
                             if resp.hovered() {
@@ -1093,12 +1100,12 @@ impl MailApp {
                                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
                                 for (k, a) in m.attachments.iter().enumerate() {
                                     let open_it = ui.add(egui::Button::new(RichText::new(format!("📎 {a}")).color(TEXT())).stroke(Stroke::new(1.0, BORDER())));
-                                    hint_above(ui, &open_it, "Otwórz");
+                                    hint_above(ui, &open_it, &t!("mail.reading.open"));
                                     if open_it.clicked() {
                                         self.actions.push(Action::OpenAttachment(m.id, k));
                                     }
                                     let save = ui.add(egui::Button::new(RichText::new(ic::DOWNLOAD).color(ACCENT())).frame(false));
-                                    hint_above(ui, &save, "Zapisz w folderze Pobrane");
+                                    hint_above(ui, &save, &t!("mail.reading.save_downloads"));
                                     if save.clicked() {
                                         self.actions.push(Action::SaveAttachment(m.id, k));
                                     }
@@ -1208,7 +1215,7 @@ impl MailApp {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             let maxed = ui.ctx().input(|inp| inp.viewport().maximized.unwrap_or(false));
-                            if window_button(ui, WinButton::Close).on_hover_text("Zamknij").clicked() {
+                            if window_button(ui, WinButton::Close).on_hover_text(t!("mail.reading.close")).clicked() {
                                 open = false;
                             }
                             let kind = if maxed { WinButton::Restore } else { WinButton::Maximize };
@@ -1220,10 +1227,10 @@ impl MailApp {
                             }
                             ui.add_space(12.0);
                             ui.spacing_mut().item_spacing.x = 6.0;
-                            if ui.button("Otwórz w programie").on_hover_text("Otwiera plik w programie Windows przypisanym do tego typu").clicked() {
+                            if ui.button(t!("mail.reading.open_in_app")).on_hover_text(t!("mail.reading.open_in_app_tip")).clicked() {
                                 outside = true;
                             }
-                            if ui.add(egui::Button::new(RichText::new("⬇  Zapisz w Pobranych").color(Color32::WHITE)).fill(ACCENT())).clicked() {
+                            if ui.add(egui::Button::new(RichText::new(t!("mail.reading.save_to_downloads")).color(Color32::WHITE)).fill(ACCENT())).clicked() {
                                 save = true;
                             }
                         });
@@ -1234,7 +1241,7 @@ impl MailApp {
                     ui.allocate_rect(rect, Sense::hover());
                     ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(6), Stroke::new(1.0, BORDER()), egui::StrokeKind::Outside);
                     if p.failed {
-                        ui.put(rect, egui::Label::new(RichText::new("Podgląd niedostępny — użyj „Otwórz w programie”.").color(MUTED())));
+                        ui.put(rect, egui::Label::new(RichText::new(t!("mail.reading.preview_unavailable")).color(MUTED())));
                         return;
                     }
                     match &p.web {
@@ -1385,11 +1392,11 @@ pub(super) fn recipients_row(ui: &mut Ui, msg: u64, to: &str, cc: &str, indent: 
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
         let size = 12.5;
-        for (label, list) in [("Do: ", &to), ("DW: ", &cc)] {
+        for (k, (label, list)) in [(t!("mail.reading.to_label"), &to), (t!("mail.reading.cc_label"), &cc)].into_iter().enumerate() {
             if list.is_empty() {
                 continue;
             }
-            if label == "DW: " && !to.is_empty() {
+            if k == 1 && !to.is_empty() {
                 ui.add_space(14.0);
             }
             ui.label(RichText::new(label).size(size).color(MUTED()));
@@ -1398,7 +1405,7 @@ pub(super) fn recipients_row(ui: &mut Ui, msg: u64, to: &str, cc: &str, indent: 
                 let text = if k + 1 < shown { format!("{name}, ") } else { name.clone() };
                 let r = ui.add(egui::Label::new(RichText::new(text).size(size).color(ACCENT())).sense(Sense::click()));
                 // the address above the name (below it the email would cover it); a click copies it
-                hint_above(ui, &r, &format!("{addr} — kliknij, aby skopiować"));
+                hint_above(ui, &r, &t!("mail.reading.click_to_copy", addr = addr));
                 if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     ui.ctx().copy_text(addr.clone());
                 }
@@ -1406,7 +1413,7 @@ pub(super) fn recipients_row(ui: &mut Ui, msg: u64, to: &str, cc: &str, indent: 
         }
         if hidden > 0 || open {
             ui.add_space(10.0);
-            let more = if open { "Zwiń".to_string() } else { format!("+{hidden} więcej") };
+            let more = if open { t!("mail.reading.collapse") } else { t!("mail.reading.more_hidden", n = hidden) };
             let r = ui.add(egui::Label::new(RichText::new(more).size(size).color(ACCENT()).underline()).sense(Sense::click()));
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 toggle = true;

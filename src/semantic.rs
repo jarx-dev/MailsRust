@@ -52,7 +52,7 @@ fn agent() -> Result<ureq::Agent, String> {
 pub fn download(tx: Sender<Progress>, ctx: eframe::egui::Context) {
     std::thread::spawn(move || {
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| download_inner(&tx, &ctx)))
-            .unwrap_or_else(|_| Err("nieoczekiwany błąd".into()));
+            .unwrap_or_else(|_| Err(t!("cal.semantic.unexpected").into_owned()));
         let _ = tx.send(match res {
             Ok(()) => Progress::Done,
             Err(e) => Progress::Failed(e),
@@ -81,7 +81,7 @@ fn download_inner(tx: &Sender<Progress>, ctx: &eframe::egui::Context) -> Result<
     let mut header = vec![0u8; header_len];
     r.read_exact(&mut header).map_err(|e| e.to_string())?;
     let header: serde_json::Value = serde_json::from_slice(&header).map_err(|e| e.to_string())?;
-    let emb = header.get("embeddings").ok_or("brak tabeli w modelu")?;
+    let emb = header.get("embeddings").ok_or_else(|| t!("cal.semantic.no_table").into_owned())?;
     let dtype = emb.get("dtype").and_then(|d| d.as_str()).unwrap_or("");
     let shape: Vec<usize> = emb
         .get("shape")
@@ -95,7 +95,7 @@ fn download_inner(tx: &Sender<Progress>, ctx: &eframe::egui::Context) -> Result<
         .and_then(|x| x.as_u64())
         .unwrap_or(0) as usize;
     if shape.len() != 2 || !(dtype == "F32" || dtype == "F16") {
-        return Err(format!("nieznany format modelu ({dtype})"));
+        return Err(t!("cal.semantic.unknown_format", dtype = dtype).into_owned());
     }
     let (vocab, dim) = (shape[0], shape[1]);
     let bytes_per = if dtype == "F32" { 4 } else { 2 };
@@ -201,13 +201,13 @@ impl Model {
         // (the file is only read; the app never changes it while it is in use)
         let bytes = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| e.to_string())?;
         if bytes.len() < 16 || &bytes[..8] != MAGIC {
-            return Err("uszkodzony plik modelu".into());
+            return Err(t!("cal.semantic.corrupt").into_owned());
         }
         let vocab = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         let dim = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
         let rows_end = 16 + vocab * dim;
         if bytes.len() < rows_end + vocab * 4 {
-            return Err("niepełny plik modelu".into());
+            return Err(t!("cal.semantic.incomplete").into_owned());
         }
         let scales: Vec<f32> = bytes[rows_end..rows_end + vocab * 4]
             .chunks_exact(4)

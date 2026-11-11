@@ -58,9 +58,9 @@ fn sign_in_key(a: &crate::model::Account) -> u64 {
 
 fn day_label(d: NaiveDate, today: NaiveDate) -> String {
     match (today - d).num_days() {
-        0 => "Dziś".into(),
-        1 => "Wczoraj".into(),
-        _ => format!("{} {}", pl::wd_full(d), d.format("%d-%m-%Y")),
+        0 => t!("misc.chat_ui.today").into_owned(),
+        1 => t!("misc.chat_ui.yesterday").into_owned(),
+        _ => format!("{} {}", i18n::wd_full(d), i18n::date(d)),
     }
 }
 
@@ -167,7 +167,7 @@ impl MailApp {
             self.chat.link = None;
             self.chat.busy = false;
             self.chat.stopped_at = Some(self.clock());
-            self.chat.error = Some("czat przestał działać — spróbuję ponownie za minutę (szczegóły: ☰ → Diagnostyka)".into());
+            self.chat.error = Some(t!("misc.chat_ui.stopped").into_owned());
             self.chat_all_unsent();
         }
 
@@ -270,17 +270,10 @@ impl MailApp {
         let Some(n) = notes.last() else { return };
         crate::notify::sound();
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
-        let k = notes.len();
-        let head = if k == 1 {
-            "Nowa wiadomość na czacie".to_string()
-        } else if (2..=4).contains(&(k % 10)) && !(12..=14).contains(&(k % 100)) {
-            format!("{k} nowe wiadomości na czacie")
-        } else {
-            format!("{k} nowych wiadomości na czacie")
-        };
+        let head = i18n::plural("misc.chat_ui.new_messages", notes.len());
         let who = if n.who.is_empty() { n.title.clone() } else { n.who.clone() };
         let from = if n.title.is_empty() || n.title == who { who.clone() } else { format!("{who} · {}", n.title) };
-        let subject = if n.text.is_empty() { "(plik)".to_string() } else { n.text.lines().next().unwrap_or("").chars().take(140).collect() };
+        let subject = if n.text.is_empty() { t!("misc.chat_ui.file_subject").into_owned() } else { n.text.lines().next().unwrap_or("").chars().take(140).collect() };
         let [r, g, b, _] = crate::theme::avatar_color(&who).to_array();
         crate::popup::show(
             crate::popup::Note { head, from, subject, dark: self.prefs.dark, logo: None, initials: crate::model::initials(&who), color: (r as u32) << 16 | (g as u32) << 8 | b as u32 },
@@ -300,7 +293,7 @@ impl MailApp {
     /// The worker went away with texts still on their way: they stay on screen as failed.
     fn chat_all_unsent(&mut self) {
         for o in self.chat.outgoing.iter_mut().filter(|o| o.failed.is_none()) {
-            o.failed = Some("mogło nie zostać wysłane (czat się rozłączył) — sprawdź w Google Chat, zanim wyślesz ponownie".into());
+            o.failed = Some(t!("misc.chat_ui.maybe_unsent").into_owned());
         }
     }
 
@@ -317,7 +310,7 @@ impl MailApp {
         let o = &self.chat.outgoing[i];
         let cmd = Cmd::Send { space: o.space.clone(), text: o.msg.text.clone(), id: o.id.clone() };
         let sent = self.chat.link.as_ref().is_some_and(|(tx, _)| tx.send(cmd).is_ok());
-        self.chat.outgoing[i].failed = if sent { None } else { Some("czat nie jest teraz połączony z Google".into()) };
+        self.chat.outgoing[i].failed = if sent { None } else { Some(t!("misc.chat_ui.not_connected").into_owned()) };
     }
 
     pub(super) fn chat_open(&mut self, name: String) {
@@ -345,7 +338,7 @@ impl MailApp {
         self.signing_in = true;
         self.sign_in_error = None;
         net::google_sign_in_chat(a.oauth_client_id.clone(), a.oauth_client_secret.clone(), a.email.clone(), self.tx.clone(), self.ctx.clone());
-        self.set_status("Otwieram stronę logowania Google w przeglądarce…");
+        self.set_status(t!("misc.chat_ui.opening_login").into_owned());
     }
 
     fn chat_send(&mut self, space: &str) {
@@ -363,7 +356,7 @@ impl MailApp {
             return;
         }
         let sent = self.chat.link.as_ref().is_some_and(|(tx, _)| tx.send(Cmd::Send { space: space.to_string(), text, id: id.clone() }).is_ok());
-        let failed = (!sent).then(|| "czat nie jest teraz połączony z Google".to_string());
+        let failed = (!sent).then(|| t!("misc.chat_ui.not_connected").into_owned());
         self.chat.outgoing.push(Outgoing { id, space: space.to_string(), msg: m, failed });
     }
 
@@ -374,12 +367,12 @@ impl MailApp {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(RichText::new("Czat").font(semibold(18.0)).color(TEXT()));
+            ui.label(RichText::new(t!("misc.chat_ui.title")).font(semibold(18.0)).color(TEXT()));
         });
         ui.add_space(6.0);
         if !self.chat_ready() {
             Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
-                ui.add(egui::Label::new(RichText::new("Czat Google czeka na włączenie — instrukcja po prawej.").small().color(MUTED())).wrap());
+                ui.add(egui::Label::new(RichText::new(t!("misc.chat_ui.waiting")).small().color(MUTED())).wrap());
             });
             return;
         }
@@ -389,7 +382,7 @@ impl MailApp {
         if self.chat.rows.is_empty() {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                let t = if self.chat.synced.is_none() { "Pobieranie rozmów…" } else { "Brak rozmów" };
+                let t = if self.chat.synced.is_none() { t!("misc.chat_ui.loading_rows") } else { t!("misc.chat_ui.no_rows") };
                 ui.label(RichText::new(t).color(MUTED()));
             });
         }
@@ -422,16 +415,16 @@ impl MailApp {
                     count_badge(p, Pos2::new(r.right() - 22.0, r.top() + 37.0), row.unread);
                 }
             }
-            let resp = if row.external { resp.on_hover_text("Rozmowa z osobami spoza Twojej organizacji") } else { resp };
+            let resp = if row.external { resp.on_hover_text(t!("misc.chat_ui.external_hover")) } else { resp };
             if resp.clicked() {
                 clicked = Some(row.name.clone());
             }
             resp.context_menu(|ui| {
-                if ui.button("Oznacz jako przeczytaną").clicked() {
+                if ui.button(t!("misc.chat_ui.mark_read")).clicked() {
                     read = Some(row.name.clone());
                     ui.close();
                 }
-                if !row.uri.is_empty() && ui.button("Otwórz w Google Chat ↗").clicked() {
+                if !row.uri.is_empty() && ui.button(t!("misc.chat_ui.open_in_chat")).clicked() {
                     crate::oauth::open_url(&row.uri);
                     ui.close();
                 }
@@ -448,11 +441,11 @@ impl MailApp {
             if let Some(e) = &self.chat.error {
                 ui.add(egui::Label::new(RichText::new(e).small().color(FLAG)).wrap());
             } else if self.chat.busy {
-                ui.label(RichText::new("⟳ synchronizacja z Google Chat…").small().color(MUTED()));
+                ui.label(RichText::new(t!("misc.chat_ui.syncing")).small().color(MUTED()));
             } else if let Some(t) = &self.chat.synced {
-                ui.label(RichText::new(format!("zaktualizowano o {t}")).small().color(MUTED()));
+                ui.label(RichText::new(t!("misc.chat_ui.updated", time = t)).small().color(MUTED()));
             }
-            if !self.chat.demo && ui.link(RichText::new("Odśwież teraz").small()).clicked() {
+            if !self.chat.demo && ui.link(RichText::new(t!("misc.chat_ui.refresh")).small()).clicked() {
                 self.chat_refresh();
             }
         });
@@ -466,7 +459,7 @@ impl MailApp {
         }
         let Some(open) = self.chat.open.clone() else {
             ui.add_space(40.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new("Wybierz rozmowę z listy po lewej.").color(MUTED())));
+            ui.vertical_centered(|ui| ui.label(RichText::new(t!("misc.chat_ui.pick")).color(MUTED())));
             return;
         };
         let row = self.chat.rows.iter().find(|r| r.name == open).cloned().unwrap_or_default();
@@ -475,13 +468,13 @@ impl MailApp {
             // inside a row, so the centred layout keeps the row's height
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if !row.uri.is_empty() && ui.small_button("Otwórz w Google Chat ↗").clicked() {
+                    if !row.uri.is_empty() && ui.small_button(t!("misc.chat_ui.open_in_chat")).clicked() {
                         crate::oauth::open_url(&row.uri);
                     }
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.add(egui::Label::new(RichText::new(&row.title).font(semibold(17.0)).color(TEXT())).truncate());
                         if row.external {
-                            ui.add(egui::Label::new(RichText::new("spoza organizacji").small().color(MUTED())).truncate());
+                            ui.add(egui::Label::new(RichText::new(t!("misc.chat_ui.external_tag")).small().color(MUTED())).truncate());
                         }
                     });
                 });
@@ -502,7 +495,7 @@ impl MailApp {
         let out: Vec<Outgoing> = self.chat.outgoing.iter().filter(|o| o.space == open).cloned().collect();
         if msgs.is_empty() && out.is_empty() {
             ui.add_space(30.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new(if self.chat.busy { "Pobieranie wiadomości…" } else { "Brak wiadomości" }).color(MUTED())));
+            ui.vertical_centered(|ui| ui.label(RichText::new(if self.chat.busy { t!("misc.chat_ui.loading_msgs") } else { t!("misc.chat_ui.no_msgs") }).color(MUTED())));
             return;
         }
         let maxw = (ui.available_width() * 0.72).clamp(160.0, 640.0);
@@ -581,27 +574,27 @@ impl MailApp {
                                 ui.add(egui::Label::new(RichText::new(&m.text).color(if o.is_some() { MUTED() } else { TEXT() })).wrap().selectable(true));
                             }
                             for (name, link) in &m.files {
-                                if ui.link(format!("{} {name}", ic::ATTACH)).on_hover_text("Otwórz w przeglądarce").clicked() {
+                                if ui.link(format!("{} {name}", ic::ATTACH)).on_hover_text(t!("misc.chat_ui.open_browser")).clicked() {
                                     crate::oauth::open_url(if link.is_empty() { uri } else { link });
                                 }
                             }
                             if m.edited && o.is_none() {
-                                ui.label(RichText::new("edytowano").size(11.0).color(MUTED()));
+                                ui.label(RichText::new(t!("misc.chat_ui.edited")).size(11.0).color(MUTED()));
                             }
                             match o.map(|o| (o, o.failed.as_deref())) {
                                 Some((_, None)) => {
-                                    ui.label(RichText::new("wysyłanie…").size(11.0).color(MUTED()));
+                                    ui.label(RichText::new(t!("misc.chat_ui.sending")).size(11.0).color(MUTED()));
                                 }
                                 Some((o, Some(e))) => {
-                                    ui.add(egui::Label::new(RichText::new(format!("Nie wysłano: {e}")).size(11.0).color(FLAG)).wrap());
+                                    ui.add(egui::Label::new(RichText::new(t!("misc.chat_ui.not_sent", error = e)).size(11.0).color(FLAG)).wrap());
                                     ui.horizontal_wrapped(|ui| {
-                                        if ui.link(RichText::new("Wyślij ponownie").size(11.0)).clicked() {
+                                        if ui.link(RichText::new(t!("misc.chat_ui.resend")).size(11.0)).clicked() {
                                             retry = Some((o.id.clone(), false));
                                         }
-                                        if ui.link(RichText::new("Edytuj").size(11.0)).clicked() {
+                                        if ui.link(RichText::new(t!("misc.chat_ui.edit")).size(11.0)).clicked() {
                                             retry = Some((o.id.clone(), true));
                                         }
-                                        if e.contains("aplikacji Chat") && ui.link(RichText::new("Skonfiguruj aplikację Chat ↗").size(11.0)).clicked() {
+                                        if crate::chat::needs_app_setup(e) && ui.link(RichText::new(t!("misc.chat_ui.configure_app")).size(11.0)).clicked() {
                                             crate::oauth::open_url(crate::chat::CONFIGURE_URL);
                                         }
                                     });
@@ -626,11 +619,11 @@ impl MailApp {
     fn chat_compose(&mut self, ui: &mut Ui, space: &str, uri: &str) {
         if !self.chat.demo && !crate::chat::can_send(&self.store.account) {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Wysyłanie wymaga jeszcze zgody w Google.").color(MUTED()));
-                if ui.add_enabled(!self.signing_in, egui::Link::new("Zezwól — logowanie Google")).clicked() {
+                ui.label(RichText::new(t!("misc.chat_ui.needs_consent")).color(MUTED()));
+                if ui.add_enabled(!self.signing_in, egui::Link::new(t!("misc.chat_ui.allow"))).clicked() {
                     self.chat_sign_in();
                 }
-                if !uri.is_empty() && ui.link("Odpisz w Google Chat ↗").clicked() {
+                if !uri.is_empty() && ui.link(t!("misc.chat_ui.reply_in_chat")).clicked() {
                     crate::oauth::open_url(uri);
                 }
             });
@@ -653,11 +646,11 @@ impl MailApp {
             egui::ScrollArea::vertical().id_salt(("chat-draft", space)).max_height(120.0).show(ui, |ui| {
                 // a blinking cursor would redraw the whole conversation twice a second
                 ui.visuals_mut().text_cursor.blink = false;
-                ui.add(egui::TextEdit::multiline(draft).id(edit_id).desired_rows(2).desired_width(w).margin(Margin::same(6)).hint_text("Napisz wiadomość — Enter wysyła, Shift+Enter nowy wiersz"));
+                ui.add(egui::TextEdit::multiline(draft).id(edit_id).desired_rows(2).desired_width(w).margin(Margin::same(6)).hint_text(t!("misc.chat_ui.hint")));
             });
             let empty = draft.trim().is_empty();
             let btn = egui::Button::new(RichText::new(ic::SEND).size(17.0).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(38.0, 38.0));
-            if ui.add_enabled(!empty, btn).on_hover_text("Wyślij (Enter)").clicked() {
+            if ui.add_enabled(!empty, btn).on_hover_text(t!("misc.chat_ui.send_hover")).clicked() {
                 send = true;
             }
         });
@@ -673,41 +666,41 @@ impl MailApp {
     fn chat_setup(&mut self, ui: &mut Ui) {
         let a = self.store.account.clone();
         ui.set_max_width(620.0);
-        ui.label(RichText::new("Czat Google").font(semibold(20.0)).color(TEXT()));
+        ui.label(RichText::new(t!("misc.chat_ui.setup_title")).font(semibold(20.0)).color(TEXT()));
         ui.add_space(6.0);
-        ui.add(egui::Label::new(RichText::new(format!("Konto {} należy do Google Workspace ({}), więc rozmowy z Google Chat — także z osobami z innych firm — mogą być tutaj, obok poczty.", a.email, a.google_hd.clone().unwrap_or_default())).color(TEXT2())).wrap());
+        ui.add(egui::Label::new(RichText::new(t!("misc.chat_ui.setup_intro", email = a.email, domain = a.google_hd.clone().unwrap_or_default())).color(TEXT2())).wrap());
         ui.add_space(12.0);
-        ui.label(RichText::new("Jednorazowo, w Twoim projekcie Google Cloud (tym od logowania poczty):").strong());
+        ui.label(RichText::new(t!("misc.chat_ui.setup_once")).strong());
         ui.add_space(6.0);
-        if ui.button("1. Włącz Google Chat API ↗").clicked() {
+        if ui.button(t!("misc.chat_ui.step1")).clicked() {
             crate::oauth::open_url(crate::chat::ENABLE_API_URL);
         }
         ui.add_space(6.0);
-        if ui.button("2. Skonfiguruj aplikację Chat (potrzebne do wysyłania) ↗").clicked() {
+        if ui.button(t!("misc.chat_ui.step2")).clicked() {
             crate::oauth::open_url(crate::chat::CONFIGURE_URL);
         }
         ui.add(
             egui::Label::new(
-                RichText::new("Wpisz nazwę aplikacji (np. „Poczta” — Google pokazuje ją przy wysłanych wiadomościach), adres ikony (np. https://developers.google.com/chat/images/quickstart-app-avatar.png) i krótki opis. „Funkcje interaktywne” zostaw wyłączone i zapisz.")
+                RichText::new(t!("misc.chat_ui.step2_note"))
                     .small()
                     .color(MUTED()),
             )
             .wrap(),
         );
         ui.add_space(10.0);
-        let btn = egui::Button::new(RichText::new("3. Zezwól na czat — logowanie Google").color(Color32::WHITE)).fill(ACCENT());
+        let btn = egui::Button::new(RichText::new(t!("misc.chat_ui.step3")).color(Color32::WHITE)).fill(ACCENT());
         if ui.add_enabled(!self.signing_in, btn).clicked() {
             self.chat_sign_in();
         }
         if self.signing_in {
-            ui.label(RichText::new("dokończ logowanie w przeglądarce…").small().color(MUTED()));
+            ui.label(RichText::new(t!("misc.chat_ui.finish_login")).small().color(MUTED()));
         }
-        ui.add(egui::Label::new(RichText::new(format!("Wybierz konto {} i zaznacz wszystkie pola zgody (czat, wiadomości, stan przeczytania).", a.email)).small().color(MUTED())).wrap());
+        ui.add(egui::Label::new(RichText::new(t!("misc.chat_ui.pick_account", email = a.email)).small().color(MUTED())).wrap());
         if let Some(e) = &self.sign_in_error {
             ui.add_space(4.0);
             ui.add(egui::Label::new(RichText::new(e).color(FLAG)).wrap());
         }
         ui.add_space(14.0);
-        ui.label(RichText::new("Nie potrzebujesz czatu? Ukryjesz go w ☰ → Kalendarz i kontakty Google.").small().color(MUTED()));
+        ui.label(RichText::new(t!("misc.chat_ui.hide_hint")).small().color(MUTED()));
     }
 }

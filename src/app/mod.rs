@@ -1,7 +1,7 @@
 use crate::calendar::{self, CalAction, CalView, EditorResult, EventEditor};
 use crate::model::{split_address, Event, Folder, Message, Store};
 use crate::net::{self, NetResult, Outgoing};
-use crate::pl;
+use crate::i18n;
 use crate::html;
 use crate::theme::*;
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime};
@@ -83,6 +83,13 @@ struct Prefs {
     google_contacts: bool,
     /// Google Chat in the app (Google Workspace accounts)
     google_chat: bool,
+    /// the interface language ("en" or "pl"); settings saved before it existed were Polish
+    #[serde(default = "lang_before_choice")]
+    lang: String,
+}
+
+fn lang_before_choice() -> String {
+    "pl".into()
 }
 
 impl Default for Prefs {
@@ -107,6 +114,7 @@ impl Default for Prefs {
             google_calendar: true,
             google_contacts: true,
             google_chat: true,
+            lang: "en".into(),
         }
     }
 }
@@ -425,6 +433,9 @@ impl MailApp {
     pub fn new(cc: &eframe::CreationContext<'_>, shot: Option<PathBuf>, preload: Option<Loading>) -> Self {
         // search runs in normal use (and in the search test); not while taking the check picture
         let search_on = (shot.is_none() || std::env::var("POCZTA_SEARCH_TEST").is_ok()) && std::env::var("POCZTA_NO_SEARCH").is_err();
+        // the language first: the tray menu and every text after it are drawn in it
+        let saved = if shot.is_none() { cc.storage.and_then(|s| eframe::get_value::<Prefs>(s, "prefs")) } else { None };
+        crate::i18n::set(&saved.as_ref().map(|p| p.lang.clone()).or_else(|| std::env::var("POCZTA_LANG").ok()).unwrap_or_default());
         let t = std::time::Instant::now();
         apply(&cc.egui_ctx);
         crate::diag::took("startup: fonts and colours", t, "");
@@ -618,7 +629,7 @@ impl MailApp {
         cc.egui_ctx.memory_mut(|mem| mem.data.clear());
         // The layout the person left the app in last time.
         if app.shot.is_none() {
-            if let Some(p) = cc.storage.and_then(|s| eframe::get_value::<Prefs>(s, "prefs")) {
+            if let Some(p) = saved {
                 app.tags_open = p.tags_open;
                 app.account_expanded = p.account_expanded;
                 app.show_side = p.show_side;
@@ -996,6 +1007,19 @@ tel.: 600-100-200".into();
         self.ctx.request_repaint();
     }
 
+    /// Switches the interface language at once (remembered for next time).
+    fn set_lang(&mut self, lang: &str) {
+        self.prefs.lang = lang.into();
+        crate::i18n::set(lang);
+        if let Some(t) = &self._tray {
+            t.set_menu(Some(Box::new(tray_menu())));
+        }
+        // the tray tooltip, in the new language
+        self.badge_shown = None;
+        self.save_now = true;
+        self.ctx.request_repaint();
+    }
+
     /// Ends the app for good (from the tray icon or the menu).
     fn quit(&mut self) {
         self.quitting = true;
@@ -1195,7 +1219,7 @@ impl eframe::App for MailApp {
                 .show(ui, |ui| {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
-                        if fold_button(ui, false).on_hover_text("Pokaż kalendarz").clicked() {
+                        if fold_button(ui, false).on_hover_text(t!("core.app.show_calendar")).clicked() {
                             self.show_side = true;
                             self.save_now = true;
                         }
@@ -1205,7 +1229,7 @@ impl eframe::App for MailApp {
                             ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
                         }
                         ui.painter().text(r.center(), Align2::CENTER_CENTER, "📅", FontId::proportional(17.0), MUTED());
-                        if resp.on_hover_text("Pokaż kalendarz").clicked() {
+                        if resp.on_hover_text(t!("core.app.show_calendar")).clicked() {
                             self.show_side = true;
                             self.save_now = true;
                         }
@@ -1249,11 +1273,11 @@ impl eframe::App for MailApp {
                     .show(ui, |ui| {
                         let today = Local::now().date_naive();
                         let title = match self.cal_view {
-                            CalView::Month => pl::month_year(self.cal_day),
+                            CalView::Month => i18n::month_year(self.cal_day),
                             CalView::Week => {
                                 let s = calendar::week_start(self.cal_day);
                                 let e = s + Duration::days(6);
-                                format!("{} – {} {}", pl::day_month(s), pl::day_month(e), e.year())
+                                format!("{} – {} {}", i18n::day_month(s), i18n::day_month(e), e.year())
                             }
                         };
                         ui.label(RichText::new(title).font(semibold(18.0)).color(TEXT()));
@@ -1430,7 +1454,7 @@ impl eframe::App for MailApp {
             static SHOWN: AtomicBool = AtomicBool::new(false);
             if !SHOWN.swap(true, Ordering::Relaxed) {
                 // test picture: the note after copying a link
-                self.flash("Link dla AI skopiowany do schowka — wklej go agentowi (działa w Twojej sieci Tailscale przez 7 dni)");
+                self.flash(&t!("ui.settings.ai_link_copied"));
             }
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("htmlfirst") && self.loading.is_none() && self.clock() > 6.0 {
@@ -1641,5 +1665,20 @@ impl Drop for FrameTimer {
             NOTED.store(now, Ordering::Relaxed);
             crate::diag::log(format!("slow screen redraw: {ms} ms"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Settings saved before the language choice existed keep the Polish interface; a fresh
+    /// install starts in English.
+    #[test]
+    fn language_of_old_and_new_settings() {
+        let old: super::Prefs = ron::from_str("(nav_width: 250.0, dark: true, notify: false)").unwrap();
+        assert_eq!(old.lang, "pl");
+        assert!(old.dark);
+        assert_eq!(super::Prefs::default().lang, "en");
+        let saved = ron::to_string(&super::Prefs { lang: "en".into(), ..Default::default() }).unwrap();
+        assert_eq!(ron::from_str::<super::Prefs>(&saved).unwrap().lang, "en");
     }
 }

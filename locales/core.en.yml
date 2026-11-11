@@ -1,0 +1,55 @@
+core:
+  app:
+    show_calendar: "Show calendar"
+  sync:
+    already_open: "Poczta is already open in another window — close this window"
+    ai_draft: "AI prepared a draft reply — you'll find it in Drafts"
+    toast_head:
+      one: "New message"
+      other: "%{n} new messages"
+    no_subject: "(no subject)"
+    configure_first: "Set up an account first"
+    sign_in_google_to_connect: "Sign in with Google to connect"
+    enter_password_to_connect: "Enter your password (for Gmail: an app password) to connect"
+    new_messages:
+      one: "%{n} new message"
+      other: "%{n} new messages"
+    up_to_date: "All up to date"
+    sent: "Message sent"
+    failed: "%{what} failed: %{error}"
+    what_sending: "Sending"
+    what_saving: "Saving changes to the server"
+    what_receiving: "Receiving"
+    stays_in_outbox: " (stays in Outbox)"
+    signed_in: "Signed in with Google as %{who}"
+    sign_in_failed: "Google sign-in failed: %{e}"
+  net:
+    unexpected_sync: "unexpected error during sync"
+    unexpected: "unexpected error"
+    wrong_google_account: "a different Google account (%{got}) than the mail account (%{email}) was chosen in the browser — sign in with %{email}"
+    google_access_unchecked: "mail access was unchecked on the Google page — sign in again and leave all boxes checked"
+    message_gone: "the message is no longer on the server"
+    folder_missing: "folder not found on the server"
+    empty_reply: "empty reply from the server"
+    unreadable_message: "could not read the message"
+    download_interrupted: "download interrupted"
+    no_address: "no address"
+    your_address: "Your address: %{e}"
+    add_recipient: "Add at least one recipient."
+    attachment_unreadable: "Can't read attachment %{file}: %{e}"
+    changes_not_saved:
+      one: "%{n} change was not saved on the server"
+      other: "%{n} changes were not saved on the server"
+    server_closed: "the server closed the connection"
+  notify:
+    no_unread: "no unread"
+    unread:
+      one: "%{n} unread"
+      other: "%{n} unread"
+  update:
+    local_build: "local"
+  autostart:
+    unknown_path: "can't find the program's path"
+    registry_write: "registry write: error %{code}"
+    registry_delete: "registry removal: error %{code}"
+    windows_only: "Windows only"

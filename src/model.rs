@@ -23,16 +23,25 @@ impl Folder {
         Folder::Trash,
     ];
 
+    /// The folder's name in the interface language. Read once per language and kept (7 × 2 short
+    /// strings), so callers keep getting a `&'static str`.
     pub fn name(self) -> &'static str {
-        match self {
-            Folder::Inbox => "Skrzynka odbiorcza",
-            Folder::Drafts => "Szkice",
-            Folder::Outbox => "Skrzynka nadawcza",
-            Folder::Sent => "Wysłane",
-            Folder::Archive => "Archiwum",
-            Folder::Junk => "Spam",
-            Folder::Trash => "Kosz",
-        }
+        static NAMES: std::sync::OnceLock<[[&'static str; 7]; 2]> = std::sync::OnceLock::new();
+        let names = NAMES.get_or_init(|| {
+            let keep = |s: std::borrow::Cow<str>| -> &'static str { Box::leak(s.into_owned().into_boxed_str()) };
+            ["en", "pl"].map(|l| {
+                [
+                    keep(t!("misc.model.inbox", locale = l)),
+                    keep(t!("misc.model.drafts", locale = l)),
+                    keep(t!("misc.model.outbox", locale = l)),
+                    keep(t!("misc.model.sent", locale = l)),
+                    keep(t!("misc.model.archive", locale = l)),
+                    keep(t!("misc.model.junk", locale = l)),
+                    keep(t!("misc.model.trash", locale = l)),
+                ]
+            })
+        });
+        names[crate::i18n::is_pl() as usize][self as usize]
     }
 
     pub fn icon(self) -> &'static str {
