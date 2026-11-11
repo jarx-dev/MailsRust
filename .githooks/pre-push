@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# pre-push: clippy for the Windows target must pass and add no warnings (AGENTS.md, "Lint").
+# Tests run only on Windows, so CI runs them. Turn on once per clone (relative, so every
+# worktree runs its own copy): git config core.hooksPath ./.githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+max=42 # known warnings of the bin; lower it when you fix some
+export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-1.99.1} # egui 0.37 needs a newer rustc than older stables
+
+echo "[pre-push] cargo xwin clippy"
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+if ! cargo xwin clippy --release --locked --target x86_64-pc-windows-msvc --all-targets >"$log" 2>&1; then
+  tail -60 "$log"
+  echo "[pre-push] clippy nie przeszedł"
+  exit 1
+fi
+n=$(grep -oP '`mailclient` \(bin "mailclient"( test)?\) generated \K\d+' "$log" | sort -n | tail -1 || true)
+if (( ${n:-0} > max )); then
+  echo "[pre-push] ostrzeżeń clippy: $n, a dozwolone $max — usuń nowe ostrzeżenia"
+  exit 1
+fi
+echo "[pre-push] OK (ostrzeżeń clippy: ${n:-0}/$max)"
