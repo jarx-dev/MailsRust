@@ -14,7 +14,7 @@ Mail, calendar and contacts in one window · starts in a fraction of a second ·
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)
 ![MIT License](https://img.shields.io/badge/license-MIT-green)
 
-<img src="docs/screenshots/main.png" alt="Main window: folders, message list, an open message and the day's calendar">
+<img src="docs/screenshots/en/main.png" alt="Main window: folders, message list, an open message and the day's calendar">
 
 <sub>All screenshots show demo data (made-up people and messages).</sub>
 
@@ -50,13 +50,13 @@ background threads, so the interface never waits.
 - Search by meaning: a small multilingual language model (Model2Vec) runs locally and finds
   messages about the same thing, even when different words were used.
 
-<img src="docs/screenshots/search.png" alt="Search results with the searched word highlighted">
+<img src="docs/screenshots/en/search.png" alt="Search results with the searched word highlighted">
 
 **Calendar and contacts**
 - Month and week views, a day panel next to your mail, events from Google Calendar.
 - Contacts with groups, including ones collected from your correspondence ("Z poczty", i.e. "From mail").
 
-<img src="docs/screenshots/calendar.png" alt="Calendar: month view and day panel">
+<img src="docs/screenshots/en/calendar.png" alt="Calendar: month view and day panel">
 
 **AI (optional, bring your own key)**
 - "Fix with AI" in several styles, and translation of received messages into the interface language.
@@ -70,7 +70,7 @@ background threads, so the interface never waits.
 - Light and dark themes, a single icon set (Segoe Fluent), and a layout like classic mail
   clients: folders | list | message | calendar day.
 
-<img src="docs/screenshots/dark.png" alt="Dark theme">
+<img src="docs/screenshots/en/dark.png" alt="Dark theme">
 
 ## Performance
 
@@ -153,7 +153,7 @@ You can find the same in the program: ☰ menu → "About".
 
 If you find Poczta useful, you can [buy me a coffee](https://buymeacoffee.com/jarx) ☕
 
-<img src="docs/screenshots/about.png" width="640" alt="The About window">
+<img src="docs/screenshots/en/about.png" width="640" alt="The About window">
 
 ## License
 
