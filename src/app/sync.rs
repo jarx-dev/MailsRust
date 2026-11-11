@@ -908,7 +908,7 @@ specjalista ds. Informatyki".into();
                         a.email = r.email.clone();
                         a.username = r.email;
                     }
-                    if !r.name.is_empty() && (a.display_name.is_empty() || a.display_name == "Aleks Nowicki") {
+                    if !r.name.is_empty() && (a.display_name.is_empty() || ["Aleks Nowicki", "Alex Newman"].contains(&a.display_name.as_str())) {
                         a.display_name = r.name;
                     }
                     let who = a.email.clone();

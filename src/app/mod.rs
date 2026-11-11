@@ -891,7 +891,7 @@ tel.: 600-100-200".into();
             }
         }
         if std::env::var("POCZTA_LOGO_TEST").is_ok() {
-            for (who, addr) in [("Zespół rozliczeń", "rozliczenia@wikipedia.org"), ("Dział IT", "it@mozilla.org")] {
+            for (who, addr) in [("Zespół rozliczeń", "rozliczenia@wikipedia.org"), ("Dział IT", "it@mozilla.org"), ("Billing team", "billing@wikipedia.org"), ("IT department", "it@mozilla.org")] {
                 if let Some(m) = app.store.messages.iter_mut().find(|m| m.from_name == who) {
                     m.from_addr = addr.into();
                 }

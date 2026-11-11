@@ -981,23 +981,27 @@ pub fn sample() -> (Vec<Row>, Vec<Msg>) {
     let t = now();
     let min = 60_000_000i64;
     let me = "users/me";
+    // in the interface language: (Polish, English)
+    let pl = crate::i18n::is_pl();
+    let l = |p: &'static str, e: &'static str| if pl { p } else { e };
+    let (anna, aleks) = (l("Anna Kowalska", "Emma Clarke"), l("Aleks Nowicki", "Alex Newman"));
     let m = |who: &str, sender: &str, ago: i64, text: &str| Msg { name: format!("m{ago}"), sender: sender.into(), who: who.into(), at: t - ago * min, edited: false, text: text.into(), files: vec![] };
     let mut msgs = vec![
-        m("Anna Kowalska", "users/anna", 1500, "Dzień dobry! Czy mogę prosić o wycenę modułu raportów?"),
-        m("Aleks Nowicki", me, 1490, "Dzień dobry, jasne — wyślę ją jutro rano."),
-        m("Anna Kowalska", "users/anna", 70, "Dziękuję za wycenę. Mamy jeszcze pytanie o termin wdrożenia."),
-        m("Anna Kowalska", "users/anna", 69, "Czy start w grudniu jest realny?"),
-        m("Aleks Nowicki", me, 40, "Tak, grudzień jest realny, jeśli akceptacja przyjdzie do piątku."),
-        m("Anna Kowalska", "users/anna", 3, "Świetnie, potwierdzę do piątku."),
+        m(anna, "users/anna", 1500, l("Dzień dobry! Czy mogę prosić o wycenę modułu raportów?", "Hello! Could I get a quote for the reports module?")),
+        m(aleks, me, 1490, l("Dzień dobry, jasne — wyślę ją jutro rano.", "Hello, sure — I'll send it tomorrow morning.")),
+        m(anna, "users/anna", 70, l("Dziękuję za wycenę. Mamy jeszcze pytanie o termin wdrożenia.", "Thanks for the quote. We have one more question about the rollout date.")),
+        m(anna, "users/anna", 69, l("Czy start w grudniu jest realny?", "Is a December start realistic?")),
+        m(aleks, me, 40, l("Tak, grudzień jest realny, jeśli akceptacja przyjdzie do piątku.", "Yes, December works if we get approval by Friday.")),
+        m(anna, "users/anna", 3, l("Świetnie, potwierdzę do piątku.", "Great, I'll confirm by Friday.")),
     ];
-    msgs[2].files = vec![("wycena-raporty.pdf".into(), String::new())];
+    msgs[2].files = vec![(l("wycena-raporty.pdf", "quote-reports.pdf").into(), String::new())];
     let row = |name: &str, title: &str, kind: &str, external: bool, ago: i64, last: &str, unread: usize| Row { name: name.into(), title: title.into(), kind: kind.into(), external, active: t - ago * min, last: last.into(), unread, uri: String::new() };
     let rows = vec![
-        row("spaces/a", "Anna Kowalska", "DIRECT_MESSAGE", true, 3, "Świetnie, potwierdzę do piątku.", 1),
-        row("spaces/b", "Piotr Nowak", "DIRECT_MESSAGE", false, 95, "Ty: Wrzuciłem poprawkę na serwer testowy", 0),
-        row("spaces/c", "Zespół wdrożeń", "SPACE", false, 260, "Marta: Jutro przegląd o 10:00", 3),
-        row("spaces/d", "Ewa Lewandowska, Tomasz Zieliński", "GROUP_CHAT", true, 2900, "Tomasz: Dzięki, wszystko działa", 0),
-        row("spaces/e", "Kamil Wójcik", "DIRECT_MESSAGE", true, 9000, &format!("{} umowa-ramowa.docx", crate::theme::ic::ATTACH), 0),
+        row("spaces/a", anna, "DIRECT_MESSAGE", true, 3, l("Świetnie, potwierdzę do piątku.", "Great, I'll confirm by Friday."), 1),
+        row("spaces/b", l("Piotr Nowak", "Paul Turner"), "DIRECT_MESSAGE", false, 95, l("Ty: Wrzuciłem poprawkę na serwer testowy", "You: I pushed the fix to the test server"), 0),
+        row("spaces/c", l("Zespół wdrożeń", "Rollout team"), "SPACE", false, 260, l("Marta: Jutro przegląd o 10:00", "Martha: Review tomorrow at 10:00"), 3),
+        row("spaces/d", l("Ewa Lewandowska, Tomasz Zieliński", "Eva Lewis, Thomas Green"), "GROUP_CHAT", true, 2900, l("Tomasz: Dzięki, wszystko działa", "Thomas: Thanks, everything works"), 0),
+        row("spaces/e", l("Kamil Wójcik", "Kevin Walsh"), "DIRECT_MESSAGE", true, 9000, &format!("{} {}", crate::theme::ic::ATTACH, l("umowa-ramowa.docx", "framework-agreement.docx")), 0),
     ];
     (rows, msgs)
 }
