@@ -158,7 +158,7 @@ pub fn path() -> std::path::PathBuf {
 fn open_db(gen: u64) -> Result<(), String> {
     let mut g = db();
     if GENERATION.load(Ordering::SeqCst) != gen {
-        return Err("czat zatrzymany".into());
+        return Err(t!("misc.chat.stopped").into_owned());
     }
     if g.is_some() {
         return Ok(());
@@ -184,9 +184,9 @@ pub fn close() -> bool {
 fn load(gen: u64, owner: &str) -> Result<HashMap<String, Space>, String> {
     let g = db();
     if GENERATION.load(Ordering::SeqCst) != gen {
-        return Err("czat zatrzymany".into());
+        return Err(t!("misc.chat.stopped").into_owned());
     }
-    let d = g.as_ref().ok_or("baza czatu zamknięta")?;
+    let d = g.as_ref().ok_or_else(|| t!("misc.chat.db_closed").into_owned())?;
     let stored_owner = d.begin_read().ok().and_then(|r| r.open_table(META_T).ok()?.get("owner").ok()?.map(|v| v.value().to_string()));
     if stored_owner.as_deref() != Some(owner) {
         let w = d.begin_write().map_err(|e| e.to_string())?;
@@ -815,7 +815,7 @@ impl Worker {
         let behind = !s.filled || s.active > s.fetched_to;
         let http = self.agent()?;
         if behind {
-            let job = self.job(&name).ok_or("rozmowa zniknęła")?;
+            let job = self.job(&name).ok_or_else(|| t!("misc.chat.conversation_gone").into_owned())?;
             let got = download(&http, &self.acc, &self.me, &job);
             let got = self.check(got)?;
             let notes = self.apply(got);

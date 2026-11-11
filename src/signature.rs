@@ -68,7 +68,6 @@ fn own_lines(body: &str) -> Vec<String> {
             || lower.starts_with("from: ")
             || lower.starts_with("od: ")
             || lower.starts_with("wysłane z ")
-            || lower.starts_with("sent from ")
             || (lower.starts_with("w dniu ") && lower.ends_with(':'))
             || (lower.starts_with("dnia ") && lower.ends_with(':'))
             || (lower.starts_with("on ") && lower.ends_with("wrote:"));

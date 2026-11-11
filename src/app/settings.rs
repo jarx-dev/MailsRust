@@ -449,7 +449,7 @@ impl MailApp {
                 let mut ch = false;
                 let label = crate::ai::effort_label;
                 egui::ComboBox::from_id_salt(salt).selected_text(label(value.as_str())).width(200.0).show_ui(ui, |ui| {
-                    for (k, _) in crate::ai::EFFORTS {
+                    for k in crate::ai::EFFORTS {
                         if ui.selectable_label(value.as_str() == k, label(k)).clicked() {
                             *value = k.to_string();
                             ch = true;

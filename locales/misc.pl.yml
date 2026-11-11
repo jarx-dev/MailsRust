@@ -39,6 +39,9 @@ misc:
     responds: "%{model} odpowiada (%{secs} s)"
     translation_cut_off: "tłumaczenie zostało ucięte (bardzo długi fragment)"
   chat:
+    stopped: "czat zatrzymany"
+    db_closed: "baza czatu zamknięta"
+    conversation_gone: "rozmowa zniknęła"
     no_connection: "brak połączenia z Google"
     err_unauthorized: "Google nie przyjął logowania — zaloguj się ponownie przez Google"
     err_app_config: "wysyłanie wymaga skonfigurowania aplikacji Chat w Twoim projekcie Google Cloud (nazwa, ikona, opis) — zobacz instrukcję w module Czat"

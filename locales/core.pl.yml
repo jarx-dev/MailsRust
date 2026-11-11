@@ -40,9 +40,9 @@ core:
     add_recipient: "Dodaj co najmniej jednego odbiorcę."
     attachment_unreadable: "Nie można odczytać załącznika %{file}: %{e}"
     changes_not_saved:
-      one: "%{n} zmian nie zapisano na serwerze"
-      few: "%{n} zmian nie zapisano na serwerze"
-      many: "%{n} zmian nie zapisano na serwerze"
+      one: "%{n} zmiana nie została zapisana na serwerze"
+      few: "%{n} zmiany nie zostały zapisane na serwerze"
+      many: "%{n} zmian nie zostało zapisanych na serwerze"
     server_closed: "serwer zamknął połączenie"
   notify:
     no_unread: "brak nieprzeczytanych"

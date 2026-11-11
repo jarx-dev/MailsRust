@@ -737,7 +737,7 @@ window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,bloc
             let last = crate::ai::load().style;
             crate::ai::STYLES
                 .iter()
-                .map(|(k, _, _, _)| {
+                .map(|(k, _)| {
                     let tick = if *k == last { "✓" } else { "" };
                     format!("<div class=\"it\" data-s=\"{k}\"><span class=\"ck\">{tick}</span><span><span class=\"l\" style=\"display:block\">{}</span><span class=\"h\" style=\"display:block\">{}</span></span></div>", esc(&crate::ai::style_label(k)), esc(&crate::ai::style_hint(k)))
                 })

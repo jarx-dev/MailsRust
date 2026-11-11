@@ -679,7 +679,10 @@ impl MailApp {
         let title = if self.loading.is_some() {
             t!("mail.list.loading_mailbox").into_owned()
         } else if self.search.trim().is_empty() {
-            let name = if self.view == MailView::Label { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
+            let name = if self.view == MailView::Label && self.label_filter == FAVOURITES {
+                // the Gmail label keeps its Polish name; the heading follows the language
+                t!("ui.sidebar.favourites").into_owned()
+            } else if self.view == MailView::Label { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
             let unread = match self.view {
                 MailView::Folder(f) => self.counts().folder_unread.get(&f).copied().unwrap_or(0),
                 _ => vis.unread,

@@ -327,8 +327,10 @@ impl MailApp {
                     let text = m.body.clone();
                     let (tx, rx) = channel();
                     let ctx = self.ctx.clone();
+                    // the language when asked: every part goes into it (a switch meanwhile drops the job, see set_lang)
+                    let pl = crate::i18n::is_pl();
                     std::thread::spawn(move || {
-                        let _ = tx.send(crate::translate::translate_email(&crate::ai::load(), html, &text));
+                        let _ = tx.send(crate::translate::translate_email(&crate::ai::load(), html, &text, pl));
                         ctx.request_repaint();
                     });
                     self.translating.insert(id, rx);

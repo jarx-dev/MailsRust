@@ -143,7 +143,13 @@ mod tests {
     fn every_used_key_exists() {
         let en = keys("en");
         let mut missing = vec![];
-        let mut stack = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        let src = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        // the test EXE copied to another machine has no sources to read (CI runs it on the checkout)
+        if !src.is_dir() {
+            eprintln!("every_used_key_exists: no sources at {}, skipped", src.display());
+            return;
+        }
+        let mut stack = vec![src];
         while let Some(p) = stack.pop() {
             if p.is_dir() {
                 stack.extend(std::fs::read_dir(&p).unwrap().map(|e| e.unwrap().path()));

@@ -90,9 +90,9 @@ pub fn text_page(text: &str) -> String {
     format!("<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:#222\">{paras}</body></html>")
 }
 
-/// The whole email translated: its page (formatted) or its text, into a page in the cache.
+/// The whole email translated (into Polish when `pl`, else English): its page (formatted) or its text, into a page in the cache.
 /// Pieces go to the model in parts of a few thousand characters, several parts at a time.
-pub fn translate_email(settings: &crate::ai::Settings, html: Option<String>, text: &str) -> Result<String, String> {
+pub fn translate_email(settings: &crate::ai::Settings, html: Option<String>, text: &str, pl: bool) -> Result<String, String> {
     let page = html.unwrap_or_else(|| text_page(text));
     let found = pieces(&page);
     if found.is_empty() {
@@ -116,7 +116,7 @@ pub fn translate_email(settings: &crate::ai::Settings, html: Option<String>, tex
         let mut out = Vec::new();
         // up to eight parts at a time
         for chunk in parts.chunks(8) {
-            let handles: Vec<_> = chunk.iter().map(|r| sc.spawn(|| crate::ai::translate_texts(settings, &texts[r.clone()]))).collect();
+            let handles: Vec<_> = chunk.iter().map(|r| sc.spawn(|| crate::ai::translate_texts(settings, &texts[r.clone()], pl))).collect();
             for h in handles {
                 out.push(h.join().unwrap_or_else(|_| Err(t!("cal.translate.unexpected").into_owned())));
             }

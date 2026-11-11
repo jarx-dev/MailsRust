@@ -742,7 +742,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                                                 h.contains("<h2"),
                                                 h.contains("<strong>gotowe"),
                                                 h.contains("Nowicki"),
-                                                h.contains("Wiadomość oryginalna")
+                                                h.contains("pz-quote-head")
                                             ));
                                         }
                                         if std::env::var("POCZTA_FOCUS_LOG").is_ok() && text.contains("XYZQ") {

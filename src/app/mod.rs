@@ -556,7 +556,8 @@ impl MailApp {
             quiet_sync: false,
             last_sync: -1.0,
             copies_asked: false,
-            prefs: Prefs::default(),
+            // (the language just set, so the menu shows it also when it came from POCZTA_LANG)
+            prefs: Prefs { lang: rust_i18n::locale().to_string(), ..Prefs::default() },
             finder: crate::finder::Finder::new(search_on),
             db,
             fetching_full: Default::default(),
@@ -1016,6 +1017,15 @@ tel.: 600-100-200".into();
         }
         // the tray tooltip, in the new language
         self.badge_shown = None;
+        // AI translations went into the old language: forgotten, and jobs still running are
+        // dropped (their results have nowhere to arrive)
+        if !self.translations.is_empty() || !self.translating.is_empty() {
+            self.translations.clear();
+            self.show_translated.clear();
+            self.translating.clear();
+            self.translate_error = None;
+            self.mail_view.reload();
+        }
         self.save_now = true;
         self.ctx.request_repaint();
     }
