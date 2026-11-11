@@ -543,6 +543,10 @@ impl MailApp {
                     ui.label("Kod źródłowy:");
                     ui.hyperlink_to("github.com/jarx-dev/MailsRust", "https://github.com/jarx-dev/MailsRust");
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Podoba Ci się Poczta?");
+                    ui.hyperlink_to("Postaw mi kawę", "https://buymeacoffee.com/jarx");
+                });
                 ui.label(RichText::new("Licencja MIT").color(MUTED()));
                 ui.add_space(4.0);
             });
