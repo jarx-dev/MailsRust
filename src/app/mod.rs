@@ -1694,4 +1694,24 @@ mod tests {
         let saved = ron::to_string(&super::Prefs { lang: "en".into(), ..Default::default() }).unwrap();
         assert_eq!(ron::from_str::<super::Prefs>(&saved).unwrap().lang, "en");
     }
+
+    /// A Google sign-in replaces only the untouched demo name (or an empty one), never a name
+    /// the person typed, even when it equals the demo name.
+    #[test]
+    fn google_name_replaces_only_the_demo_name() {
+        use crate::model::Account;
+        let demo = Account::default();
+        assert!(demo.takes_google_name());
+        let english_demo = Account { display_name: "Alex Newman".into(), email: "alex@example.com".into(), ..Default::default() };
+        assert!(english_demo.takes_google_name());
+        let chosen = Account { demo_name: false, ..Default::default() };
+        assert!(!chosen.takes_google_name());
+        let own = Account { display_name: "Maria Lopez".into(), ..Default::default() };
+        assert!(!own.takes_google_name());
+        let empty = Account { display_name: String::new(), demo_name: false, ..Default::default() };
+        assert!(empty.takes_google_name());
+        // saved before the flag existed: an untouched demo account still gets its Google name
+        let old: Account = ron::from_str("(display_name: \"Aleks Nowicki\", email: \"aleks@example.com\", imap_host: \"\", imap_port: 993, smtp_host: \"\", smtp_port: 587, username: \"\")").unwrap();
+        assert!(old.takes_google_name());
+    }
 }

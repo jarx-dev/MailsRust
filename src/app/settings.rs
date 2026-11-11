@@ -722,7 +722,10 @@ impl MailApp {
                 }
                 egui::Grid::new("accgrid-top").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label(t!("ui.settings.account.name"));
-                    ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(300.0));
+                    if ui.add(egui::TextEdit::singleline(&mut a.display_name).desired_width(300.0)).changed() {
+                        // a name the person typed is theirs: a Google sign-in no longer replaces it
+                        a.demo_name = false;
+                    }
                     ui.end_row();
                     ui.label(t!("ui.settings.account.email"));
                     let r = ui.add(egui::TextEdit::singleline(&mut a.email).hint_text(t!("ui.settings.gmail_hint")).desired_width(300.0));

@@ -317,6 +317,11 @@ pub struct Account {
     /// Keep taking the signature from sent mail (off once the person removed it).
     #[serde(default = "yes")]
     pub signature_auto: bool,
+    /// The display name is the demo one nobody chose; a Google sign-in replaces it. Off once the
+    /// person edits the name. Saved before it existed: on, so an untouched demo account still gets
+    /// its Google name as before (a name typed earlier is kept anyway unless it equals the demo name).
+    #[serde(default = "yes")]
+    pub demo_name: bool,
 }
 
 fn yes() -> bool {
@@ -347,11 +352,17 @@ impl Default for Account {
             signature_images: vec![],
             signature_on: true,
             signature_auto: true,
+            demo_name: true,
         }
     }
 }
 
 impl Account {
+    /// A Google sign-in may put the profile's name here: the name is empty or still the untouched demo one.
+    pub fn takes_google_name(&self) -> bool {
+        self.display_name.trim().is_empty() || (self.demo_name && ["Aleks Nowicki", "Alex Newman"].contains(&self.display_name.as_str()))
+    }
+
     pub fn is_configured(&self) -> bool {
         !self.imap_host.trim().is_empty() && !self.username.trim().is_empty()
     }

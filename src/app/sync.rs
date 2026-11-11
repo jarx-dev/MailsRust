@@ -892,11 +892,7 @@ specjalista ds. Informatyki".into();
                     self.save_now = true;
                     self.signing_in = false;
                     let a = &mut self.store.account;
-                    // only the demo account's name (fresh install, never signed in) gives way to the
-                    // Google one; a name the person chose stays, even if it matches the demo name
-                    let demo_name = a.display_name.is_empty()
-                        || (["Aleks Nowicki", "Alex Newman"].contains(&a.display_name.as_str())
-                            && (["aleks@example.com", "alex@example.com"].contains(&a.email.as_str()) || a.google_sub.is_empty()));
+                    let demo_name = a.takes_google_name();
                     a.oauth_refresh_token = r.refresh_token;
                     a.oauth_scopes = r.scopes;
                     // without the id token the account kind stays as it was known

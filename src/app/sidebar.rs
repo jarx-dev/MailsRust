@@ -219,7 +219,7 @@ impl MailApp {
                     }
                 });
                 if ui.button(t!("ui.sidebar.menu.add_account")).on_hover_text(t!("ui.sidebar.menu.add_account_hint")).clicked() {
-                    self.extra_edit = Some((None, crate::model::Account { imap_port: 993, smtp_port: 465, ..Default::default() }));
+                    self.extra_edit = Some((None, crate::model::Account { display_name: String::new(), email: String::new(), imap_port: 993, smtp_port: 465, demo_name: false, ..Default::default() }));
                     ui.close();
                 }
                 if ui.button(t!("ui.sidebar.menu.ai_settings")).on_hover_text(t!("ui.sidebar.menu.ai_settings_hint")).clicked() {

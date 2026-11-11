@@ -137,6 +137,18 @@ mod tests {
         }
     }
 
+    /// The compose page puts these texts unescaped into JS '…' strings and title="…" attributes.
+    #[test]
+    fn compose_page_texts_are_safe_in_html_and_js() {
+        for lang in ["en", "pl"] {
+            for (k, v) in crate::_RUST_I18N_BACKEND.messages_for_locale(lang).unwrap() {
+                if k.starts_with("compose.page.") || k.starts_with("compose.view.") {
+                    assert!(!v.contains(['\'', '"', '<', '>', '&', '\\']), "{lang} {k}: {v}");
+                }
+            }
+        }
+    }
+
     /// Every `t!("…")` and `plural("…")` key written in the code has a text (a missing one would
     /// show the bare key on screen).
     #[test]
