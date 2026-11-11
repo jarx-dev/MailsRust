@@ -18,7 +18,6 @@ if ! cargo xwin clippy --release --locked --target x86_64-pc-windows-msvc --all-
 fi
 n=$(grep -oP '`mailclient` \(bin "mailclient"( test)?\) generated \K\d+' "$log" | sort -n | tail -1 || true)
 if (( ${n:-0} > max )); then
-  grep -A8 '^warning' "$log" | tail -80
   echo "[pre-push] ostrzeżeń clippy: $n, a dozwolone $max — usuń nowe ostrzeżenia"
   exit 1
 fi
