@@ -54,7 +54,7 @@ background threads, so the interface never waits.
 
 **Calendar and contacts**
 - Month and week views, a day panel next to your mail, events from Google Calendar.
-- Contacts with groups, including ones collected from your correspondence ("Z poczty", i.e. "From mail").
+- Contacts with groups, including ones collected from your correspondence ("From mail").
 
 <img src="docs/screenshots/en/calendar.png" alt="Calendar: month view and day panel">
 
@@ -64,7 +64,7 @@ background threads, so the interface never waits.
   in the ☰ menu → "AI settings".
 - "Copy link for AI": a single message can be shared with an AI agent on your private
   Tailscale network. The agent reads it as text or JSON and can leave a draft reply in Drafts,
-  but it never sends anything on its own.
+  but it never sends anything on its own. The page the agent reads is in Polish.
 
 **Look and feel**
 - Light and dark themes, a single icon set (Segoe Fluent), and a layout like classic mail

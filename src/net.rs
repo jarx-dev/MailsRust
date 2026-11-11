@@ -1387,7 +1387,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         let name = p
             .attachment_name()
             .map(|n| n.to_string())
-            .unwrap_or_else(|| if p.is_message() { "wiadomość.eml".into() } else { "załącznik".into() });
+            .unwrap_or_else(|| if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
         let ext = std::path::Path::new(&name)
             .extension()
             .and_then(|e| e.to_str())

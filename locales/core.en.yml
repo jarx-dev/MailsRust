@@ -24,6 +24,7 @@ core:
     signed_in: "Signed in with Google as %{who}"
     sign_in_failed: "Google sign-in failed: %{e}"
   net:
+    message_file: "message.eml"
     unexpected_sync: "unexpected error during sync"
     unexpected: "unexpected error"
     wrong_google_account: "a different Google account (%{got}) than the mail account (%{email}) was chosen in the browser — sign in with %{email}"

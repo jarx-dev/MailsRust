@@ -26,6 +26,7 @@ core:
     signed_in: "Zalogowano przez Google jako %{who}"
     sign_in_failed: "Logowanie przez Google nie powiodło się: %{e}"
   net:
+    message_file: "wiadomość.eml"
     unexpected_sync: "nieoczekiwany błąd podczas synchronizacji"
     unexpected: "nieoczekiwany błąd"
     wrong_google_account: "wybrano w przeglądarce inne konto Google (%{got}) niż konto poczty (%{email}) — zaloguj się kontem %{email}"

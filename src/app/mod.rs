@@ -180,7 +180,7 @@ fn safe_name(name: &str) -> String {
         .map(|c| if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '_' } else { c })
         .collect();
     let s = s.trim().trim_end_matches('.').to_string();
-    if s.is_empty() { "załącznik".into() } else { s }
+    if s.is_empty() { t!("misc.chat.attachment").into_owned() } else { s }
 }
 
 /// Opens a file or folder with the program Windows uses for it (no shell in between).
@@ -1010,6 +1010,9 @@ tel.: 600-100-200".into();
 
     /// Switches the interface language at once (remembered for next time).
     fn set_lang(&mut self, lang: &str) {
+        if self.prefs.lang == lang {
+            return;
+        }
         self.prefs.lang = lang.into();
         crate::i18n::set(lang);
         if let Some(t) = &self._tray {

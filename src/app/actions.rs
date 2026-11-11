@@ -367,7 +367,7 @@ impl MailApp {
                 }
                 Action::PreviewAttachment(id, i) => {
                     let Some(m) = self.msg(id) else { continue };
-                    let name = safe_name(m.attachments.get(i).map(String::as_str).unwrap_or("załącznik"));
+                    let name = safe_name(&m.attachments.get(i).cloned().unwrap_or_else(|| t!("misc.chat.attachment").into_owned()));
                     let Some(src) = m.attachment_files.get(i).filter(|f| std::path::Path::new(f).exists()).cloned() else {
                         self.set_status(t!("ui.actions.attachment_missing"));
                         continue;
@@ -387,7 +387,7 @@ impl MailApp {
                 Action::OpenAttachment(id, i) | Action::SaveAttachment(id, i) => {
                     let save = matches!(a, Action::SaveAttachment(..));
                     let Some(m) = self.msg(id) else { continue };
-                    let name = safe_name(m.attachments.get(i).map(String::as_str).unwrap_or("załącznik"));
+                    let name = safe_name(&m.attachments.get(i).cloned().unwrap_or_else(|| t!("misc.chat.attachment").into_owned()));
                     let Some(src) = m.attachment_files.get(i).filter(|f| std::path::Path::new(f).exists()).cloned() else {
                         self.set_status(t!("ui.actions.attachment_missing"));
                         continue;
@@ -398,7 +398,7 @@ impl MailApp {
                         let _ = std::fs::create_dir_all(&dir);
                         // don't overwrite: "plik.pdf", "plik (1).pdf", …
                         let p = std::path::Path::new(&name);
-                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("załącznik").to_string();
+                        let stem = p.file_stem().and_then(|s| s.to_str()).map(String::from).unwrap_or_else(|| t!("misc.chat.attachment").into_owned());
                         let ext = p.extension().and_then(|s| s.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
                         let mut dest = dir.join(&name);
                         let mut n = 1;
