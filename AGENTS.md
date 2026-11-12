@@ -37,3 +37,5 @@ Before calling UI work done, say which of these applied: light and dark theme; a
 ## Pull requests
 
 One request, one PR, opened only when asked. The title says why the change matters; the body gives the problem, the fix, and how it was proven. UI changes carry before/after screenshots, and performance changes carry before/after numbers.
+
+Before `gh pr create`, the whole diff gets two independent reviews (the `dual-review` skill where it exists), and every confirmed finding is fixed or answered; the body names the reviewers and the verdict. Every merge ships to users, so what one reviewer misses reaches them.
