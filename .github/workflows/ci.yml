@@ -1,5 +1,5 @@
 # Every PR and every merge to main: the same Windows build as a release, and the tests
-# (they run only on Windows, so this is where they run on every change).
+# (they run only on Windows, so this is where they run on every change but docs).
 name: CI
 
 on:
@@ -9,14 +9,42 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # on main a docs-only push must not cancel the build of the code pushed before it
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  # Only top-level *.md, docs/ or LICENSE changed: the build is skipped, and branch protection
+  # counts a skipped job as passed (with no workflow run at all the required check would wait for
+  # good). A deeper *.md may be built in, so it runs the build.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          FORCED: ${{ github.event.forced }}
+        run: |
+          # what cannot be told (a new branch, a forced push) counts as code; --no-renames: code
+          # moved into docs/ still shows as removed
+          if [ "$FORCED" != true ] && files=$(git diff --no-renames --name-only "$BASE" "$GITHUB_SHA") && [ -n "$files" ] && ! grep -qvE '^[^/]+\.md$|^docs/|^LICENSE' <<<"$files"; then
+            echo code=false >> "$GITHUB_OUTPUT"
+          else
+            echo code=true >> "$GITHUB_OUTPUT"
+          fi
+
   windows:
     name: build i testy (Windows)
+    needs: changes
+    # also when `changes` itself failed: a skip there would pass the required check untested
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

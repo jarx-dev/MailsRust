@@ -5,6 +5,35 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Only top-level *.md, docs/ or LICENSE in every pushed ref: nothing to lint, as CI skips its
+# build then (.github/workflows/ci.yml; unlike CI, a forced push of docs over checked code
+# skips too). What cannot be told (nothing new, a ref not fetched) runs the checks.
+docs_only() {
+  local any=0 lref lsha rref rsha files main s
+  [[ -t 0 ]] && return 1 # run by hand: no refs to read
+  while read -r lref lsha rref rsha; do
+    [[ $lsha =~ ^0+$ ]] && continue # a deleted branch
+    # a new branch counts from where it left main as the remote has it now: a stale origin/main
+    # could hide a code change that this branch reverts
+    if [[ $rsha =~ ^0+$ ]]; then
+      main=$(git ls-remote "$1" refs/heads/main 2>/dev/null | cut -f1)
+      [[ -n $main ]] && rsha=$(git merge-base "$lsha" "$main" 2>/dev/null) || return 1
+    fi
+    files=$(git diff --no-renames --name-only "$rsha" "$lsha" 2>/dev/null) || return 1
+    [[ -n $files ]] || return 1
+    # 1 only: every path is a document (2 is grep failing)
+    s=0
+    grep -qvE '^[^/]+\.md$|^docs/|^LICENSE' <<<"$files" || s=$?
+    ((s == 1)) || return 1
+    any=1
+  done
+  ((any))
+}
+if docs_only "$1"; then
+  echo "[pre-push] same dokumenty: bez clippy"
+  exit 0
+fi
+
 max=42 # known warnings of the bin; lower it when you fix some
 export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-1.99.1} # egui 0.37 needs a newer rustc than older stables
 
