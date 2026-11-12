@@ -5,6 +5,27 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Only top-level *.md, docs/ or LICENSE in every pushed ref: nothing to lint, as CI skips its
+# build then (.github/workflows/ci.yml). What cannot be told (nothing new, a ref not fetched)
+# runs the checks.
+docs_only() {
+  local any=0 lref lsha rref rsha files
+  while read -r lref lsha rref rsha; do
+    [[ $lsha =~ ^0+$ ]] && continue # a deleted branch
+    # a new branch counts from where it left origin/main
+    if [[ $rsha =~ ^0+$ ]]; then rsha=$(git merge-base "$lsha" origin/main) || return 1; fi
+    files=$(git diff --no-renames --name-only "$rsha" "$lsha") || return 1
+    [[ -n $files ]] || return 1
+    ! grep -qvE '^[^/]+\.md$|^docs/|^LICENSE' <<<"$files" || return 1
+    any=1
+  done
+  ((any))
+}
+if docs_only; then
+  echo "[pre-push] same dokumenty: bez clippy"
+  exit 0
+fi
+
 max=42 # known warnings of the bin; lower it when you fix some
 export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-1.99.1} # egui 0.37 needs a newer rustc than older stables
 
