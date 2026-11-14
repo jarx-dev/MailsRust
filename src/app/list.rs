@@ -393,7 +393,7 @@ impl MailApp {
         let msgs: Vec<Message> = others.iter().filter_map(|id| self.msg(*id).cloned()).collect();
         let (earlier, later): (Vec<&Message>, Vec<&Message>) = msgs.iter().partition(|x| (x.date, x.id) < (m.date, m.id));
         let open = self.thread_open == Some(m.id);
-        let shown: Vec<&Message> = if open || earlier.len() <= 3 { earlier.clone() } else { earlier[earlier.len() - 3..].to_vec() };
+        let shown: Vec<&Message> = if open || earlier.len() <= 2 { earlier.clone() } else { earlier[earlier.len() - 2..].to_vec() };
         let hidden = earlier.len() - shown.len();
         if hidden > 0 {
             let label = i18n::plural("mail.list.older_show", hidden);
