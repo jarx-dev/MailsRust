@@ -36,6 +36,8 @@ pub(super) enum Action {
     SaveAttachment(u64, usize),
     AddTag(u64, String),
     RemoveTag(u64, String),
+    /// a Gmail rule sending this sender's mail to the bin from now on (main account)
+    BlockSender(String),
 }
 
 impl MailApp {
@@ -232,6 +234,20 @@ impl MailApp {
                     // moved out of the list: the next one is shown, like after deleting
                     if leaves && self.selected == Some(id) && !self.visible_ids().contains(&id) {
                         self.go_to_neighbour(next);
+                    }
+                }
+                Action::BlockSender(addr) => {
+                    if crate::google::has_scope(&self.store.account, crate::google::SCOPE_RULES) {
+                        self.rules_run(net::RuleChange::Block(vec![addr]));
+                        self.set_status(t!("mail.rules.saving"));
+                    } else {
+                        // the rule is made when the sign-in allowing it comes back (one sign-in for several)
+                        if !self.rules_pending.contains(&addr) {
+                            self.rules_pending.push(addr);
+                        }
+                        if !self.signing_in {
+                            self.rules_sign_in();
+                        }
                     }
                 }
                 Action::MarkAllRead(acct, folder) => {

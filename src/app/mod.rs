@@ -263,6 +263,11 @@ pub struct MailApp {
     img_rx: Receiver<(String, Option<Arc<[u8]>>)>,
     html_cache: Option<(u64, Arc<Vec<html::Block>>)>,
     signing_in: bool,
+    /// Gmail's rules of the main account (None: not read yet) and whether they are being read or changed
+    rules: Option<Result<Vec<crate::google::Rule>, String>>,
+    rules_busy: bool,
+    /// senders to block once the sign-in allowing the rules comes back
+    rules_pending: Vec<String>,
     save_now: bool,
     mail_view: crate::webview::MailView,
     web_target: Option<(u64, egui::Rect)>,
@@ -522,6 +527,9 @@ impl MailApp {
             img_rx,
             html_cache: None,
             signing_in: false,
+            rules: None,
+            rules_busy: false,
+            rules_pending: vec![],
             save_now: false,
             mail_view: Default::default(),
             web_target: None,
@@ -686,6 +694,21 @@ impl MailApp {
         if std::env::var("POCZTA_START").as_deref() == Ok("account") {
             app.account_open = true;
             app.store.account.use_gmail();
+        }
+        // test pictures of Gmail's rules in the account settings (made-up rules, nothing asked of Google)
+        if std::env::var("POCZTA_START").as_deref() == Ok("rules") && app.shot.is_some() {
+            app.account_open = true;
+            let a = &mut app.store.account;
+            a.use_gmail();
+            a.oauth_refresh_token = "test".into();
+            a.oauth_client_id = "test.apps.googleusercontent.com".into();
+            a.oauth_scopes = format!("https://mail.google.com/ {}", crate::google::SCOPE_RULES);
+            let filters = serde_json::json!([
+                { "id": "1", "criteria": { "from": "offers@shop.example" }, "action": { "addLabelIds": ["TRASH"] } },
+                { "id": "2", "criteria": { "from": "invoices@example.com", "hasAttachment": true }, "action": { "addLabelIds": ["Label_1"], "removeLabelIds": ["INBOX", "UNREAD"] } }
+            ]);
+            let named = |_: &str| if crate::i18n::is_pl() { "Faktury i rachunki" } else { "Bills" }.to_string();
+            app.rules = Some(Ok(filters.as_array().into_iter().flatten().map(|f| crate::google::describe(f, &named)).collect()));
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("diag") {
             app.diag_open = true;

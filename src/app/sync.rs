@@ -917,11 +917,37 @@ specjalista ds. Informatyki".into();
                     self.set_status(t!("core.sync.signed_in", who = who));
                     // Fetch mail straight away.
                     self.send_receive();
+                    // the rules are read again with the new sign-in; a sender waiting for it is blocked now
+                    self.rules = None;
+                    let pending = std::mem::take(&mut self.rules_pending);
+                    if !pending.is_empty() {
+                        if crate::google::has_scope(&self.store.account, crate::google::SCOPE_RULES) {
+                            self.rules_run(net::RuleChange::Block(pending));
+                        } else {
+                            self.set_status(t!("mail.rules.failed", e = t!("mail.rules.no_consent")));
+                        }
+                    }
                 }
                 NetResult::SignInFailed(e) => {
                     self.signing_in = false;
+                    self.rules_pending.clear();
                     self.sign_in_error = Some(e.clone());
                     self.set_status(t!("core.sync.sign_in_failed", e = e));
+                }
+                NetResult::Rules { email, change, failed, list } => {
+                    self.rules_busy = false;
+                    // signed in to another Google account meanwhile: the new one's rules are read instead
+                    if !email.eq_ignore_ascii_case(&self.store.account.email) {
+                        self.rules = None;
+                        continue;
+                    }
+                    match (change, failed) {
+                        (_, Some(e)) => self.set_status(t!("mail.rules.failed", e = e)),
+                        (net::RuleChange::Block(addrs), None) => self.set_status(t!("mail.rules.blocked", addr = addrs.join(", "))),
+                        (net::RuleChange::Delete(_), None) => self.set_status(t!("mail.rules.deleted")),
+                        (net::RuleChange::None, None) => {}
+                    }
+                    self.rules = Some(list);
                 }
             }
         }

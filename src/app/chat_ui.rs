@@ -334,11 +334,7 @@ impl MailApp {
     }
 
     fn chat_sign_in(&mut self) {
-        let a = &self.store.account;
-        self.signing_in = true;
-        self.sign_in_error = None;
-        net::google_sign_in_chat(a.oauth_client_id.clone(), a.oauth_client_secret.clone(), a.email.clone(), self.tx.clone(), self.ctx.clone());
-        self.set_status(t!("misc.chat_ui.opening_login").into_owned());
+        self.sign_in_more(crate::chat::SCOPES, t!("misc.chat_ui.opening_login"));
     }
 
     fn chat_send(&mut self, space: &str) {
