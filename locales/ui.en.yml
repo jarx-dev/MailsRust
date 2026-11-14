@@ -126,6 +126,8 @@ ui:
       new_event: "📅  New event"
       send_receive: "⟳  Send/Receive"
       accounts: "👤  Accounts…"
+      rules: "📋  Gmail rules…"
+      rules_need_google: "Needs a Gmail account signed in with Google"
       calendar_panel: "Calendar panel on the right"
       stop_ai: "🔗  Turn off AI links (%{n})"
       stop_ai_hint: "All shared emails stop being available to agents"

@@ -269,6 +269,8 @@ pub struct MailApp {
     /// Gmail's rules of the main account (None: not read yet) and whether they are being read or changed
     rules: Option<Result<crate::google::RuleBook, String>>,
     rules_busy: bool,
+    /// the panel of Gmail's rules (menu ☰)
+    rules_open: bool,
     /// senders to block once the sign-in allowing the rules comes back
     rules_pending: Vec<String>,
     /// the rule editor (open while Some) and why its last save failed
@@ -537,6 +539,7 @@ impl MailApp {
             signing_in: false,
             rules: None,
             rules_busy: false,
+            rules_open: false,
             rules_pending: vec![],
             rule_edit: None,
             rule_edit_error: None,
@@ -706,10 +709,10 @@ impl MailApp {
             app.account_open = true;
             app.store.account.use_gmail();
         }
-        // test pictures of Gmail's rules in the account settings and the rule editor (made-up rules, nothing asked of Google)
+        // test pictures of Gmail's rules panel and the rule editor (made-up rules, nothing asked of Google)
         let start = std::env::var("POCZTA_START").unwrap_or_default();
         if (start == "rules" || start == "rule-editor") && app.shot.is_some() {
-            app.account_open = true;
+            app.rules_open = true;
             let a = &mut app.store.account;
             a.use_gmail();
             a.oauth_refresh_token = "test".into();
@@ -1225,6 +1228,12 @@ impl eframe::App for MailApp {
                     _ => {}
                 }
             }
+            // POCZTA_KEY=ArrowDown: that key (by its egui name) is pressed once (never with POCZTA_SHOT_REAL)
+            if let Some(key) = std::env::var("POCZTA_KEY").ok().and_then(|k| egui::Key::from_name(&k)).filter(|_| self.frames == 45 && std::env::var("POCZTA_SHOT_REAL").is_err()) {
+                for pressed in [true, false] {
+                    raw.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+                }
+            }
         }
     }
 
@@ -1400,6 +1409,7 @@ impl eframe::App for MailApp {
         self.readers_ui(&ctx);
         self.previews_ui(&ctx);
         self.account_ui(&ctx);
+        self.rules_window(&ctx);
         self.rule_editor_ui(&ctx);
         self.diag_ui(&ctx);
         self.side_settings_ui(&ctx);
@@ -1410,7 +1420,7 @@ impl eframe::App for MailApp {
         self.flash_ui(&ctx);
         // The browser view sits on top of everything, so it steps aside while a menu or dialog is open.
         // (and in the background: an open writing window keeps the screen drawn, but the view stays closed)
-        let covered = self.account_open || self.extra_edit.is_some() || self.rule_edit.is_some() || self.ai_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
+        let covered = self.account_open || self.rules_open || self.extra_edit.is_some() || self.rule_edit.is_some() || self.ai_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
         let want = if covered {
             None
         } else {
