@@ -528,8 +528,17 @@ impl MailApp {
                     self.actions.push(Action::RemoveTag(m.id, l.clone()));
                 }
                 if ui.interact(name_rect, id(("tag", m.id, l.as_str())), Sense::click()).on_hover_text(t!("mail.reading.tag_show_tip")).clicked() {
-                    self.label_filter = l.clone();
-                    self.view = MailView::Label;
+                    // an own folder's label opens that folder (every account's mail)
+                    match self.prefs.my_folders.iter().find(|f| same_label(f, l)) {
+                        Some(f) => {
+                            self.label_filter = f.clone();
+                            self.view = MailView::Mine;
+                        }
+                        None => {
+                            self.label_filter = l.clone();
+                            self.view = MailView::Label;
+                        }
+                    }
                     self.search.clear();
                 }
                 right -= used + 6.0;

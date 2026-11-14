@@ -181,6 +181,11 @@ ui:
     collapse: "Collapse"
     untag: "Remove “%{name}” from all messages"
     new_tag: "New tag…"
+    new_folder: "New folder"
+    new_folder_hint: "Folder name, then Enter"
+    remove_folder: "Remove the folder “%{name}”"
+    remove_folder_tip: "The messages stay, with a tag of that name"
+    folder_name_bad: "That folder exists already, or the name cannot be used"
     add: "Add"
     mark_all_read: "✓  Mark all as read"
     categories:
