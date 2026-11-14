@@ -846,11 +846,16 @@ tel.: 600-100-200".into();
         if std::env::var("POCZTA_START").as_deref() == Ok("thread-later") {
             // test picture: a conversation with an earlier message and a newer reply of yours
             if let Some(base) = app.store.messages.iter().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date).cloned() {
-                let mut before = base.clone();
-                before.id = app.store.new_id();
-                before.date = base.date - Duration::hours(3);
-                before.body = "Wcześniejsza wiadomość tej rozmowy.".into();
-                before.html_path = String::new();
+                // POCZTA_THREAD_EARLIER=n: n earlier messages (3 or more: some hide behind "Show older")
+                let earlier = std::env::var("POCZTA_THREAD_EARLIER").ok().and_then(|n| n.parse::<u8>().ok()).map_or(1, i64::from);
+                for k in 0..earlier {
+                    let mut before = base.clone();
+                    before.id = app.store.new_id();
+                    before.date = base.date - Duration::hours(3 * (earlier - k));
+                    before.body = "Wcześniejsza wiadomość tej rozmowy.".into();
+                    before.html_path = String::new();
+                    app.store.messages.push(before);
+                }
                 let mut after = base.clone();
                 after.id = app.store.new_id();
                 after.folder = Folder::Sent;
@@ -862,7 +867,6 @@ tel.: 600-100-200".into();
                 after.body = "Dziękuję, będę w czwartek.".into();
                 after.html_path = String::new();
                 after.attachments.clear();
-                app.store.messages.push(before);
                 app.store.messages.push(after);
                 app.selected = Some(base.id);
                 app.thread_for = Some(base.id);
