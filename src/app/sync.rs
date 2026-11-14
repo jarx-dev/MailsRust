@@ -17,9 +17,9 @@ impl MailApp {
         // with no pointer over it either: the new build starts minimized
         let behind = !focused && !self.hidden && self.clock() - self.last_input > 120.0;
         let quiet = self.hidden || minimized || behind || self.clock() - self.last_input > 600.0;
-        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some() || self.chat_holds_text();
+        let working = !self.composers.is_empty() || self.busy > 0 || self.ops_running || self.receiving || !self.pending_ops.is_empty() || self.quitting || self.signing_in || self.book_rx.is_some() || self.chat_holds_text() || self.rules_busy;
         // forms hold their text only in memory; reading windows get input the main window doesn't see
-        let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
+        let open = self.editor.is_some() || self.book_edit.is_some() || self.extra_edit.is_some() || self.rule_edit.is_some() || !self.readers.is_empty() || !self.previews.is_empty();
         if !quiet || working || open {
             ctx.request_repaint_after(std::time::Duration::from_secs(30));
             return;
@@ -934,18 +934,36 @@ specjalista ds. Informatyki".into();
                     self.sign_in_error = Some(e.clone());
                     self.set_status(t!("core.sync.sign_in_failed", e = e));
                 }
-                NetResult::Rules { email, change, failed, list } => {
+                NetResult::Rules { email, change, done, list } => {
                     self.rules_busy = false;
                     // signed in to another Google account meanwhile: the new one's rules are read instead
                     if !email.eq_ignore_ascii_case(&self.store.account.email) {
                         self.rules = None;
                         continue;
                     }
-                    match (change, failed) {
-                        (_, Some(e)) => self.set_status(t!("mail.rules.failed", e = e)),
-                        (net::RuleChange::Block(addrs), None) => self.set_status(t!("mail.rules.blocked", addr = addrs.join(", "))),
-                        (net::RuleChange::Delete(_), None) => self.set_status(t!("mail.rules.deleted")),
-                        (net::RuleChange::None, None) => {}
+                    match (change, done) {
+                        (net::RuleChange::Save(_), Err(e)) => {
+                            // the editor stays open with what was typed
+                            self.rule_edit_error = Some(e.clone());
+                            self.set_status(t!("mail.rules.failed", e = e));
+                        }
+                        (_, Err(e)) => self.set_status(t!("mail.rules.failed", e = e)),
+                        (net::RuleChange::Block(addrs), Ok(_)) => self.set_status(t!("mail.rules.blocked", addr = addrs.join(", "))),
+                        (net::RuleChange::Delete(_), Ok(_)) => self.set_status(t!("mail.rules.deleted")),
+                        (net::RuleChange::Save(form), Ok((n, apply_failed))) => {
+                            // the rule is saved: the editor closes even if changing the old mail failed
+                            self.rule_edit = None;
+                            if let Some(e) = apply_failed {
+                                self.set_status(t!("mail.rules.saved_apply_failed", e = e));
+                            } else if form.apply {
+                                self.set_status(crate::i18n::plural("mail.rules.saved_applied", n));
+                                // the changed messages come back with the next sync
+                                self.send_receive();
+                            } else {
+                                self.set_status(t!("mail.rules.saved"));
+                            }
+                        }
+                        (net::RuleChange::None, Ok(_)) => {}
                     }
                     self.rules = Some(list);
                 }

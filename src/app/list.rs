@@ -945,6 +945,12 @@ impl MailApp {
             .map(|m| m.from_addr.trim().to_lowercase())
             .filter(|a| crate::google::blockable(a));
         if let Some(addr) = sender {
+            // like Gmail's "Filter messages like these": the editor starts with the sender
+            if !self.rules_busy && crate::google::has_scope(&self.store.account, crate::google::SCOPE_RULES) && ui.button(t!("mail.rules.menu_rule")).clicked() {
+                self.rule_edit = Some(crate::google::RuleForm { from: addr.clone(), ..Default::default() });
+                self.rule_edit_error = None;
+                ui.close();
+            }
             ui.menu_button(format!("{}  {}", ic::BLOCKED, t!("mail.rules.menu_block")), |ui| {
                 ui.set_max_width(340.0);
                 ui.label(RichText::new(t!("mail.rules.menu_block_explain", addr = addr)).small().color(MUTED()));

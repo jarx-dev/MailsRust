@@ -326,19 +326,39 @@ pub struct Rule {
     pub when: String,
     /// what happens to it: "to the bin, mark as read"
     pub then: String,
+    /// the filter as Gmail gave it, for changing it
+    pub raw: Value,
+}
+
+/// The account's filters and its own labels (id, name), which a rule can add.
+#[derive(Default)]
+pub struct RuleBook {
+    pub rules: Vec<Rule>,
+    pub labels: Vec<(String, String)>,
+    /// the labels couldn't be read (the rules show label ids then)
+    pub labels_error: Option<String>,
 }
 
 /// Every filter of the account, also the ones made on Gmail's page.
-pub fn rules(acc: &Account) -> Result<Vec<Rule>, String> {
+pub fn rules(acc: &Account) -> Result<RuleBook, String> {
     let token = token(acc)?;
     let filters = get(&token, &format!("{GMAIL}/settings/filters"), "reguły")?;
-    let Some(filters) = filters["filter"].as_array().filter(|f| !f.is_empty()) else { return Ok(vec![]) };
     // filters name the person's own labels by id ("Label_12"), the list gives their names (without it, the ids)
-    let labels = get(&token, &format!("{GMAIL}/labels"), "reguły").unwrap_or(Value::Null);
-    let label = |id: &str| {
-        labels["labels"].as_array().and_then(|l| l.iter().find(|l| l["id"] == id)).and_then(|l| l["name"].as_str()).unwrap_or(id).to_string()
+    let (labels, labels_error) = match get(&token, &format!("{GMAIL}/labels"), "reguły") {
+        Ok(v) => (v, None),
+        Err(e) => (Value::Null, Some(e)),
     };
-    Ok(filters.iter().map(|f| describe(f, &label)).collect())
+    let mut own: Vec<(String, String)> = labels["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|l| l["type"] == "user")
+        .filter_map(|l| Some((l["id"].as_str()?.to_string(), l["name"].as_str()?.to_string())))
+        .collect();
+    own.sort_by_key(|l| l.1.to_lowercase());
+    let label = |id: &str| own.iter().find(|l| l.0 == id).map(|l| l.1.clone()).unwrap_or_else(|| id.to_string());
+    let rules = filters["filter"].as_array().into_iter().flatten().map(|f| describe(f, &label)).collect();
+    Ok(RuleBook { rules, labels: own, labels_error })
 }
 
 pub(crate) fn describe(f: &Value, label: &dyn Fn(&str) -> String) -> Rule {
@@ -387,7 +407,7 @@ pub(crate) fn describe(f: &Value, label: &dyn Fn(&str) -> String) -> Rule {
     if let Some(to) = a["forward"].as_str() {
         then.push(t!("mail.rules.forward", to = to).into_owned());
     }
-    Rule { id: f["id"].as_str().unwrap_or("").to_string(), when: when.join(", "), then: then.join(", ") }
+    Rule { id: f["id"].as_str().unwrap_or("").to_string(), when: when.join(", "), then: then.join(", "), raw: f.clone() }
 }
 
 /// A rule on Gmail's side: mail from `addr` goes straight to the bin, as Gmail's own "Delete it"
@@ -420,6 +440,296 @@ pub fn delete_rule(acc: &Account, id: &str) -> Result<(), String> {
     send(&token(acc)?, "DELETE", &format!("{GMAIL}/settings/filters/{}", enc(id)), None, "reguły").map(|_| ())
 }
 
+/// A rule as the editor shows it. Whatever the editor doesn't show (a category, extra labels
+/// the rule removes) stays as it was in `base`.
+#[derive(Clone, Default)]
+pub struct RuleForm {
+    /// the rule being changed (None: a new one)
+    pub id: Option<String>,
+    pub base: Value,
+    pub from: String,
+    pub to: String,
+    pub subject: String,
+    pub words: String,
+    pub not_words: String,
+    pub attachment: bool,
+    /// 0: any size
+    pub size_kb: u32,
+    pub smaller: bool,
+    pub archive: bool,
+    pub read: bool,
+    pub star: bool,
+    /// the person's own label to add ("" none)
+    pub label: String,
+    /// 0: as Gmail decides, 1: always important, 2: never
+    pub important: u8,
+    pub never_spam: bool,
+    pub trash: bool,
+    pub forward: String,
+    /// also change the mail already in the mailbox
+    pub apply: bool,
+}
+
+const SYSTEM: [&str; 6] = ["TRASH", "STARRED", "IMPORTANT", "INBOX", "UNREAD", "SPAM"];
+
+fn own_label(id: &str) -> bool {
+    !SYSTEM.contains(&id) && !id.starts_with("CATEGORY_")
+}
+
+impl RuleForm {
+    pub fn from_filter(f: &Value) -> Self {
+        let c = &f["criteria"];
+        let s = |k: &str| c[k].as_str().unwrap_or("").to_string();
+        let a = &f["action"];
+        let has = |k: &str, id: &str| a[k].as_array().is_some_and(|l| l.iter().any(|x| x == id));
+        let important = if has("addLabelIds", "IMPORTANT") { 1 } else if has("removeLabelIds", "IMPORTANT") { 2 } else { 0 };
+        let label = a["addLabelIds"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).find(|x| own_label(x)).unwrap_or("").to_string();
+        RuleForm {
+            id: f["id"].as_str().map(String::from),
+            base: f.clone(),
+            from: s("from"),
+            to: s("to"),
+            subject: s("subject"),
+            words: s("query"),
+            not_words: s("negatedQuery"),
+            attachment: c["hasAttachment"].as_bool() == Some(true),
+            size_kb: c["size"].as_u64().map(|b| b.div_ceil(1024) as u32).unwrap_or(0),
+            smaller: c["sizeComparison"] == "smaller",
+            archive: has("removeLabelIds", "INBOX"),
+            read: has("removeLabelIds", "UNREAD"),
+            star: has("addLabelIds", "STARRED"),
+            label,
+            important,
+            never_spam: has("removeLabelIds", "SPAM"),
+            trash: has("addLabelIds", "TRASH"),
+            forward: a["forward"].as_str().unwrap_or("").to_string(),
+            apply: false,
+        }
+    }
+
+    /// The filter to send to Gmail: `base` with what the editor shows put in.
+    pub fn to_filter(&self) -> Value {
+        let mut c = self.base["criteria"].as_object().cloned().unwrap_or_default();
+        for (k, v) in [("from", &self.from), ("to", &self.to), ("subject", &self.subject), ("query", &self.words), ("negatedQuery", &self.not_words)] {
+            if v.trim().is_empty() {
+                c.remove(k);
+            } else {
+                c.insert(k.into(), v.trim().into());
+            }
+        }
+        if self.attachment {
+            c.insert("hasAttachment".into(), true.into());
+        } else {
+            c.remove("hasAttachment");
+        }
+        if self.size_kb > 0 {
+            // the editor shows KB: a size made on Gmail's page in bytes stays exact if not changed
+            let old = self.base["criteria"]["size"].as_u64().filter(|b| b.div_ceil(1024) == u64::from(self.size_kb));
+            c.insert("size".into(), old.unwrap_or(u64::from(self.size_kb) * 1024).into());
+            c.insert("sizeComparison".into(), if self.smaller { "smaller" } else { "larger" }.into());
+        } else {
+            c.remove("size");
+            c.remove("sizeComparison");
+        }
+        let a = &self.base["action"];
+        // what the editor doesn't show is kept: categories and labels the rule takes off
+        let keep = |k: &str, managed: &dyn Fn(&str) -> bool| -> Vec<Value> {
+            a[k].as_array().into_iter().flatten().filter(|x| x.as_str().is_some_and(|x| !managed(x))).cloned().collect()
+        };
+        let mut add = keep("addLabelIds", &|x| SYSTEM.contains(&x) || own_label(x));
+        let mut remove = keep("removeLabelIds", &|x| SYSTEM.contains(&x));
+        for (on, id) in [(self.trash, "TRASH"), (self.star, "STARRED"), (self.important == 1, "IMPORTANT")] {
+            if on {
+                add.push(id.into());
+            }
+        }
+        if !self.label.is_empty() {
+            add.push(self.label.clone().into());
+        }
+        for (on, id) in [(self.archive, "INBOX"), (self.read, "UNREAD"), (self.never_spam, "SPAM"), (self.important == 2, "IMPORTANT")] {
+            if on {
+                remove.push(id.into());
+            }
+        }
+        let mut action = serde_json::Map::new();
+        if !add.is_empty() {
+            action.insert("addLabelIds".into(), add.into());
+        }
+        if !remove.is_empty() {
+            action.insert("removeLabelIds".into(), remove.into());
+        }
+        if !self.forward.trim().is_empty() {
+            action.insert("forward".into(), self.forward.trim().into());
+        }
+        json!({ "criteria": c, "action": action })
+    }
+
+    /// Why the rule can't be saved yet (Gmail needs some condition and something to do).
+    pub fn problem(&self) -> Option<String> {
+        let f = self.to_filter();
+        // judged by the search it makes: a condition the editor doesn't show must not pass for one
+        if search_query(&f["criteria"]).is_empty() {
+            return Some(t!("mail.rules.need_condition").into_owned());
+        }
+        if f["action"].as_object().is_none_or(|a| a.is_empty()) {
+            return Some(t!("mail.rules.need_action").into_owned());
+        }
+        None
+    }
+
+    /// Nothing changed in an existing rule.
+    pub fn unchanged(&self) -> bool {
+        self.id.is_some() && same_rule(&self.to_filter(), &self.base)
+    }
+}
+
+/// Two filters do the same: labels in any order, addresses and the subject in any case (the
+/// words searched for keep their case: "OR" is an operator there).
+fn same_rule(x: &Value, y: &Value) -> bool {
+    let norm = |f: &Value| {
+        let low = |v: &Value| match v {
+            Value::String(s) => Value::String(s.trim().to_lowercase()),
+            other => other.clone(),
+        };
+        let c: serde_json::Map<String, Value> = f["criteria"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), if ["from", "to", "subject"].contains(&k.as_str()) { low(v) } else { v.clone() }))
+            .collect();
+        let mut a = f["action"].as_object().cloned().unwrap_or_default();
+        for k in ["addLabelIds", "removeLabelIds"] {
+            if let Some(Value::Array(l)) = a.get_mut(k) {
+                l.sort_by(|x, y| x.as_str().cmp(&y.as_str()));
+            }
+        }
+        if let Some(fw) = a.get_mut("forward") {
+            *fw = low(fw);
+        }
+        json!({ "criteria": c, "action": a })
+    };
+    norm(x) == norm(y)
+}
+
+/// Gmail's search for the mail a filter matches (as Gmail's own "also apply to matching
+/// conversations"; spam and the bin are left out, as there). Where unsure it matches less.
+pub(crate) fn search_query(c: &Value) -> String {
+    let text = |k: &str| c[k].as_str().map(str::trim).filter(|v| !v.is_empty());
+    let mut q = vec![];
+    if let Some(v) = text("from") {
+        q.push(format!("from:({v})"));
+    }
+    // a filter's "to" also means the copies (Cc, Bcc)
+    if let Some(v) = text("to") {
+        q.push(format!("{{to:({v}) cc:({v}) bcc:({v})}}"));
+    }
+    // a filter's subject is a phrase
+    if let Some(v) = text("subject") {
+        q.push(format!("subject:\"{}\"", v.replace('"', "")));
+    }
+    if let Some(v) = text("query") {
+        q.push(format!("({v})"));
+    }
+    // "doesn't have": not matching that search (as the filter's own negatedQuery)
+    if let Some(v) = text("negatedQuery") {
+        q.push(format!("-({v})"));
+    }
+    if c["hasAttachment"].as_bool() == Some(true) {
+        q.push("has:attachment".into());
+    }
+    if let Some(size) = c["size"].as_u64() {
+        q.push(format!("{}:{size}", if c["sizeComparison"] == "smaller" { "smaller" } else { "larger" }));
+    }
+    // only a condition makes a search: alone this would match the whole mailbox
+    if !q.is_empty() && c["excludeChats"].as_bool() == Some(true) {
+        q.push("-in:chats".into());
+    }
+    q.join(" ")
+}
+
+/// Saves the rule (a changed one: the new one first, then the old one goes, so a failure keeps
+/// it) and, if asked, does the same to the mail already there. Err: the rule wasn't saved;
+/// otherwise how many messages changed, and why changing them failed (the rule is saved then).
+pub fn save_rule(acc: &Account, form: &RuleForm) -> Result<(usize, Option<String>), String> {
+    let token = token(acc)?;
+    let filter = form.to_filter();
+    let url = format!("{GMAIL}/settings/filters");
+    if !form.unchanged() {
+        let made = match send(&token, "POST", &url, Some(filter.clone()), "reguły") {
+            Err(e) if e.contains("Filter already exists") => None,
+            r => Some(r?),
+        };
+        if let Some(old) = &form.id {
+            let old_left = || get(&token, &url, "reguły").map(|all| all["filter"].as_array().is_some_and(|l| l.iter().any(|f| f["id"] == old.as_str())));
+            // "already exists": the old rule goes only if another one does the same (a retry after
+            // a failed delete); if the one that exists is the old rule itself, it stays
+            let delete = made.is_some() || {
+                let all = get(&token, &url, "reguły")?;
+                let list = all["filter"].as_array().cloned().unwrap_or_default();
+                list.iter().any(|f| f["id"] == old.as_str()) && list.iter().any(|f| f["id"] != old.as_str() && same_rule(f, &filter))
+            };
+            if delete {
+                if let Err(e) = send(&token, "DELETE", &format!("{url}/{}", enc(old)), None, "reguły") {
+                    match old_left() {
+                        // deleted after all, only the answer was lost
+                        Ok(false) => {}
+                        // the old rule stays: the new one is taken back, so the rules are as before
+                        Ok(true) => {
+                            if let Some(new) = made.as_ref().and_then(|m| m["id"].as_str()) {
+                                if let Err(e2) = send(&token, "DELETE", &format!("{url}/{}", enc(new)), None, "reguły") {
+                                    return Err(t!("mail.rules.both_left", e = e2).into_owned());
+                                }
+                            }
+                            return Err(e);
+                        }
+                        // not known: nothing more is deleted
+                        Err(_) => return Err(t!("mail.rules.unsure", e = e).into_owned()),
+                    }
+                }
+            }
+        }
+    }
+    if !form.apply {
+        return Ok((0, None));
+    }
+    Ok(match apply_existing(&token, &filter) {
+        Ok(n) => (n, None),
+        Err(e) => (0, Some(e)),
+    })
+}
+
+/// The filter's action done to the matching mail already in the mailbox.
+fn apply_existing(token: &str, filter: &Value) -> Result<usize, String> {
+    let query = search_query(&filter["criteria"]);
+    let a = &filter["action"];
+    let (add, remove) = (a["addLabelIds"].clone(), a["removeLabelIds"].clone());
+    if query.is_empty() || (add.is_null() && remove.is_null()) {
+        return Ok(0);
+    }
+    let q = enc(&query);
+    let (mut ids, mut page) = (Vec::<String>::new(), String::new());
+    // shortcut: at most 100 pages (50 000 messages), a larger mailbox would need a progress bar
+    for _ in 0..100 {
+        let v = get(token, &format!("{GMAIL}/messages?maxResults=500&q={q}{page}"), "reguły")?;
+        ids.extend(v["messages"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(String::from)));
+        match v["nextPageToken"].as_str() {
+            Some(t) => page = format!("&pageToken={}", enc(t)),
+            None => break,
+        }
+    }
+    for chunk in ids.chunks(1000) {
+        let mut body = json!({ "ids": chunk });
+        if !add.is_null() {
+            body["addLabelIds"] = add.clone();
+        }
+        if !remove.is_null() {
+            body["removeLabelIds"] = remove.clone();
+        }
+        send(token, "POST", &format!("{GMAIL}/messages/batchModify"), Some(body), "reguły")?;
+    }
+    Ok(ids.len())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -441,5 +751,47 @@ mod tests {
         for bad in ["-a@x.pl", "a b@x.pl", "{a b}@x.pl", "a@x", "a@-x.pl", "a@b@x.pl", "ą@x.pl", "", "x.pl", "a@x.pl OR b"] {
             assert!(!super::blockable(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn gmail_rule_editor_keeps_what_it_does_not_show() {
+        let f = serde_json::json!({
+            "id": "F1",
+            "criteria": { "from": "news@x.pl", "size": 3000, "sizeComparison": "smaller", "excludeChats": true },
+            "action": { "addLabelIds": ["Label_7", "CATEGORY_UPDATES", "STARRED"], "removeLabelIds": ["INBOX", "Label_9"] }
+        });
+        let mut r = super::RuleForm::from_filter(&f);
+        assert_eq!((r.from.as_str(), r.size_kb, r.smaller, r.label.as_str(), r.star, r.archive, r.read), ("news@x.pl", 3, true, "Label_7", true, true, false));
+        assert!(r.unchanged());
+        r.label = "Label_8".into();
+        r.star = false;
+        r.read = true;
+        r.size_kb = 0;
+        r.subject = " faktura ".into();
+        let out = r.to_filter();
+        assert_eq!(out["criteria"], serde_json::json!({ "from": "news@x.pl", "subject": "faktura", "excludeChats": true }));
+        assert_eq!(out["action"], serde_json::json!({ "addLabelIds": ["CATEGORY_UPDATES", "Label_8"], "removeLabelIds": ["Label_9", "INBOX", "UNREAD"] }));
+        assert!(!r.unchanged() && r.problem().is_none());
+        assert_eq!(super::search_query(&out["criteria"]), "from:(news@x.pl) subject:\"faktura\" -in:chats");
+        let all = serde_json::json!({ "to": "a@x.pl", "subject": "a \"b\" c", "query": "x OR y", "negatedQuery": "p q" });
+        assert_eq!(super::search_query(&all), "{to:(a@x.pl) cc:(a@x.pl) bcc:(a@x.pl)} subject:\"a b c\" (x OR y) -(p q)");
+        // a condition the editor doesn't show is not a search: never the whole mailbox
+        assert_eq!(super::search_query(&serde_json::json!({ "excludeChats": true })), "");
+        let hidden = super::RuleForm { base: serde_json::json!({ "criteria": { "excludeChats": true } }), read: true, ..Default::default() };
+        assert!(hidden.problem().is_some());
+        // the same rule in other letters and label order
+        let mut same = r.clone();
+        same.base = r.to_filter();
+        same.id = Some("F1".into());
+        same.from = "NEWS@x.pl".into();
+        assert!(same.unchanged());
+        same.words = "a OR b".into();
+        same.base = same.to_filter();
+        same.words = "a or b".into();
+        assert!(!same.unchanged());
+        let empty = super::RuleForm { read: true, ..Default::default() };
+        assert!(empty.problem().is_some());
+        let nothing = super::RuleForm { from: "a@x.pl".into(), ..Default::default() };
+        assert!(nothing.problem().is_some());
     }
 }
