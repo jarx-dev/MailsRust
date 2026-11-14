@@ -49,11 +49,16 @@ fn explain(e: ureq::Error, what: &str) -> String {
         ureq::Error::Status(code, resp) => {
             let body = resp.into_string().unwrap_or_default();
             if body.contains("SERVICE_DISABLED") || body.contains("has not been used in project") || body.contains("is disabled") {
-                let api = if what == "kalendarz" { "Google Calendar API" } else { "People API" };
+                let api = match what {
+                    "kalendarz" => "Google Calendar API",
+                    // from the message menu there's no button to turn it on: say where
+                    "reguły" => return t!("mail.rules.api_disabled").into_owned(),
+                    _ => "People API",
+                };
                 return t!("cal.google.api_disabled", api = api).into_owned();
             }
             if code == 403 && (body.contains("insufficient") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") || body.contains("PERMISSION_DENIED")) {
-                return t!("cal.google.no_consent").into_owned();
+                return if what == "reguły" { t!("mail.rules.no_consent") } else { t!("cal.google.no_consent") }.into_owned();
             }
             if code == 401 {
                 crate::oauth::forget_tokens();
@@ -63,6 +68,7 @@ fn explain(e: ureq::Error, what: &str) -> String {
             let what = match what {
                 "kalendarz" => t!("cal.google.what_calendar"),
                 "kontakty" => t!("cal.google.what_contacts"),
+                "reguły" => t!("mail.rules.what"),
                 _ => t!("cal.google.what_account"),
             };
             t!("cal.google.http_status", what = what, code = code, msg = msg.chars().take(200).collect::<String>()).into_owned()
@@ -305,4 +311,135 @@ pub fn check(acc: &Account) -> (Result<String, String>, Result<String, String>) 
     });
     let people = contacts(&token).map(|(g, p)| t!("cal.gcal.contacts_ok", people = crate::i18n::plural("cal.gcal.people", p.len()), groups = crate::i18n::plural("cal.gcal.groups", g.len())).into_owned());
     (cal, people)
+}
+
+// ------------------------------------------------------------ Gmail rules (filters)
+
+/// Reading and changing Gmail's filters, asked for only when the person opens the rules.
+pub const SCOPE_RULES: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
+const GMAIL: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
+
+/// One Gmail filter, in words.
+pub struct Rule {
+    pub id: String,
+    /// which mail: "from: a@b.pl, subject: …"
+    pub when: String,
+    /// what happens to it: "to the bin, mark as read"
+    pub then: String,
+}
+
+/// Every filter of the account, also the ones made on Gmail's page.
+pub fn rules(acc: &Account) -> Result<Vec<Rule>, String> {
+    let token = token(acc)?;
+    let filters = get(&token, &format!("{GMAIL}/settings/filters"), "reguły")?;
+    let Some(filters) = filters["filter"].as_array().filter(|f| !f.is_empty()) else { return Ok(vec![]) };
+    // filters name the person's own labels by id ("Label_12"), the list gives their names (without it, the ids)
+    let labels = get(&token, &format!("{GMAIL}/labels"), "reguły").unwrap_or(Value::Null);
+    let label = |id: &str| {
+        labels["labels"].as_array().and_then(|l| l.iter().find(|l| l["id"] == id)).and_then(|l| l["name"].as_str()).unwrap_or(id).to_string()
+    };
+    Ok(filters.iter().map(|f| describe(f, &label)).collect())
+}
+
+pub(crate) fn describe(f: &Value, label: &dyn Fn(&str) -> String) -> Rule {
+    let c = &f["criteria"];
+    let mut when = vec![];
+    for (key, word) in [
+        ("from", t!("mail.rules.from")),
+        ("to", t!("mail.rules.to")),
+        ("subject", t!("mail.rules.subject")),
+        ("query", t!("mail.rules.query")),
+        ("negatedQuery", t!("mail.rules.negated")),
+    ] {
+        if let Some(v) = c[key].as_str().filter(|v| !v.is_empty()) {
+            when.push(format!("{word} {v}"));
+        }
+    }
+    if c["hasAttachment"].as_bool() == Some(true) {
+        when.push(t!("mail.rules.attachment").into_owned());
+    }
+    if let Some(size) = c["size"].as_i64() {
+        let kb = (size + 1023) / 1024;
+        when.push(if c["sizeComparison"] == "smaller" { t!("mail.rules.smaller", kb = kb) } else { t!("mail.rules.larger", kb = kb) }.into_owned());
+    }
+    let a = &f["action"];
+    let mut then = vec![];
+    let ids = |key: &str| a[key].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default();
+    for id in ids("addLabelIds") {
+        then.push(match id.as_str() {
+            "TRASH" => t!("mail.rules.to_bin").into_owned(),
+            "STARRED" => t!("mail.rules.star").into_owned(),
+            "IMPORTANT" => t!("mail.rules.important").into_owned(),
+            "SPAM" => t!("mail.rules.to_spam").into_owned(),
+            c if c.starts_with("CATEGORY_") => t!("mail.rules.category", name = c["CATEGORY_".len()..].to_lowercase()).into_owned(),
+            other => t!("mail.rules.label", name = label(other)).into_owned(),
+        });
+    }
+    for id in ids("removeLabelIds") {
+        then.push(match id.as_str() {
+            "INBOX" => t!("mail.rules.archive").into_owned(),
+            "UNREAD" => t!("mail.rules.mark_read").into_owned(),
+            "SPAM" => t!("mail.rules.never_spam").into_owned(),
+            "IMPORTANT" => t!("mail.rules.not_important").into_owned(),
+            other => t!("mail.rules.unlabel", name = label(other)).into_owned(),
+        });
+    }
+    if let Some(to) = a["forward"].as_str() {
+        then.push(t!("mail.rules.forward", to = to).into_owned());
+    }
+    Rule { id: f["id"].as_str().unwrap_or("").to_string(), when: when.join(", "), then: then.join(", ") }
+}
+
+/// A rule on Gmail's side: mail from `addr` goes straight to the bin, as Gmail's own "Delete it"
+/// (a filter can't send mail to spam, Google doesn't allow it).
+pub fn block_sender(acc: &Account, addr: &str) -> Result<(), String> {
+    if !blockable(addr) {
+        return Err(t!("mail.rules.bad_address", addr = addr).into_owned());
+    }
+    let body = json!({ "criteria": { "from": addr }, "action": { "addLabelIds": ["TRASH"] } });
+    match send(&token(acc)?, "POST", &format!("{GMAIL}/settings/filters"), Some(body), "reguły") {
+        // blocked twice: the rule is already there
+        Err(e) if e.contains("Filter already exists") => Ok(()),
+        r => r.map(|_| ()),
+    }
+}
+
+/// A plain address only: Gmail reads the filter's "from" as a search, where a leading "-"
+/// means "not from" and would send every other message to the bin.
+pub fn blockable(addr: &str) -> bool {
+    let Some((user, domain)) = addr.split_once('@') else { return false };
+    let plain = |s: &str| s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._%+-".contains(&b));
+    user.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && plain(user)
+        && domain.contains('.')
+        && domain.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && plain(domain)
+}
+
+pub fn delete_rule(acc: &Account, id: &str) -> Result<(), String> {
+    send(&token(acc)?, "DELETE", &format!("{GMAIL}/settings/filters/{}", enc(id)), None, "reguły").map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn gmail_rules_read_in_words() {
+        let f = serde_json::json!({
+            "id": "ANe1",
+            "criteria": { "from": "spam@x.pl", "size": 2048, "sizeComparison": "larger" },
+            "action": { "addLabelIds": ["TRASH", "Label_7", "CATEGORY_PROMOTIONS"], "removeLabelIds": ["INBOX", "UNREAD"] }
+        });
+        let r = super::describe(&f, &|id| if id == "Label_7" { "Faktury".into() } else { id.into() });
+        assert_eq!(r.id, "ANe1");
+        assert_eq!(r.when, "from: spam@x.pl, larger than 2 KB");
+        assert_eq!(r.then, "to the Trash, label “Faktury”, category: promotions, skip the Inbox (archive), mark as read");
+        let empty = super::describe(&serde_json::json!({ "id": "x" }), &|id| id.into());
+        assert_eq!((empty.when.as_str(), empty.then.as_str()), ("", ""));
+        for ok in ["spam@x.pl", "a.b+c@mail.example.com", "9x@a-b.pl"] {
+            assert!(super::blockable(ok), "{ok}");
+        }
+        for bad in ["-a@x.pl", "a b@x.pl", "{a b}@x.pl", "a@x", "a@-x.pl", "a@b@x.pl", "ą@x.pl", "", "x.pl", "a@x.pl OR b"] {
+            assert!(!super::blockable(bad), "{bad}");
+        }
+    }
 }

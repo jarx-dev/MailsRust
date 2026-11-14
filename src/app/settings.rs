@@ -692,6 +692,92 @@ impl MailApp {
         }
     }
 
+    /// Reads Gmail's rules of the main account, changing one first if asked.
+    pub(super) fn rules_run(&mut self, change: net::RuleChange) {
+        // test runs and pictures never reach Google (a copied mailbox may hold a real sign-in)
+        if self.shot.is_some() || std::env::var("POCZTA_OFFLINE").is_ok() {
+            self.rules.get_or_insert(Ok(vec![]));
+            return;
+        }
+        self.rules_busy = true;
+        net::gmail_rules(self.store.account.clone(), change, self.tx.clone(), self.ctx.clone());
+    }
+
+    /// Google's sign-in once more, adding `scopes` (the chat, Gmail's rules) to what was allowed.
+    pub(super) fn sign_in_more(&mut self, scopes: &'static str, status: std::borrow::Cow<str>) {
+        let a = &self.store.account;
+        self.signing_in = true;
+        self.sign_in_error = None;
+        net::google_sign_in_more(a.oauth_client_id.clone(), a.oauth_client_secret.clone(), a.email.clone(), scopes, self.tx.clone(), self.ctx.clone());
+        self.set_status(status);
+    }
+
+    pub(super) fn rules_sign_in(&mut self) {
+        self.sign_in_more(crate::google::SCOPE_RULES, t!("mail.rules.opening_login"));
+    }
+
+    /// Gmail's rules in the account settings: every filter of the account, each can be removed.
+    fn rules_ui(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new(t!("mail.rules.title")).strong());
+        if !crate::google::has_scope(&self.store.account, crate::google::SCOPE_RULES) {
+            ui.label(RichText::new(t!("mail.rules.need_consent")).small().color(MUTED()));
+            if ui.add_enabled(!self.signing_in, egui::Button::new(t!("mail.rules.allow"))).clicked() {
+                self.rules_sign_in();
+            }
+            return;
+        }
+        if self.rules.is_none() && !self.rules_busy {
+            self.rules_run(net::RuleChange::None);
+        }
+        let busy = self.rules_busy;
+        let mut change = None;
+        match &self.rules {
+            None => {
+                ui.spinner();
+            }
+            Some(Err(e)) => {
+                ui.colored_label(FLAG, e);
+            }
+            Some(Ok(list)) if list.is_empty() => {
+                ui.label(RichText::new(t!("mail.rules.none")).small().color(MUTED()));
+            }
+            Some(Ok(list)) => {
+                egui::ScrollArea::vertical().id_salt("gmail-rules").max_height(220.0).show(ui, |ui| {
+                    for r in list {
+                        ui.horizontal(|ui| {
+                            // a second click confirms: a rule made on Gmail's page is not easy to make again
+                            ui.add_enabled_ui(!busy, |ui| {
+                                ui.menu_button(t!("mail.rules.delete"), |ui| {
+                                    if ui.button(t!("mail.rules.delete_confirm")).clicked() {
+                                        change = Some(net::RuleChange::Delete(r.id.clone()));
+                                        ui.close();
+                                    }
+                                });
+                            });
+                            ui.add(egui::Label::new(format!("{}  →  {}", r.when, r.then)).wrap());
+                        });
+                    }
+                });
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.refresh")).small()).clicked() {
+                change = Some(net::RuleChange::None);
+            }
+            if busy {
+                ui.spinner();
+            }
+            if ui.link(RichText::new(t!("mail.rules.open_gmail")).small()).clicked() {
+                // authuser: the browser may be signed in to several Google accounts
+                crate::oauth::open_url(&format!("https://mail.google.com/mail/?authuser={}#settings/filters", crate::google::enc(&self.store.account.email)));
+            }
+        });
+        ui.label(RichText::new(t!("mail.rules.note")).small().color(MUTED()));
+        if let Some(c) = change {
+            self.rules_run(c);
+        }
+    }
+
     pub(super) fn account_ui(&mut self, ctx: &egui::Context) {
         if !self.account_open {
             return;
@@ -906,6 +992,11 @@ impl MailApp {
                         }
                     });
                     ui.label(RichText::new(t!("ui.settings.account.signature_note")).small().color(MUTED()));
+                }
+                if crate::google::ready(&self.store.account) {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    self.rules_ui(ui);
                 }
                 ui.add_space(8.0);
                 ui.separator();

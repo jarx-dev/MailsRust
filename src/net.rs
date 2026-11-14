@@ -17,6 +17,33 @@ pub enum NetResult {
     Full { acct: u32, uid: u32, folder: Folder, message: Box<Message> },
     /// Copied people (DW) of an account's stored mail: (folder, uid, "a@x.pl, b@y.pl").
     Copies { acct: u32, found: Result<Vec<(Folder, u32, String)>, String> },
+    /// Gmail's rules of the account `email` read again after `change`, which failed with `failed`.
+    Rules { email: String, change: RuleChange, failed: Option<String>, list: Result<Vec<crate::google::Rule>, String> },
+}
+
+/// What to change in Gmail's rules before reading them again.
+pub enum RuleChange {
+    None,
+    /// mail from these addresses goes to the bin from now on
+    Block(Vec<String>),
+    /// the rule with this id
+    Delete(String),
+}
+
+/// Changes Gmail's rules (if asked) and reads them again, on a background thread.
+pub fn gmail_rules(acc: Account, change: RuleChange, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
+    std::thread::spawn(move || {
+        let failed = guarded(|| match &change {
+            RuleChange::None => Ok(()),
+            // one after another: Google trips over filters made at the same moment
+            RuleChange::Block(addrs) => addrs.iter().try_for_each(|a| crate::google::block_sender(&acc, a)),
+            RuleChange::Delete(id) => crate::google::delete_rule(&acc, id),
+        })
+        .err();
+        let list = guarded(|| crate::google::rules(&acc));
+        let _ = tx.send(NetResult::Rules { email: acc.email.clone(), change, failed, list });
+        ctx.request_repaint();
+    });
 }
 
 /// Runs a background job so that even an unexpected crash inside it comes back as an
@@ -141,11 +168,11 @@ pub fn google_sign_in(client_id: String, client_secret: String, tx: Sender<NetRe
     });
 }
 
-/// The same sign-in once more, adding the chat to what was allowed. It must be the same Google
-/// account as the mail's: another one would take the mailbox over.
-pub fn google_sign_in_chat(client_id: String, client_secret: String, email: String, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
+/// The same sign-in once more, adding `extra` (the chat, Gmail's rules) to what was allowed. It
+/// must be the same Google account as the mail's: another one would take the mailbox over.
+pub fn google_sign_in_more(client_id: String, client_secret: String, email: String, extra: &'static str, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
     std::thread::spawn(move || {
-        let scopes = format!("{} {}", crate::oauth::SCOPES, crate::chat::SCOPES);
+        let scopes = format!("{} {extra}", crate::oauth::SCOPES);
         let res = match crate::oauth::login_scopes(&client_id, &client_secret, &scopes) {
             Ok(r) if !email.is_empty() && !r.email.eq_ignore_ascii_case(&email) => {
                 NetResult::SignInFailed(t!("core.net.wrong_google_account", got = r.email, email = email).into_owned())

@@ -938,6 +938,23 @@ impl MailApp {
             ui.close();
         }
         ui.menu_button(t!("mail.list.menu_tags"), |ui| self.tag_menu(ui, id));
+        // a Gmail rule for the sender: only the main account signs in to Google
+        let sender = self
+            .msg(id)
+            .filter(|m| !mine && m.account == 0 && crate::google::ready(&self.store.account))
+            .map(|m| m.from_addr.trim().to_lowercase())
+            .filter(|a| crate::google::blockable(a));
+        if let Some(addr) = sender {
+            ui.menu_button(format!("{}  {}", ic::BLOCKED, t!("mail.rules.menu_block")), |ui| {
+                ui.set_max_width(340.0);
+                ui.label(RichText::new(t!("mail.rules.menu_block_explain", addr = addr)).small().color(MUTED()));
+                if ui.button(t!("mail.rules.menu_block_confirm", addr = addr)).clicked() {
+                    self.actions.push(Action::Move(id, Folder::Junk));
+                    self.actions.push(Action::BlockSender(addr.clone()));
+                    ui.close();
+                }
+            });
+        }
         ui.menu_button(t!("mail.list.menu_move_to"), |ui| {
             for f in Folder::ALL {
                 if ui.button(format!("{}  {}", f.icon(), f.name())).clicked() {
