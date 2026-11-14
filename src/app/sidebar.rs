@@ -89,6 +89,26 @@ pub(super) fn draw_tag_icon(p: &egui::Painter, c: Pos2, col: Color32) {
 }
 
 impl MailApp {
+    /// A row of the left bar as a place to drop a message dragged from the list: outlined while
+    /// one that `fits` is held over it; the message when it is let go there.
+    pub(super) fn dropped_on(&self, row: &egui::Response, fits: impl Fn(&Message) -> bool) -> Option<u64> {
+        let held = row.dnd_hover_payload::<DragMsg>()?;
+        if !self.msg(held.0).is_some_and(fits) {
+            return None;
+        }
+        row.ctx.layer_painter(row.layer_id).rect_stroke(row.rect, CornerRadius::same(4), Stroke::new(1.5, ACCENT()), egui::StrokeKind::Inside);
+        row.dnd_release_payload::<DragMsg>().map(|d| d.0)
+    }
+
+    /// Whether a message dropped on folder `f` goes there: only a move the server makes too, of a
+    /// message it knows (its number, an account that connects; a message just moved has none
+    /// until the next sync), and archiving only on Gmail (elsewhere it deletes from the server).
+    pub(super) fn drop_moves(&self, m: &Message, f: Folder) -> bool {
+        let a = self.account_ref(m.account);
+        // (test pictures: the demo messages are on no server)
+        moves_on_server(m.folder, f) && (self.shot.is_some() || (m.uid.is_some() && a.can_connect() && (f != Folder::Archive || a.imap_host == "imap.gmail.com")))
+    }
+
     /// Every tag used on any message, sorted.
     pub(super) fn all_tags(&self) -> Vec<String> {
         match &self.counts {
@@ -129,6 +149,11 @@ impl MailApp {
             self.selected = self.visible_ids().first().copied();
         }
         if !key.ends_with('/') {
+            // (the tags shown are those of the account in focus)
+            if let Some(mid) = self.dropped_on(&resp, |m| m.account == self.view_account && !m.labels.contains(&key)) {
+                self.actions.push(Action::AddTag(mid, key.clone()));
+                self.set_status(t!("ui.actions.tagged", tag = shown));
+            }
             resp.context_menu(|ui| {
                 if ui.button(t!("ui.sidebar.untag", name = shown)).clicked() {
                     let ids: Vec<u64> = self.store.messages.iter().filter(|m| m.labels.contains(&key)).map(|m| m.id).collect();
@@ -510,7 +535,12 @@ impl MailApp {
         }
         let favs = counts.tags.get(FAVOURITES).copied().unwrap_or(0);
         let on = self.view == MailView::Label && self.label_filter == FAVOURITES && self.search.is_empty();
-        if folder_row(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), &t!("ui.sidebar.favourites"), favs, on, 28.0) {
+        let fav_row = folder_row_r(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), &t!("ui.sidebar.favourites"), favs, false, on, 28.0);
+        if let Some(mid) = self.dropped_on(&fav_row, |m| !m.labels.iter().any(|l| l == FAVOURITES)) {
+            self.actions.push(Action::AddTag(mid, FAVOURITES.into()));
+            self.set_status(t!("ui.actions.tagged", tag = t!("ui.sidebar.favourites")));
+        }
+        if fav_row.clicked() {
             self.label_filter = FAVOURITES.to_string();
             self.view = MailView::Label;
             self.search.clear();
@@ -555,6 +585,9 @@ impl MailApp {
                 let unread = counts.folder_unread.get(&f).copied().unwrap_or(0);
                 if mark_all_menu(&row, unread) {
                     self.actions.push(Action::MarkAllRead(Some(0), Some(f)));
+                }
+                if let Some(mid) = self.dropped_on(&row, |m| m.account == 0 && self.drop_moves(m, f)) {
+                    self.actions.push(Action::Move(mid, f));
                 }
                 if row.clicked() {
                     self.view = MailView::Folder(f);
@@ -611,6 +644,9 @@ impl MailApp {
                     let unread = counts.acct_unread.get(&(acct, f)).copied().unwrap_or(0);
                     if mark_all_menu(&row, unread) {
                         self.actions.push(Action::MarkAllRead(Some(acct), Some(f)));
+                    }
+                    if let Some(mid) = self.dropped_on(&row, |m| m.account == acct && self.drop_moves(m, f)) {
+                        self.actions.push(Action::Move(mid, f));
                     }
                     if row.clicked() {
                         self.view = MailView::Folder(f);

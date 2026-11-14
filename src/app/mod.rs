@@ -1180,6 +1180,23 @@ impl eframe::App for MailApp {
         // test pictures: a mouse resting over the window must not leave a hover on them
         if self.shot.is_some() {
             raw.events.retain(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_) | egui::Event::PointerButton { .. }));
+            // POCZTA_DRAG="x1,y1:x2,y2": the picture's own mouse drags from one point to the other
+            // (in the window's points), and with POCZTA_DRAG_DROP lets go there; the same point
+            // twice is a plain click (never with POCZTA_SHOT_REAL: that mailbox may reach a server)
+            let script = if std::env::var("POCZTA_SHOT_REAL").is_ok() { String::new() } else { std::env::var("POCZTA_DRAG").unwrap_or_default() };
+            let n: Vec<f32> = script.split([',', ':']).filter_map(|x| x.trim().parse().ok()).collect();
+            if let [x1, y1, x2, y2] = n[..] {
+                let (a, b) = (egui::pos2(x1, y1), egui::pos2(x2, y2));
+                let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+                let release = if a == b { 32 } else { 60 };
+                match self.frames {
+                    f if f == release && std::env::var("POCZTA_DRAG_DROP").is_ok() => raw.events.push(press(b, false)),
+                    30 => raw.events.push(egui::Event::PointerMoved(a)),
+                    31 => raw.events.push(press(a, true)),
+                    f @ 32..=51 => raw.events.push(egui::Event::PointerMoved(a + (b - a) * ((f - 31) as f32 / 20.0))),
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -1759,5 +1776,15 @@ mod tests {
         // saved before the flag existed: an untouched demo account still gets its Google name
         let old: Account = ron::from_str("(display_name: \"Aleks Nowicki\", email: \"aleks@example.com\", imap_host: \"\", imap_port: 993, smtp_host: \"\", smtp_port: 587, username: \"\")").unwrap();
         assert!(old.takes_google_name());
+    }
+
+    /// A message dragged onto a folder is accepted only where the server gets the same move;
+    /// any other drop would change this computer's copy alone.
+    #[test]
+    fn drops_only_where_the_server_moves_too() {
+        use super::list::moves_on_server;
+        use crate::model::Folder::*;
+        assert!(moves_on_server(Inbox, Archive) && moves_on_server(Inbox, Trash) && moves_on_server(Junk, Inbox) && moves_on_server(Sent, Trash) && moves_on_server(Sent, Junk));
+        assert!(!moves_on_server(Archive, Inbox) && !moves_on_server(Inbox, Sent) && !moves_on_server(Drafts, Trash) && !moves_on_server(Inbox, Inbox));
     }
 }
