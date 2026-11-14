@@ -74,16 +74,7 @@ impl MailApp {
                         }
                         self.queue_op(id, |uid| net::Op::Seen { uid, on: true });
                     }
-                    // a big message stored with its header only: fetch the rest now
-                    let partial = self
-                        .msg(id)
-                        .filter(|m| m.partial && matches!(m.folder, Folder::Inbox | Folder::Sent))
-                        .and_then(|m| m.uid.map(|u| (m.folder, u, m.account)));
-                    if let Some((folder, uid, acct)) = partial {
-                        if self.account_ref(acct).can_connect() && self.fetching_full.insert((folder, uid)) {
-                            net::fetch_full(self.account_for(acct), acct, uid, folder, self.tx.clone(), self.ctx.clone());
-                        }
-                    }
+                    self.fetch_full_if_partial(id, true);
                 }
                 Action::OpenWindow(id) => {
                     if let Some(r) = self.readers.iter().find(|r| r.msg.id == id) {
@@ -137,6 +128,8 @@ impl MailApp {
                     }
                 }
                 Action::RemoveTag(id, tag) => {
+                    let next = self.neighbour(id);
+                    let listed = self.visible_ids().contains(&id);
                     let removed = self.msg_mut(id).map(|m| {
                         let before = m.labels.len();
                         m.labels.retain(|l| *l != tag);
@@ -145,6 +138,14 @@ impl MailApp {
                     if removed == Some(true) {
                         let t = tag.clone();
                         self.queue_op(id, move |uid| net::Op::Label { uid, label: t, add: false });
+                        // gone from the tag's list: the next one of it is shown, like after moving
+                        if listed && self.selected == Some(id) {
+                            self.touched = true;
+                            self.refresh_caches();
+                            if !self.visible_ids().contains(&id) {
+                                self.go_to_neighbour(next);
+                            }
+                        }
                     }
                 }
                 Action::Reply(id, all) => {
@@ -212,7 +213,8 @@ impl MailApp {
                 }
                 Action::Move(id, f) => {
                     let next = self.neighbour(id);
-                    let leaves = self.msg(id).is_some_and(|m| m.folder != f);
+                    // (one opened from outside the list, e.g. from a conversation, stays open)
+                    let leaves = self.msg(id).is_some_and(|m| m.folder != f) && self.visible_ids().contains(&id);
                     let from = self.msg(id).map(|m| m.folder);
                     match (from, f) {
                         (Some(a), b) if a == b => {}
@@ -232,8 +234,12 @@ impl MailApp {
                     }
                     self.set_status(t!("ui.actions.moved_to", folder = f.name()));
                     // moved out of the list: the next one is shown, like after deleting
-                    if leaves && self.selected == Some(id) && !self.visible_ids().contains(&id) {
-                        self.go_to_neighbour(next);
+                    if leaves && self.selected == Some(id) {
+                        self.touched = true;
+                        self.refresh_caches();
+                        if !self.visible_ids().contains(&id) {
+                            self.go_to_neighbour(next);
+                        }
                     }
                 }
                 Action::BlockSender(addr) => {
@@ -447,7 +453,7 @@ impl MailApp {
         }
     }
 
-    /// The message after uid=197608(Jarek) gid=197121 groups=197121 in the list shown (or the one before it, when it is the last).
+    /// The message after `id` in the list shown (or the one before it, when it is the last).
     pub(super) fn neighbour(&self, id: u64) -> Option<u64> {
         let ids = self.visible_ids();
         let pos = ids.iter().position(|x| *x == id)?;

@@ -85,6 +85,23 @@ impl MailApp {
         }
     }
 
+    /// A big message stored with its header only: fetches the rest (once; the reply fills it in).
+    /// After a failed try only `retry` (the person opening it) tries again.
+    pub(super) fn fetch_full_if_partial(&mut self, id: u64, retry: bool) {
+        let partial = self
+            .msg(id)
+            .filter(|m| m.partial && matches!(m.folder, Folder::Inbox | Folder::Sent))
+            .and_then(|m| m.uid.map(|u| (m.account, m.folder, u)));
+        if let Some(key @ (acct, folder, uid)) = partial {
+            let free = self.fetching_full.get(&key).is_none_or(|failed| *failed && retry);
+            if free && self.account_ref(acct).can_connect() {
+                self.fetching_full.insert(key, false);
+                self.busy += 1;
+                net::fetch_full(self.account_for(acct), acct, uid, folder, self.tx.clone(), self.ctx.clone());
+            }
+        }
+    }
+
     /// A message shown in the reading pane for a moment counts as read (as if it had been
     /// clicked): after 1 second.
     pub(super) fn read_after_a_while(&mut self, ctx: &egui::Context) {
@@ -811,12 +828,22 @@ impl MailApp {
                 }
             }
             ui.add_space(12.0);
-            // A big message stored with its header only: the rest is on its way.
+            // A big message stored with its header only: the rest is on its way (or it couldn't be had).
             if m.partial && m.body.is_empty() && m.html_path.is_empty() {
                 ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    ui.add(egui::Spinner::new().size(14.0).color(ACCENT()));
-                    ui.label(RichText::new(t!("mail.reading.downloading_full")).color(MUTED()));
+                self.fetch_full_if_partial(m.id, false);
+                let state = m.uid.and_then(|u| self.fetching_full.get(&(m.account, m.folder, u)).copied());
+                ui.horizontal_wrapped(|ui| {
+                    if state == Some(false) {
+                        ui.add(egui::Spinner::new().size(14.0).color(ACCENT()));
+                        ui.label(RichText::new(t!("mail.reading.downloading_full")).color(MUTED()));
+                    } else {
+                        ui.label(RichText::new(t!("mail.reading.full_not_downloaded")).color(MUTED()));
+                        // (only after a try that failed: otherwise there is nothing it could do)
+                        if state == Some(true) && ui.link(t!("ui.sidebar.retry")).clicked() {
+                            self.fetch_full_if_partial(m.id, true);
+                        }
+                    }
                 });
                 return;
             }

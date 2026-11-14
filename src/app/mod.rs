@@ -334,8 +334,8 @@ pub struct MailApp {
     prefs: Prefs,
     finder: crate::finder::Finder,
     db: Option<crate::db::Db>,
-    /// big messages whose full text is being downloaded (by server number)
-    fetching_full: std::collections::HashSet<(Folder, u32)>,
+    /// big messages whose full text is being downloaded (by account and server number); true: it failed
+    fetching_full: HashMap<(u32, Folder, u32), bool>,
     sign_in_error: Option<String>,
     oauth_setup: bool,
     last_scan: f64,
@@ -953,6 +953,15 @@ tel.: 600-100-200".into();
             for (m, tags) in app.store.messages.iter_mut().filter(|m| m.folder == Folder::Inbox).zip(sets.iter().cycle()) {
                 m.labels = tags.iter().map(|t| t.to_string()).collect();
             }
+            if std::env::var("POCZTA_START").as_deref() == Ok("untag") && app.shot.is_some() {
+                // test picture: in the "Natubay" tag's list, the open message's tag taken off
+                app.view = MailView::Label;
+                app.label_filter = "Natubay".into();
+                app.selected = app.visible_ids().first().copied();
+                if let Some(id) = app.selected {
+                    app.actions.push(Action::RemoveTag(id, "Natubay".into()));
+                }
+            }
         }
         if std::env::var("POCZTA_LOGO_TEST").is_ok() {
             for (who, addr) in [("Zespół rozliczeń", "rozliczenia@wikipedia.org"), ("Dział IT", "it@mozilla.org"), ("Billing team", "billing@wikipedia.org"), ("IT department", "it@mozilla.org")] {
@@ -1003,6 +1012,19 @@ tel.: 600-100-200".into();
                     app.thread_unfolded.insert(last.id);
                     app.thread_for = Some(first.id);
                     app.main_folded = std::env::var("POCZTA_FOLD_MAIN").is_ok();
+                }
+                if let Some(which) = std::env::var("POCZTA_PARTIAL").ok().filter(|_| app.shot.is_some()) {
+                    // test picture: the unfolded one (POCZTA_PARTIAL=main: the open one) stored with its
+                    // header only, its text asked for (from a made-up server that refuses at once)
+                    let target = if which == "main" { app.store.messages.iter_mut().find(|m| m.id == first.id) } else { app.store.messages.last_mut() };
+                    if let Some(m) = target {
+                        m.partial = true;
+                        m.body.clear();
+                        m.html_path.clear();
+                        m.uid = Some(1);
+                    }
+                    let a = &mut app.store.account;
+                    (a.imap_host, a.imap_port, a.username, a.password) = ("127.0.0.1".into(), 1, "test".into(), "test".into());
                 }
                 if std::env::var("POCZTA_OPEN_OLDEST").is_ok() {
                     // test picture: the oldest one open, more newer ones below it than fit
