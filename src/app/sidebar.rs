@@ -3,6 +3,18 @@ use super::*;
 /// The Gmail label that holds favourite messages.
 pub(super) const FAVOURITES: &str = "Ulubione";
 
+/// A new folder's name from what was typed: trimmed, not empty, not the favourites' label, not
+/// a folder already there (in any letter case), and a label Gmail gives back as it was sent
+/// (none of its own names, no quotes or backslashes, no "/" at either end).
+pub(super) fn folder_name(typed: &str, have: &[String]) -> Option<String> {
+    let name = typed.trim();
+    let low = name.to_lowercase();
+    const GMAIL: [&str; 9] = ["inbox", "sent", "drafts", "spam", "trash", "starred", "important", "unread", "chats"];
+    let taken = low == FAVOURITES.to_lowercase() || GMAIL.contains(&low.as_str()) || low.starts_with("[gmail]") || have.iter().any(|f| f.to_lowercase() == low);
+    let odd = name.contains(['"', '\\']) || name.starts_with('/') || name.ends_with('/');
+    (!name.is_empty() && !taken && !odd).then(|| name.to_string())
+}
+
 /// Small square button with a double chevron: "»" folds the calendar away, "«" brings it back.
 pub(super) fn fold_button(ui: &mut Ui, fold: bool) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
@@ -106,7 +118,16 @@ impl MailApp {
     pub(super) fn drop_moves(&self, m: &Message, f: Folder) -> bool {
         let a = self.account_ref(m.account);
         // (test pictures: the demo messages are on no server)
-        moves_on_server(m.folder, f) && (self.shot.is_some() || (m.uid.is_some() && a.can_connect() && (f != Folder::Archive || a.imap_host == "imap.gmail.com")))
+        moves_on_server(m.folder, f) && (self.shot.is_some() || (m.uid.is_some() && a.can_connect() && (f != Folder::Archive || a.imap_host.trim().eq_ignore_ascii_case("imap.gmail.com"))))
+    }
+
+    /// Whether a tag (a Gmail label: a tag, the favourites, an own folder) given to `m` reaches
+    /// the server too. Elsewhere it would stay on this computer only and a later sync could take
+    /// it off again: a Gmail account that connects, a message it has a number for, not in the bin.
+    pub(super) fn labels_on_server(&self, m: &Message) -> bool {
+        let a = self.account_ref(m.account);
+        // (test pictures: the demo messages are on no server)
+        self.shot.is_some() || (m.uid.is_some() && a.can_connect() && a.imap_host.trim().eq_ignore_ascii_case("imap.gmail.com") && matches!(m.folder, Folder::Inbox | Folder::Sent | Folder::Junk))
     }
 
     /// Every tag used on any message, sorted.
@@ -150,7 +171,7 @@ impl MailApp {
         }
         if !key.ends_with('/') {
             // (the tags shown are those of the account in focus)
-            if let Some(mid) = self.dropped_on(&resp, |m| m.account == self.view_account && !m.labels.contains(&key)) {
+            if let Some(mid) = self.dropped_on(&resp, |m| m.account == self.view_account && !m.labels.contains(&key) && self.labels_on_server(m)) {
                 self.actions.push(Action::AddTag(mid, key.clone()));
                 self.set_status(t!("ui.actions.tagged", tag = shown));
             }
@@ -495,9 +516,20 @@ impl MailApp {
 
     pub(super) fn folder_list(&mut self, ui: &mut Ui) {
         ui.add_space(10.0);
+        let mut opened = false;
         ui.horizontal(|ui| {
             ui.add_space(12.0);
             ui.label(RichText::new(t!("ui.sidebar.nav.mail")).font(semibold(16.0)).color(TEXT()));
+            // a small "+" at the heading's end: a new folder of one's own (no row of its own)
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(10.0);
+                let add = ui.add(egui::Button::new(RichText::new(ic::ADD).size(12.0).color(MUTED())).frame(false)).on_hover_text(t!("ui.sidebar.new_folder"));
+                if add.clicked() {
+                    // (a name already being typed stays)
+                    self.new_folder.get_or_insert_with(String::new);
+                    opened = true;
+                }
+            });
         });
         ui.add_space(6.0);
         // dense rows, as in eM Client: one row every 27 px
@@ -536,7 +568,7 @@ impl MailApp {
         let favs = counts.tags.get(FAVOURITES).copied().unwrap_or(0);
         let on = self.view == MailView::Label && self.label_filter == FAVOURITES && self.search.is_empty();
         let fav_row = folder_row_r(ui, ic::STAR, Color32::from_rgb(0xE0, 0xA1, 0x00), &t!("ui.sidebar.favourites"), favs, false, on, 28.0);
-        if let Some(mid) = self.dropped_on(&fav_row, |m| !m.labels.iter().any(|l| l == FAVOURITES)) {
+        if let Some(mid) = self.dropped_on(&fav_row, |m| !m.labels.iter().any(|l| l == FAVOURITES) && self.labels_on_server(m)) {
             self.actions.push(Action::AddTag(mid, FAVOURITES.into()));
             self.set_status(t!("ui.actions.tagged", tag = t!("ui.sidebar.favourites")));
         }
@@ -545,6 +577,65 @@ impl MailApp {
             self.view = MailView::Label;
             self.search.clear();
             self.selected = self.visible_ids().first().copied();
+        }
+        // the person's own folders: a Gmail label, with the mail of every account
+        for name in self.prefs.my_folders.clone() {
+            let n = counts.mine.get(&name).copied().unwrap_or(0);
+            let on = self.view == MailView::Mine && self.label_filter == name && self.search.is_empty();
+            let row = folder_row_r(ui, ic::FOLDER, MUTED(), &name, n, false, on, 28.0);
+            if let Some(mid) = self.dropped_on(&row, |m| !m.labels.iter().any(|l| same_label(l, &name)) && self.labels_on_server(m)) {
+                self.actions.push(Action::AddTag(mid, name.clone()));
+                self.set_status(t!("ui.actions.tagged", tag = name));
+            }
+            row.context_menu(|ui| {
+                if ui.button(t!("ui.sidebar.remove_folder", name = name)).on_hover_text(t!("ui.sidebar.remove_folder_tip")).clicked() {
+                    self.prefs.my_folders.retain(|f| *f != name);
+                    if self.view == MailView::Mine && self.label_filter == name {
+                        self.view = MailView::Folder(Folder::Inbox);
+                        self.view_account = 0;
+                        self.selected = self.visible_ids().first().copied();
+                    }
+                    self.save_now = true;
+                    ui.close();
+                }
+            });
+            if row.clicked() {
+                self.label_filter = name.clone();
+                self.view = MailView::Mine;
+                self.search.clear();
+                self.selected = self.visible_ids().first().copied();
+            }
+        }
+        if let Some(mut text) = self.new_folder.take() {
+            // open only while typed into: Enter makes the folder; Escape, a click elsewhere or
+            // another module drops it
+            let mut keep = false;
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                let r = ui.add(egui::TextEdit::singleline(&mut text).id(id("new-folder")).hint_text(t!("ui.sidebar.new_folder_hint")).desired_width(ui.available_width() - 12.0));
+                // (asked for after the field is drawn: on the frame of the click on "+", a focus
+                // asked for earlier goes back to nothing, as the click was not on the field)
+                if opened {
+                    r.request_focus();
+                }
+                keep = ui.memory(|m| m.has_focus(r.id));
+                if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    match folder_name(&text, &self.prefs.my_folders) {
+                        Some(name) => {
+                            // a Gmail label already there keeps its spelling (Gmail ignores letter case)
+                            let low = name.to_lowercase();
+                            let name = self.store.messages.iter().flat_map(|m| m.labels.iter()).find(|l| l.to_lowercase() == low).cloned().unwrap_or(name);
+                            self.prefs.my_folders.push(name);
+                            self.save_now = true;
+                        }
+                        None if !text.trim().is_empty() => self.set_status(t!("ui.sidebar.folder_name_bad")),
+                        None => {}
+                    }
+                }
+            });
+            if keep {
+                self.new_folder = Some(text);
+            }
         }
         ui.add_space(8.0);
         // Account group
@@ -664,6 +755,8 @@ impl MailApp {
         // Tags (Gmail labels), with how many messages carry each (favourites have their own row).
         let mut tags = counts.tags.clone();
         tags.remove(FAVOURITES);
+        // (own folders have their rows up top)
+        tags.retain(|t, _| !self.prefs.my_folders.iter().any(|f| same_label(f, t)));
         if !tags.is_empty() {
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
             if resp.hovered() {

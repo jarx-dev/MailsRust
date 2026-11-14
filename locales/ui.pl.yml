@@ -183,6 +183,11 @@ ui:
     collapse: "Zwiń"
     untag: "Odepnij „%{name}” od wszystkich wiadomości"
     new_tag: "Nowy tag…"
+    new_folder: "Nowy folder"
+    new_folder_hint: "Nazwa folderu i Enter"
+    remove_folder: "Usuń folder „%{name}”"
+    remove_folder_tip: "Wiadomości zostają, z tagiem o tej nazwie"
+    folder_name_bad: "Taki folder już jest albo tej nazwy nie można użyć"
     add: "Dodaj"
     mark_all_read: "✓  Oznacz wszystkie jako przeczytane"
     categories:

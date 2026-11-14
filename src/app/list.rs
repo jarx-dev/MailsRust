@@ -30,6 +30,12 @@ pub(super) fn moves_on_server(from: Folder, to: Folder) -> bool {
     matches!((from, to), (Inbox | Sent | Junk, Trash) | (Inbox | Sent | Trash, Junk) | (Inbox, Archive) | (Trash | Junk, Inbox))
 }
 
+/// The same Gmail label in any letter case (Gmail ignores it; two accounts may spell it apart),
+/// compared without copying either name.
+pub(super) fn same_label(a: &str, b: &str) -> bool {
+    a.chars().flat_map(char::to_lowercase).eq(b.chars().flat_map(char::to_lowercase))
+}
+
 pub(super) const ROW_H: f32 = 66.0;
 
 pub(super) const GROUP_H: f32 = 32.0;
@@ -48,6 +54,8 @@ pub(super) struct Counts {
     pub(super) inbox_unread_all: usize,
     pub(super) tags: std::collections::BTreeMap<String, usize>,
     pub(super) group_total: HashMap<String, usize>,
+    /// the person's own folders: messages of every account with that label
+    pub(super) mine: HashMap<String, usize>,
 }
 
 /// Where a search looks: everywhere, in received mail, or in sent mail.
@@ -77,6 +85,8 @@ pub(super) enum MailView {
     NoReply,
     /// Messages with the tag in `MailApp::label_filter`.
     Label,
+    /// One of the person's own folders (`label_filter`): that label on every account's mail.
+    Mine,
 }
 
 impl MailView {
@@ -89,7 +99,7 @@ impl MailView {
             MailView::Unread => 0,
             MailView::Flagged => 1,
             MailView::NoReply => 2,
-            MailView::Label => 3,
+            MailView::Label | MailView::Mine => 3,
         };
         let names = NAMES.get_or_init(|| {
             let keep = |s: std::borrow::Cow<str>| -> &'static str { Box::leak(s.into_owned().into_boxed_str()) };
@@ -158,6 +168,13 @@ impl MailApp {
         }
         // (tags are counted for the account in focus: a change of account counts again)
         let key = self.msg_sig ^ (self.view_account as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        // (a folder made or removed counts again too)
+        let key = key ^ {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            self.prefs.my_folders.hash(&mut h);
+            h.finish()
+        };
         if let Some((sig, c)) = &self.counts {
             if *sig == key {
                 return c.clone();
@@ -168,6 +185,7 @@ impl MailApp {
         // counted by the tag names as they are (no copies); copied once per tag at the end
         let mut tags: HashMap<&str, usize> = HashMap::new();
         let mut group_total: HashMap<&str, usize> = HashMap::new();
+        let mut mine: HashMap<&str, usize> = HashMap::new();
         let mut folder_count = [0usize; 16];
         let mut folder_unread = [0usize; 16];
         for m in &self.store.messages {
@@ -197,6 +215,12 @@ impl MailApp {
             // ("Oznaczone": the main account only)
             if m.flagged && m.account == 0 {
                 c.flagged += 1;
+            }
+            // own folders: every account (counted under the folder's own spelling)
+            for l in &m.labels {
+                if let Some(f) = self.prefs.my_folders.iter().find(|f| same_label(f, l)) {
+                    *mine.entry(f.as_str()).or_default() += 1;
+                }
             }
             // tags: of the account in focus only
             if m.account != self.view_account {
@@ -231,6 +255,7 @@ impl MailApp {
         }
         c.tags = tags.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
         c.group_total = group_total.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        c.mine = mine.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
         let c = Arc::new(c);
         self.counts = Some((key, c.clone()));
         c
@@ -492,7 +517,7 @@ impl MailApp {
         let hits = self.finder.hits().map(|h| (h.as_ptr() as usize, h.len())).unwrap_or((0, 0));
         // folders and search results don't change with read / flagged / tags (only these views do),
         // so opening a message (which marks it read) doesn't sort the whole folder again
-        let about_flags = matches!(self.view, MailView::Unread | MailView::Flagged | MailView::Label | MailView::NoReply) && self.search.trim().is_empty();
+        let about_flags = matches!(self.view, MailView::Unread | MailView::Flagged | MailView::Label | MailView::Mine | MailView::NoReply) && self.search.trim().is_empty();
         let sig = if about_flags { self.msg_sig } else { self.struct_sig };
         // (the list without replies also changes when the replies have been found again)
         let sig = if self.view == MailView::NoReply { sig ^ self.answered.0.rotate_left(17) ^ (self.prefs.no_reply_needed.len() as u64).rotate_left(40) } else { sig };
@@ -577,6 +602,7 @@ impl MailApp {
                                 *l == self.label_filter || (self.label_filter.ends_with('/') && l.starts_with(&self.label_filter))
                             })
                     }
+                    MailView::Mine => m.folder != Folder::Trash && m.labels.iter().any(|l| same_label(l, &self.label_filter)),
                 }
             })
             .filter(|m| {
@@ -692,7 +718,7 @@ impl MailApp {
             let name = if self.view == MailView::Label && self.label_filter == FAVOURITES {
                 // the Gmail label keeps its Polish name; the heading follows the language
                 t!("ui.sidebar.favourites").into_owned()
-            } else if self.view == MailView::Label { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
+            } else if matches!(self.view, MailView::Label | MailView::Mine) { pretty_label(self.label_filter.trim_end_matches('/')) } else { self.view.title().to_string() };
             let unread = match self.view {
                 MailView::Folder(f) => self.counts().folder_unread.get(&f).copied().unwrap_or(0),
                 _ => vis.unread,
@@ -971,6 +997,22 @@ impl MailApp {
             ui.close();
         }
         ui.menu_button(t!("mail.list.menu_tags"), |ui| self.tag_menu(ui, id));
+        // the person's own folders (dragging the message onto one does the same)
+        if !self.prefs.my_folders.is_empty() {
+            let (has, reaches) = self.msg(id).map(|m| (m.labels.clone(), self.labels_on_server(m))).unwrap_or_default();
+            ui.add_enabled_ui(reaches, |ui| {
+                ui.menu_button(t!("mail.list.menu_to_folder"), |ui| {
+                    for f in self.prefs.my_folders.clone() {
+                        if ui.add_enabled(!has.iter().any(|l| same_label(l, &f)), egui::Button::new(format!("{}  {}", ic::FOLDER, f))).clicked() {
+                            self.actions.push(Action::AddTag(id, f.clone()));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_disabled_hover_text(t!("mail.list.menu_to_folder_off"));
+            });
+        }
         // a Gmail rule for the sender: only the main account signs in to Google
         let sender = self
             .msg(id)

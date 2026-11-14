@@ -117,6 +117,8 @@ mail:
     menu_fav_tip: "Favorites are stored in Gmail as the “Ulubione” label, so they show on your phone too"
     menu_tags: "🏷  Tags"
     menu_move_to: "Move to"
+    menu_to_folder: "Add to folder"
+    menu_to_folder_off: "Only messages of a Gmail account, already fetched from the server (not from the bin)"
     menu_delete: "🗑  Delete"
     group_today: "Today"
     group_yesterday: "Yesterday"

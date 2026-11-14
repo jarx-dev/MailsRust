@@ -108,6 +108,8 @@ pub mod ic {
     pub const DOWNLOAD: &str = "\u{E896}";
     pub const CHAT: &str = "\u{E8F2}";
     pub const ATTACH: &str = "\u{E723}";
+    pub const FOLDER: &str = "\u{E8B7}";
+    pub const ADD: &str = "\u{E710}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

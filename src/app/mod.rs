@@ -83,6 +83,8 @@ struct Prefs {
     google_contacts: bool,
     /// Google Chat in the app (Google Workspace accounts)
     google_chat: bool,
+    /// the person's own folders: Gmail labels shown with every account's mail, under "Ulubione"
+    my_folders: Vec<String>,
     /// the interface language ("en" or "pl"); settings saved before it existed were Polish
     #[serde(default = "lang_before_choice")]
     lang: String,
@@ -114,6 +116,7 @@ impl Default for Prefs {
             google_calendar: true,
             google_contacts: true,
             google_chat: true,
+            my_folders: vec![],
             lang: "en".into(),
         }
     }
@@ -319,6 +322,8 @@ pub struct MailApp {
     extra_folded: HashSet<usize>,
     ops_running: bool,
     new_tag: String,
+    /// the name being typed for a new folder of the left bar (None: no field shown)
+    new_folder: Option<String>,
     receiving: bool,
     quiet_sync: bool,
     last_sync: f64,
@@ -565,6 +570,7 @@ impl MailApp {
             extra_folded: HashSet::new(),
             ops_running: false,
             new_tag: String::new(),
+            new_folder: None,
             receiving: false,
             quiet_sync: false,
             last_sync: -1.0,
@@ -891,6 +897,16 @@ tel.: 600-100-200".into();
                 }
             }
         }
+        if app.shot.is_some() {
+            // test pictures: POCZTA_MY_FOLDERS="A,B" own folders; POCZTA_START=new-folder: a name being typed
+            if let Ok(v) = std::env::var("POCZTA_MY_FOLDERS") {
+                app.prefs.my_folders = v.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect();
+            }
+            if std::env::var("POCZTA_START").as_deref() == Ok("new-folder") {
+                app.new_folder = Some("Do zrobienia".into());
+                cc.egui_ctx.memory_mut(|m| m.request_focus(id("new-folder")));
+            }
+        }
         if std::env::var("POCZTA_START").as_deref() == Ok("mark-all") {
             // test picture: the inbox marked read as a whole (its number gone)
             app.actions.push(Action::MarkAllRead(Some(0), Some(Folder::Inbox)));
@@ -1194,6 +1210,18 @@ impl eframe::App for MailApp {
                     30 => raw.events.push(egui::Event::PointerMoved(a)),
                     31 => raw.events.push(press(a, true)),
                     f @ 32..=51 => raw.events.push(egui::Event::PointerMoved(a + (b - a) * ((f - 31) as f32 / 20.0))),
+                    _ => {}
+                }
+            }
+            // POCZTA_TYPE: then types this text (POCZTA_TYPE_ENTER: and presses Enter)
+            if let Some(text) = std::env::var("POCZTA_TYPE").ok().filter(|_| !script.is_empty()) {
+                match self.frames {
+                    40 => raw.events.push(egui::Event::Text(text)),
+                    45 if std::env::var("POCZTA_TYPE_ENTER").is_ok() => {
+                        for pressed in [true, false] {
+                            raw.events.push(egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1786,5 +1814,25 @@ mod tests {
         use crate::model::Folder::*;
         assert!(moves_on_server(Inbox, Archive) && moves_on_server(Inbox, Trash) && moves_on_server(Junk, Inbox) && moves_on_server(Sent, Trash) && moves_on_server(Sent, Junk));
         assert!(!moves_on_server(Archive, Inbox) && !moves_on_server(Inbox, Sent) && !moves_on_server(Drafts, Trash) && !moves_on_server(Inbox, Inbox));
+    }
+
+    /// A new folder needs a name of its own: not empty, not the favourites, not one already
+    /// there in another letter case.
+    #[test]
+    fn new_folder_names() {
+        use super::sidebar::folder_name;
+        let have = vec!["Do zrobienia".to_string()];
+        assert_eq!(folder_name("  Faktury ", &have).as_deref(), Some("Faktury"));
+        assert_eq!(folder_name("   ", &have), None);
+        assert_eq!(folder_name("do ZROBIENIA", &have), None);
+        assert_eq!(folder_name("ulubione", &have), None);
+        // Gmail's own names and labels it would not give back as sent
+        for bad in ["Inbox", "[Gmail]/Spam", "a\"b", "back\\slash", "/x", "x/"] {
+            assert_eq!(folder_name(bad, &have), None, "{bad}");
+        }
+        assert_eq!(folder_name("Klienci/Pilne", &have).as_deref(), Some("Klienci/Pilne"));
+        // a folder takes in its label however an account spells it
+        use super::list::same_label;
+        assert!(same_label("Ważne", "WAŻNE") && same_label("faktury", "Faktury") && !same_label("Faktury", "Faktura"));
     }
 }

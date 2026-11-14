@@ -119,6 +119,8 @@ mail:
     menu_fav_tip: "Ulubione są w Gmailu etykietą „Ulubione”, więc widać je też w telefonie"
     menu_tags: "🏷  Tagi"
     menu_move_to: "Przenieś do"
+    menu_to_folder: "Dodaj do folderu"
+    menu_to_folder_off: "Tylko wiadomości z konta Gmail, już pobrane z serwera (nie z Kosza)"
     menu_delete: "🗑  Usuń"
     group_today: "Dzisiaj"
     group_yesterday: "Wczoraj"
