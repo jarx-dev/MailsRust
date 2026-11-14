@@ -153,6 +153,7 @@ ui:
       new: "New"
       new_event: "New"
       refresh: "Refresh"
+      delete: "Delete"
       today: "Today"
       month: "Month"
       week: "Week"

@@ -154,6 +154,7 @@ ui:
       new: "Nowy"
       new_event: "Nowe"
       refresh: "Odśwież"
+      delete: "Usuń"
       today: "Dziś"
       month: "Miesiąc"
       week: "Tydzień"
