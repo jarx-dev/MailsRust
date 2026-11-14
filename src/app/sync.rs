@@ -819,8 +819,16 @@ specjalista ds. Informatyki".into();
                     }
                 }
                 NetResult::Full { acct, uid, folder, message } => {
-                    self.fetching_full.remove(&(folder, uid));
-                    let m = *message;
+                    let m = match message {
+                        Ok(m) => *m,
+                        Err(error) => {
+                            // kept as failed: the card says so instead of waiting; opening it tries again
+                            self.fetching_full.insert((acct, folder, uid), true);
+                            self.set_status(t!("core.sync.failed", what = t!("core.sync.what_receiving"), error = error).into_owned());
+                            continue;
+                        }
+                    };
+                    self.fetching_full.remove(&(acct, folder, uid));
                     if let Some(old) = self.store.messages.iter_mut().find(|x| x.folder == folder && x.account == acct && x.uid == Some(uid)) {
                         let oid = old.id;
                         old.body = m.body;
@@ -829,7 +837,10 @@ specjalista ds. Informatyki".into();
                         old.attachments = m.attachments;
                         old.attachment_files = m.attachment_files;
                         old.partial = false;
-                        self.mail_view.reload();
+                        // (a conversation's card filled in leaves the open message's view as it is)
+                        if self.selected == Some(oid) {
+                            self.mail_view.reload();
+                        }
                         if self.html_cache.as_ref().map(|c| c.0) == Some(oid) {
                             self.html_cache = None;
                         }

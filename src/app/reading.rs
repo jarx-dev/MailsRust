@@ -85,6 +85,23 @@ impl MailApp {
         }
     }
 
+    /// A big message stored with its header only: fetches the rest (once; the reply fills it in).
+    /// After a failed try only `retry` (the person opening it) tries again.
+    pub(super) fn fetch_full_if_partial(&mut self, id: u64, retry: bool) {
+        let partial = self
+            .msg(id)
+            .filter(|m| m.partial && matches!(m.folder, Folder::Inbox | Folder::Sent))
+            .and_then(|m| m.uid.map(|u| (m.account, m.folder, u)));
+        if let Some(key @ (acct, folder, uid)) = partial {
+            let free = self.fetching_full.get(&key).is_none_or(|failed| *failed && retry);
+            if free && self.account_ref(acct).can_connect() {
+                self.fetching_full.insert(key, false);
+                self.busy += 1;
+                net::fetch_full(self.account_for(acct), acct, uid, folder, self.tx.clone(), self.ctx.clone());
+            }
+        }
+    }
+
     /// A message shown in the reading pane for a moment counts as read (as if it had been
     /// clicked): after 1 second.
     pub(super) fn read_after_a_while(&mut self, ctx: &egui::Context) {

@@ -46,13 +46,7 @@ impl MailApp {
         self.ctx.copy_text(url);
         self.flash(&t!("ui.settings.ai_link_copied"));
         // a big message with only its header here: get the rest, the shared copy follows
-        if m.partial && matches!(m.folder, Folder::Inbox | Folder::Sent) {
-            if let Some(uid) = m.uid {
-                if self.store.account.can_connect() && self.fetching_full.insert((m.folder, uid)) {
-                    net::fetch_full(self.account_for(m.account), m.account, uid, m.folder, self.tx.clone(), self.ctx.clone());
-                }
-            }
-        }
+        self.fetch_full_if_partial(m.id, true);
     }
 
     /// Links shared before (and not expired) work again after the app restarts.

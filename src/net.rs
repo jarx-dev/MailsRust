@@ -13,8 +13,8 @@ pub enum NetResult {
     SignInFailed(String),
     /// Queued changes were saved on the server.
     Synced,
-    /// The full version of a message that was stored with its header only.
-    Full { acct: u32, uid: u32, folder: Folder, message: Box<Message> },
+    /// The full version of a message that was stored with its header only (or why it couldn't be had).
+    Full { acct: u32, uid: u32, folder: Folder, message: Result<Box<Message>, String> },
     /// Copied people (DW) of an account's stored mail: (folder, uid, "a@x.pl, b@y.pl").
     Copies { acct: u32, found: Result<Vec<(Folder, u32, String)>, String> },
     /// Gmail's rules of the account `email` read again after `change`. `done`: how many messages
@@ -475,10 +475,7 @@ pub fn fetch_full(account: Account, acct: u32, uid: u32, folder: Folder, tx: Sen
             let _ = session.logout();
             Ok(m)
         });
-        let _ = tx.send(match res {
-            Ok(m) => NetResult::Full { acct, uid, folder, message: Box::new(m) },
-            Err(e) => NetResult::Failed { what: "Pobieranie wiadomości".into(), error: e, id: None },
-        });
+        let _ = tx.send(NetResult::Full { acct, uid, folder, message: res.map(Box::new) });
         ctx.request_repaint();
     });
 }

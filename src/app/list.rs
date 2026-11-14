@@ -396,6 +396,11 @@ impl MailApp {
                                 ui.set_width(ui.available_width());
                                 egui::ScrollArea::horizontal().id_salt(("card-html", x.id)).show(ui, |ui| self.render_html(ui, x, &b));
                             });
+                        } else if body.is_empty() && x.partial && x.uid.is_some_and(|u| self.fetching_full.get(&(x.account, x.folder, u)) == Some(&false)) {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new().size(14.0).color(ACCENT()));
+                                ui.label(RichText::new(t!("mail.reading.downloading_full")).color(MUTED()));
+                            });
                         } else if body.is_empty() && x.partial {
                             ui.label(RichText::new(t!("mail.list.body_not_downloaded")).color(MUTED()));
                         } else {
@@ -452,6 +457,9 @@ impl MailApp {
                 let unfolded = self.thread_unfolded.contains(&x.id);
                 if unfolded && x.on_disk {
                     self.ensure_body(x.id);
+                }
+                if unfolded {
+                    self.fetch_full_if_partial(x.id, false);
                 }
                 if self.thread_card(ui, x, unfolded) {
                     if unfolded {
