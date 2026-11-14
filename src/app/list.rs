@@ -20,6 +20,16 @@ pub(super) enum Row {
     Msg(u64),
 }
 
+/// A message dragged from the list onto a folder or a tag of the left bar.
+pub(super) struct DragMsg(pub(super) u64);
+
+/// Moves the server is told about too (any other would change only this computer's copy);
+/// kept in step with `Action::Move` and `queue_op`.
+pub(super) fn moves_on_server(from: Folder, to: Folder) -> bool {
+    use Folder::*;
+    matches!((from, to), (Inbox | Sent | Junk, Trash) | (Inbox | Sent | Trash, Junk) | (Inbox, Archive) | (Trash | Junk, Inbox))
+}
+
 pub(super) const ROW_H: f32 = 66.0;
 
 pub(super) const GROUP_H: f32 = 32.0;
@@ -753,19 +763,42 @@ impl MailApp {
                         p.text(Pos2::new(gr.left() + 30.0, gr.center().y), Align2::LEFT_CENTER, group_title(g), FontId::proportional(14.5), MUTED());
                         p.hline(gr.left() + 10.0..=gr.right() - 10.0, gr.bottom() - 1.0, Stroke::new(1.0, BORDER()));
                     }
-                    Row::Msg(id) => {
-                        let Some(m) = self.msg(id).cloned() else { continue };
+                    Row::Msg(mid) => {
+                        let Some(m) = self.msg(mid).cloned() else { continue };
                         let r = Rect::from_min_size(origin + Vec2::new(0.0, *y), Vec2::new(w, ROW_H));
-                        ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| self.message_row(ui, &m, today));
+                        // (an id of its own: a press or an open menu stays with this message while
+                        // the list scrolls under it)
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(r).scope_id(id(("row", mid))), |ui| self.message_row(ui, &m, today));
                     }
                 }
             }
         });
+        // the window left mid-drag may never hear the button go up: let go of the message
+        if ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false)))) {
+            egui::DragAndDrop::clear_payload(ui.ctx());
+        }
+        // a message being dragged: its subject follows the pointer
+        let held = egui::DragAndDrop::payload::<DragMsg>(ui.ctx()).and_then(|d| self.msg(d.0).map(|m| m.subject.clone()));
+        if let (Some(subject), Some(at)) = (held, ui.ctx().pointer_latest_pos()) {
+            let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, id("drag-ghost")));
+            let font = FontId::proportional(13.0);
+            let w = (text_width(ui, &subject, font.clone()) + 40.0).min(280.0);
+            let r = Rect::from_min_size(at + Vec2::new(14.0, 10.0), Vec2::new(w, 28.0));
+            p.rect_filled(r, CornerRadius::same(6), BG());
+            p.rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0, ACCENT()), egui::StrokeKind::Inside);
+            p.text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, ic::MAIL, font.clone(), ACCENT());
+            line_f(&p, Pos2::new(r.left() + 30.0, r.top() + 5.0), &subject, font, TEXT(), w - 40.0);
+        }
     }
 
     pub(super) fn message_row(&mut self, ui: &mut Ui, m: &Message, today: NaiveDate) {
         let w = ui.available_width();
-        let (outer, resp) = ui.allocate_exact_size(Vec2::new(w, ROW_H), Sense::click());
+        // (a finger on a touch screen scrolls the list instead; the mouse still drags)
+        let sense = if ui.input(|i| i.any_touches()) { Sense::click() } else { Sense::click_and_drag() };
+        let (outer, resp) = ui.allocate_exact_size(Vec2::new(w, ROW_H), sense);
+        if resp.drag_started_by(egui::PointerButton::Primary) {
+            egui::DragAndDrop::set_payload(ui.ctx(), DragMsg(m.id));
+        }
         let r = outer.shrink2(Vec2::new(4.0, 1.0));
         let on = self.selected == Some(m.id);
         let p = ui.painter();

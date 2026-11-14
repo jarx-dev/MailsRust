@@ -211,6 +211,7 @@ ui:
     deleted_forever: "Message deleted permanently"
     to_trash: "Moved to the trash"
     moved_to: "Moved to: %{folder}"
+    tagged: "Added to: %{tag}"
     marked_read: "Marked as read: %{n}"
     no_reply_needed: "Marked: no reply needed"
     reply_needed: "Marked: reply needed"

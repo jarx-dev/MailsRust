@@ -213,6 +213,7 @@ ui:
     deleted_forever: "Wiadomość usunięta na stałe"
     to_trash: "Przeniesiono do kosza"
     moved_to: "Przeniesiono do: %{folder}"
+    tagged: "Dodano do: %{tag}"
     marked_read: "Oznaczono jako przeczytane: %{n}"
     no_reply_needed: "Oznaczono: nie wymaga odpowiedzi"
     reply_needed: "Oznaczono: wymaga odpowiedzi"
