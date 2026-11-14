@@ -471,6 +471,7 @@ impl MailApp {
             // another message opened: its conversation starts folded, the message itself open
             self.thread_for = Some(m.id);
             self.thread_unfolded.clear();
+            self.thread_open = None;
             self.main_folded = false;
         }
         Frame::new().inner_margin(Margin { left: 20, right: 20, top: 12, bottom: 10 }).show(ui, |ui| {
