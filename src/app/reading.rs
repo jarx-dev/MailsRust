@@ -666,7 +666,7 @@ impl MailApp {
                         }
                     }
                     egui::Popup::menu(&more).show(|ui| self.message_menu(ui, mid, read, flagged));
-                    // what to do with the message (once on the top bar), next to "more"
+                    // what to do with the message (delete also on the top bar), next to "more"
                     if icon(ui, 8, ic::DELETE, &t!("mail.reading.delete_tip")).clicked() {
                         self.actions.push(Action::Delete(mid));
                     }

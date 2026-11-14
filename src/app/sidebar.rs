@@ -337,7 +337,15 @@ impl MailApp {
                     if tool_button(ui, ic::REFRESH, &l(t!("ui.sidebar.toolbar.refresh").into_owned()), true) {
                         self.actions.push(Action::SendReceive);
                     }
-                    // (what to do with a message sits on the open message itself)
+                    // the open message, as with the Delete key (the next one of the list is shown);
+                    // kept apart from Refresh, so a slip doesn't delete
+                    tool_sep(ui);
+                    if tool_button(ui, ic::DELETE, &l(t!("ui.sidebar.toolbar.delete").into_owned()), self.selected.is_some_and(|id| self.msg(id).is_some())) {
+                        if let Some(id) = self.selected {
+                            self.actions.push(Action::Delete(id));
+                        }
+                    }
+                    // (the rest of what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}
                 Module::Chat => {
