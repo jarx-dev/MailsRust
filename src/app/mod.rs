@@ -264,10 +264,13 @@ pub struct MailApp {
     html_cache: Option<(u64, Arc<Vec<html::Block>>)>,
     signing_in: bool,
     /// Gmail's rules of the main account (None: not read yet) and whether they are being read or changed
-    rules: Option<Result<Vec<crate::google::Rule>, String>>,
+    rules: Option<Result<crate::google::RuleBook, String>>,
     rules_busy: bool,
     /// senders to block once the sign-in allowing the rules comes back
     rules_pending: Vec<String>,
+    /// the rule editor (open while Some) and why its last save failed
+    rule_edit: Option<crate::google::RuleForm>,
+    rule_edit_error: Option<String>,
     save_now: bool,
     mail_view: crate::webview::MailView,
     web_target: Option<(u64, egui::Rect)>,
@@ -530,6 +533,8 @@ impl MailApp {
             rules: None,
             rules_busy: false,
             rules_pending: vec![],
+            rule_edit: None,
+            rule_edit_error: None,
             save_now: false,
             mail_view: Default::default(),
             web_target: None,
@@ -695,8 +700,9 @@ impl MailApp {
             app.account_open = true;
             app.store.account.use_gmail();
         }
-        // test pictures of Gmail's rules in the account settings (made-up rules, nothing asked of Google)
-        if std::env::var("POCZTA_START").as_deref() == Ok("rules") && app.shot.is_some() {
+        // test pictures of Gmail's rules in the account settings and the rule editor (made-up rules, nothing asked of Google)
+        let start = std::env::var("POCZTA_START").unwrap_or_default();
+        if (start == "rules" || start == "rule-editor") && app.shot.is_some() {
             app.account_open = true;
             let a = &mut app.store.account;
             a.use_gmail();
@@ -707,8 +713,15 @@ impl MailApp {
                 { "id": "1", "criteria": { "from": "offers@shop.example" }, "action": { "addLabelIds": ["TRASH"] } },
                 { "id": "2", "criteria": { "from": "invoices@example.com", "hasAttachment": true }, "action": { "addLabelIds": ["Label_1"], "removeLabelIds": ["INBOX", "UNREAD"] } }
             ]);
-            let named = |_: &str| if crate::i18n::is_pl() { "Faktury i rachunki" } else { "Bills" }.to_string();
-            app.rules = Some(Ok(filters.as_array().into_iter().flatten().map(|f| crate::google::describe(f, &named)).collect()));
+            let bills = if crate::i18n::is_pl() { "Faktury i rachunki" } else { "Bills" }.to_string();
+            let named = |_: &str| bills.clone();
+            let rules: Vec<_> = filters.as_array().into_iter().flatten().map(|f| crate::google::describe(f, &named)).collect();
+            if start == "rule-editor" {
+                let mut form = crate::google::RuleForm::from_filter(&rules[1].raw);
+                form.apply = true;
+                app.rule_edit = Some(form);
+            }
+            app.rules = Some(Ok(crate::google::RuleBook { rules, labels: vec![("Label_1".into(), bills)], labels_error: None }));
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("diag") {
             app.diag_open = true;
@@ -1342,6 +1355,7 @@ impl eframe::App for MailApp {
         self.readers_ui(&ctx);
         self.previews_ui(&ctx);
         self.account_ui(&ctx);
+        self.rule_editor_ui(&ctx);
         self.diag_ui(&ctx);
         self.side_settings_ui(&ctx);
         self.extra_account_ui(&ctx);
@@ -1351,7 +1365,7 @@ impl eframe::App for MailApp {
         self.flash_ui(&ctx);
         // The browser view sits on top of everything, so it steps aside while a menu or dialog is open.
         // (and in the background: an open writing window keeps the screen drawn, but the view stays closed)
-        let covered = self.account_open || self.extra_edit.is_some() || self.ai_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
+        let covered = self.account_open || self.extra_edit.is_some() || self.rule_edit.is_some() || self.ai_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
         let want = if covered {
             None
         } else {

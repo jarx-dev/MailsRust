@@ -696,7 +696,7 @@ impl MailApp {
     pub(super) fn rules_run(&mut self, change: net::RuleChange) {
         // test runs and pictures never reach Google (a copied mailbox may hold a real sign-in)
         if self.shot.is_some() || std::env::var("POCZTA_OFFLINE").is_ok() {
-            self.rules.get_or_insert(Ok(vec![]));
+            self.rules.get_or_insert(Ok(Default::default()));
             return;
         }
         self.rules_busy = true;
@@ -731,6 +731,7 @@ impl MailApp {
         }
         let busy = self.rules_busy;
         let mut change = None;
+        let mut edit = None;
         match &self.rules {
             None => {
                 ui.spinner();
@@ -738,15 +739,18 @@ impl MailApp {
             Some(Err(e)) => {
                 ui.colored_label(FLAG, e);
             }
-            Some(Ok(list)) if list.is_empty() => {
+            Some(Ok(book)) if book.rules.is_empty() => {
                 ui.label(RichText::new(t!("mail.rules.none")).small().color(MUTED()));
             }
-            Some(Ok(list)) => {
+            Some(Ok(book)) => {
                 egui::ScrollArea::vertical().id_salt("gmail-rules").max_height(220.0).show(ui, |ui| {
-                    for r in list {
+                    for r in &book.rules {
                         ui.horizontal(|ui| {
-                            // a second click confirms: a rule made on Gmail's page is not easy to make again
                             ui.add_enabled_ui(!busy, |ui| {
+                                if ui.button(t!("mail.rules.edit")).clicked() {
+                                    edit = Some(crate::google::RuleForm::from_filter(&r.raw));
+                                }
+                                // a second click confirms: a rule made on Gmail's page is not easy to make again
                                 ui.menu_button(t!("mail.rules.delete"), |ui| {
                                     if ui.button(t!("mail.rules.delete_confirm")).clicked() {
                                         change = Some(net::RuleChange::Delete(r.id.clone()));
@@ -761,6 +765,9 @@ impl MailApp {
             }
         }
         ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.new"))).clicked() {
+                edit = Some(crate::google::RuleForm::default());
+            }
             if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.refresh")).small()).clicked() {
                 change = Some(net::RuleChange::None);
             }
@@ -775,6 +782,143 @@ impl MailApp {
         ui.label(RichText::new(t!("mail.rules.note")).small().color(MUTED()));
         if let Some(c) = change {
             self.rules_run(c);
+        }
+        if edit.is_some() {
+            self.rule_edit = edit;
+            self.rule_edit_error = None;
+        }
+    }
+
+    /// The rule editor, over the account settings: Gmail's own conditions and actions.
+    pub(super) fn rule_editor_ui(&mut self, ctx: &egui::Context) {
+        let Some(mut f) = self.rule_edit.take() else { return };
+        // the labels to choose from come with the rules
+        if self.rules.is_none() && !self.rules_busy {
+            self.rules_run(net::RuleChange::None);
+        }
+        let busy = self.rules_busy;
+        let (labels, labels_error): (&[(String, String)], Option<&String>) = match &self.rules {
+            Some(Ok(book)) => (&book.labels, book.labels_error.as_ref()),
+            // the rules couldn't be read: the labels neither, said with a way to try again
+            Some(Err(e)) => (&[], Some(e)),
+            None => (&[], None),
+        };
+        let mut open = true;
+        let mut cancel = false;
+        let mut save = false;
+        let mut reload = false;
+        let title = if f.id.is_some() { t!("mail.rules.edit_title") } else { t!("mail.rules.new_title") };
+        crate::theme::dialog(ctx, "rule-editor", &title, 520.0, &mut open, |ui| {
+            // while it saves, what is typed would be lost when the editor closes: nothing to type
+            if busy {
+                ui.disable();
+            }
+            ui.label(RichText::new(t!("mail.rules.when_title")).strong());
+            egui::Grid::new("rule-when").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                for (label, value) in [
+                    (t!("mail.rules.field_from"), &mut f.from),
+                    (t!("mail.rules.field_to"), &mut f.to),
+                    (t!("mail.rules.field_subject"), &mut f.subject),
+                    (t!("mail.rules.field_words"), &mut f.words),
+                    (t!("mail.rules.field_not_words"), &mut f.not_words),
+                ] {
+                    ui.label(label);
+                    ui.add(egui::TextEdit::singleline(value).desired_width(300.0));
+                    ui.end_row();
+                }
+                ui.label(t!("mail.rules.field_size"));
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("rule-size")
+                        .selected_text(if f.smaller { t!("mail.rules.size_smaller") } else { t!("mail.rules.size_larger") })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut f.smaller, false, t!("mail.rules.size_larger"));
+                            ui.selectable_value(&mut f.smaller, true, t!("mail.rules.size_smaller"));
+                        });
+                    // a size made on Gmail's page may be larger than the range: kept, not cut
+                    ui.add(egui::DragValue::new(&mut f.size_kb).range(0..=50_000).clamp_existing_to_range(false).suffix(" KB"));
+                    ui.add_space(12.0);
+                    ui.checkbox(&mut f.attachment, t!("mail.rules.cb_attachment"));
+                });
+                ui.end_row();
+            });
+            ui.add_space(8.0);
+            ui.label(RichText::new(t!("mail.rules.then_title")).strong());
+            // two columns, so the save button fits without scrolling
+            egui::Grid::new("rule-then").num_columns(2).spacing([24.0, 4.0]).show(ui, |ui| {
+                ui.checkbox(&mut f.archive, t!("mail.rules.cb_archive"));
+                ui.checkbox(&mut f.read, t!("mail.rules.cb_read"));
+                ui.end_row();
+                ui.checkbox(&mut f.star, t!("mail.rules.cb_star"));
+                ui.checkbox(&mut f.never_spam, t!("mail.rules.cb_never_spam"));
+                ui.end_row();
+                ui.checkbox(&mut f.trash, t!("mail.rules.cb_trash"));
+                ui.end_row();
+            });
+            egui::Grid::new("rule-then-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                ui.label(t!("mail.rules.field_label"));
+                let name = |id: &str| labels.iter().find(|l| l.0 == id).map(|l| l.1.clone()).unwrap_or_else(|| id.to_string());
+                let shown = if f.label.is_empty() { t!("mail.rules.no_label").into_owned() } else { name(&f.label) };
+                egui::ComboBox::from_id_salt("rule-label").selected_text(shown).width(260.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.label, String::new(), t!("mail.rules.no_label"));
+                    for (id, n) in labels {
+                        ui.selectable_value(&mut f.label, id.clone(), n);
+                    }
+                });
+                ui.end_row();
+                if let Some(e) = labels_error {
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t!("mail.rules.labels_failed", e = e)).small().color(FLAG));
+                        if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.refresh")).small()).clicked() {
+                            reload = true;
+                        }
+                    });
+                    ui.end_row();
+                }
+                ui.label(t!("mail.rules.field_important"));
+                let names = [t!("mail.rules.important_keep"), t!("mail.rules.important_always"), t!("mail.rules.important_never")];
+                egui::ComboBox::from_id_salt("rule-important").selected_text(names[usize::from(f.important.min(2))].clone()).width(260.0).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() {
+                        ui.selectable_value(&mut f.important, i as u8, n.clone());
+                    }
+                });
+                ui.end_row();
+                ui.label(t!("mail.rules.field_forward"));
+                ui.add(egui::TextEdit::singleline(&mut f.forward).hint_text(t!("mail.rules.forward_hint")).desired_width(260.0));
+                ui.end_row();
+            });
+            ui.add_space(8.0);
+            ui.checkbox(&mut f.apply, t!("mail.rules.apply")).on_hover_text(t!("mail.rules.apply_note"));
+            if let Some(e) = &self.rule_edit_error {
+                ui.colored_label(FLAG, e);
+            }
+            let problem = f.problem();
+            ui.add_space(8.0);
+            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), Layout::right_to_left(Align::Center), |ui| {
+                if ui.add(egui::Button::new(t!("mail.rules.cancel")).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                    cancel = true;
+                }
+                let btn = egui::Button::new(RichText::new(t!("mail.rules.save")).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0));
+                if ui.add_enabled(!busy && problem.is_none(), btn).clicked() {
+                    save = true;
+                }
+                if busy {
+                    ui.spinner();
+                }
+                if let Some(p) = problem {
+                    ui.label(RichText::new(p).small().color(MUTED()));
+                }
+            });
+        });
+        if reload {
+            self.rules_run(net::RuleChange::None);
+        }
+        if save {
+            self.rule_edit_error = None;
+            self.rules_run(net::RuleChange::Save(Box::new(f.clone())));
+        }
+        if open && !cancel {
+            self.rule_edit = Some(f);
         }
     }
 
