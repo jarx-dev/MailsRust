@@ -17,8 +17,10 @@ pub enum NetResult {
     Full { acct: u32, uid: u32, folder: Folder, message: Box<Message> },
     /// Copied people (DW) of an account's stored mail: (folder, uid, "a@x.pl, b@y.pl").
     Copies { acct: u32, found: Result<Vec<(Folder, u32, String)>, String> },
-    /// Gmail's rules of the account `email` read again after `change`, which failed with `failed`.
-    Rules { email: String, change: RuleChange, failed: Option<String>, list: Result<Vec<crate::google::Rule>, String> },
+    /// Gmail's rules of the account `email` read again after `change`. `done`: how many messages
+    /// already in the mailbox changed and why changing them failed (the change itself was made),
+    /// or why the change failed.
+    Rules { email: String, change: RuleChange, done: Result<(usize, Option<String>), String>, list: Result<crate::google::RuleBook, String> },
 }
 
 /// What to change in Gmail's rules before reading them again.
@@ -28,20 +30,22 @@ pub enum RuleChange {
     Block(Vec<String>),
     /// the rule with this id
     Delete(String),
+    /// a new or changed rule from the editor
+    Save(Box<crate::google::RuleForm>),
 }
 
 /// Changes Gmail's rules (if asked) and reads them again, on a background thread.
 pub fn gmail_rules(acc: Account, change: RuleChange, tx: Sender<NetResult>, ctx: eframe::egui::Context) {
     std::thread::spawn(move || {
-        let failed = guarded(|| match &change {
-            RuleChange::None => Ok(()),
+        let done = guarded(|| match &change {
+            RuleChange::None => Ok((0, None)),
             // one after another: Google trips over filters made at the same moment
-            RuleChange::Block(addrs) => addrs.iter().try_for_each(|a| crate::google::block_sender(&acc, a)),
-            RuleChange::Delete(id) => crate::google::delete_rule(&acc, id),
-        })
-        .err();
+            RuleChange::Block(addrs) => addrs.iter().try_for_each(|a| crate::google::block_sender(&acc, a)).map(|_| (0, None)),
+            RuleChange::Delete(id) => crate::google::delete_rule(&acc, id).map(|_| (0, None)),
+            RuleChange::Save(form) => crate::google::save_rule(&acc, form),
+        });
         let list = guarded(|| crate::google::rules(&acc));
-        let _ = tx.send(NetResult::Rules { email: acc.email.clone(), change, failed, list });
+        let _ = tx.send(NetResult::Rules { email: acc.email.clone(), change, done, list });
         ctx.request_repaint();
     });
 }
