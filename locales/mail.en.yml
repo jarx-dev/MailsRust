@@ -42,6 +42,7 @@ mail:
     more_hidden: "+%{n} more"
     collapse: "Collapse"
     downloading_full: "Downloading the full message…"
+    full_not_downloaded: "The full text of this message couldn't be downloaded."
     translating: "🌐  Translating the message into English…"
     translated: "🌐  Translated into English (AI)"
     show_original: "Show original"

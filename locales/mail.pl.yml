@@ -42,6 +42,7 @@ mail:
     more_hidden: "+%{n} więcej"
     collapse: "Zwiń"
     downloading_full: "Pobieranie pełnej treści wiadomości…"
+    full_not_downloaded: "Nie udało się pobrać pełnej treści tej wiadomości."
     translating: "🌐  Tłumaczę wiadomość na polski…"
     translated: "🌐  Przetłumaczono na polski (AI)"
     show_original: "Pokaż oryginał"

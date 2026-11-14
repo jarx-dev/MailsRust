@@ -1013,14 +1013,15 @@ tel.: 600-100-200".into();
                     app.thread_for = Some(first.id);
                     app.main_folded = std::env::var("POCZTA_FOLD_MAIN").is_ok();
                 }
-                if std::env::var("POCZTA_PARTIAL").is_ok() && app.shot.is_some() {
-                    // test picture: the unfolded one stored with its header only, its text asked for
-                    // (from a made-up server that refuses at once: nothing leaves the machine)
-                    if let Some(last) = app.store.messages.last_mut() {
-                        last.partial = true;
-                        last.body.clear();
-                        last.html_path.clear();
-                        last.uid = Some(1);
+                if let Some(which) = std::env::var("POCZTA_PARTIAL").ok().filter(|_| app.shot.is_some()) {
+                    // test picture: the unfolded one (POCZTA_PARTIAL=main: the open one) stored with its
+                    // header only, its text asked for (from a made-up server that refuses at once)
+                    let target = if which == "main" { app.store.messages.iter_mut().find(|m| m.id == first.id) } else { app.store.messages.last_mut() };
+                    if let Some(m) = target {
+                        m.partial = true;
+                        m.body.clear();
+                        m.html_path.clear();
+                        m.uid = Some(1);
                     }
                     let a = &mut app.store.account;
                     (a.imap_host, a.imap_port, a.username, a.password) = ("127.0.0.1".into(), 1, "test".into(), "test".into());
