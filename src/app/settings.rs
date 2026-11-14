@@ -716,9 +716,19 @@ impl MailApp {
         self.sign_in_more(crate::google::SCOPE_RULES, t!("mail.rules.opening_login"));
     }
 
-    /// Gmail's rules in the account settings: every filter of the account, each can be removed.
+    /// Gmail's rules in a panel of their own (menu ☰): each rule as "When … / Then …", made,
+    /// changed or removed here.
+    pub(super) fn rules_window(&mut self, ctx: &egui::Context) {
+        if !self.rules_open {
+            return;
+        }
+        let mut open = true;
+        crate::theme::dialog(ctx, "gmail-rules-panel", &t!("mail.rules.title"), 640.0, &mut open, |ui| self.rules_ui(ui));
+        self.rules_open &= open;
+    }
+
+    /// The panel's content: every filter of the account, each can be changed or removed.
     fn rules_ui(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new(t!("mail.rules.title")).strong());
         if !crate::google::has_scope(&self.store.account, crate::google::SCOPE_RULES) {
             ui.label(RichText::new(t!("mail.rules.need_consent")).small().color(MUTED()));
             if ui.add_enabled(!self.signing_in, egui::Button::new(t!("mail.rules.allow"))).clicked() {
@@ -732,6 +742,19 @@ impl MailApp {
         let busy = self.rules_busy;
         let mut change = None;
         let mut edit = None;
+        ui.horizontal(|ui| {
+            let new = egui::Button::new(RichText::new(t!("mail.rules.new")).color(Color32::WHITE)).fill(ACCENT()).min_size(Vec2::new(0.0, 30.0));
+            if ui.add_enabled(!busy, new).clicked() {
+                edit = Some(crate::google::RuleForm::default());
+            }
+            if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.refresh")).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                change = Some(net::RuleChange::None);
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+        ui.add_space(8.0);
         match &self.rules {
             None => {
                 ui.spinner();
@@ -740,45 +763,49 @@ impl MailApp {
                 ui.colored_label(FLAG, e);
             }
             Some(Ok(book)) if book.rules.is_empty() => {
-                ui.label(RichText::new(t!("mail.rules.none")).small().color(MUTED()));
+                ui.label(RichText::new(t!("mail.rules.none")).color(MUTED()));
             }
             Some(Ok(book)) => {
-                egui::ScrollArea::vertical().id_salt("gmail-rules").max_height(220.0).show(ui, |ui| {
+                // (on a low screen the list scrolls inside, the buttons above stay in sight)
+                let list_h = (ui.ctx().content_rect().height() - 320.0).clamp(140.0, 420.0);
+                egui::ScrollArea::vertical().id_salt("gmail-rules").max_height(list_h).show(ui, |ui| {
                     for r in &book.rules {
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(!busy, |ui| {
-                                if ui.button(t!("mail.rules.edit")).clicked() {
-                                    edit = Some(crate::google::RuleForm::from_filter(&r.raw));
-                                }
-                                // a second click confirms: a rule made on Gmail's page is not easy to make again
-                                ui.menu_button(t!("mail.rules.delete"), |ui| {
-                                    if ui.button(t!("mail.rules.delete_confirm")).clicked() {
-                                        change = Some(net::RuleChange::Delete(r.id.clone()));
-                                        ui.close();
+                        // one card per rule: when (what it looks for), then (what it does)
+                        Frame::new().stroke(Stroke::new(1.0, BORDER())).corner_radius(CornerRadius::same(6)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    // a second click confirms: a rule made on Gmail's page is not easy to make again
+                                    ui.menu_button(t!("mail.rules.delete"), |ui| {
+                                        if ui.button(t!("mail.rules.delete_confirm")).clicked() {
+                                            change = Some(net::RuleChange::Delete(r.id.clone()));
+                                            ui.close();
+                                        }
+                                    });
+                                    if ui.button(t!("mail.rules.edit")).clicked() {
+                                        edit = Some(crate::google::RuleForm::from_filter(&r.raw));
+                                    }
+                                });
+                                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                                    for (head, text) in [(t!("mail.rules.card_when"), &r.when), (t!("mail.rules.card_then"), &r.then)] {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(RichText::new(head).strong().color(ACCENT()));
+                                            ui.add(egui::Label::new(text.as_str()).wrap());
+                                        });
                                     }
                                 });
                             });
-                            ui.add(egui::Label::new(format!("{}  →  {}", r.when, r.then)).wrap());
                         });
+                        ui.add_space(6.0);
                     }
                 });
             }
         }
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.new"))).clicked() {
-                edit = Some(crate::google::RuleForm::default());
-            }
-            if ui.add_enabled(!busy, egui::Button::new(t!("mail.rules.refresh")).small()).clicked() {
-                change = Some(net::RuleChange::None);
-            }
-            if busy {
-                ui.spinner();
-            }
-            if ui.link(RichText::new(t!("mail.rules.open_gmail")).small()).clicked() {
-                // authuser: the browser may be signed in to several Google accounts
-                crate::oauth::open_url(&format!("https://mail.google.com/mail/?authuser={}#settings/filters", crate::google::enc(&self.store.account.email)));
-            }
-        });
+        ui.add_space(4.0);
+        if ui.link(RichText::new(t!("mail.rules.open_gmail")).small()).clicked() {
+            // authuser: the browser may be signed in to several Google accounts
+            crate::oauth::open_url(&format!("https://mail.google.com/mail/?authuser={}#settings/filters", crate::google::enc(&self.store.account.email)));
+        }
         ui.label(RichText::new(t!("mail.rules.note")).small().color(MUTED()));
         if let Some(c) = change {
             self.rules_run(c);
@@ -789,7 +816,7 @@ impl MailApp {
         }
     }
 
-    /// The rule editor, over the account settings: Gmail's own conditions and actions.
+    /// The rule editor, over the rules panel (or the message menu): Gmail's own conditions and actions.
     pub(super) fn rule_editor_ui(&mut self, ctx: &egui::Context) {
         let Some(mut f) = self.rule_edit.take() else { return };
         // the labels to choose from come with the rules
@@ -1140,7 +1167,10 @@ impl MailApp {
                 if crate::google::ready(&self.store.account) {
                     ui.add_space(8.0);
                     ui.separator();
-                    self.rules_ui(ui);
+                    // the rules have a panel of their own (also in the menu ☰)
+                    if ui.button(t!("mail.rules.open_panel")).clicked() {
+                        self.rules_open = true;
+                    }
                 }
                 ui.add_space(8.0);
                 ui.separator();

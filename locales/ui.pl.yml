@@ -127,6 +127,8 @@ ui:
       new_event: "📅  Nowe wydarzenie"
       send_receive: "⟳  Wyślij / odbierz"
       accounts: "👤  Konta…"
+      rules: "📋  Reguły Gmaila…"
+      rules_need_google: "Wymaga konta Gmail zalogowanego przez Google"
       calendar_panel: "Panel kalendarza po prawej"
       stop_ai: "🔗  Wyłącz linki dla AI (%{n})"
       stop_ai_hint: "Wszystkie udostępnione e-maile przestają być dostępne dla agentów"

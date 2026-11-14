@@ -342,7 +342,8 @@ impl MailApp {
         if ctx.input(|i| i.pointer.any_pressed()) {
             self.take_keyboard_back();
         }
-        if ctx.memory(|m| m.focused().is_some()) {
+        // (and while a dialog is open: Delete or the arrows there must not act on the mail behind it)
+        if ctx.memory(|m| m.focused().is_some() || m.top_modal_layer().is_some()) {
             return;
         }
         let (del, up, down, n, r) = ctx.input(|i| {

@@ -241,6 +241,15 @@ impl MailApp {
                     self.account_open = true;
                     ui.close();
                 }
+                // Gmail's rules: only the main account signs in to Google
+                if ui
+                    .add_enabled(crate::google::ready(&self.store.account), egui::Button::new(t!("ui.sidebar.menu.rules")))
+                    .on_disabled_hover_text(t!("ui.sidebar.menu.rules_need_google"))
+                    .clicked()
+                {
+                    self.rules_open = true;
+                    ui.close();
+                }
                 ui.checkbox(&mut self.show_side, t!("ui.sidebar.menu.calendar_panel"));
                 if !self.prefs.ai_shares.is_empty()
                     && ui
