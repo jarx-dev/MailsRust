@@ -1,4 +1,10 @@
 ui:
+  history:
+    title: "History"
+    tip: "Mail with this person"
+    pick: "Open a message to see all mail with its sender."
+    search: "Search mail with this person"
+    fold: "Fold the panel to the side"
   settings:
     email_hint: "you@company.com"
     gmail_hint: "you@gmail.com"

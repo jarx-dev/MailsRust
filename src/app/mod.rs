@@ -35,6 +35,8 @@ use actions::*;
 mod contacts_ui;
 use contacts_ui::*;
 
+mod history;
+
 mod chat_ui;
 use chat_ui::*;
 
@@ -61,6 +63,7 @@ struct Prefs {
     account_expanded: bool,
     show_side: bool,
     side_agenda: bool,
+    side_history: bool,
     cal_week: bool,
     /// Tag groups (e.g. "n8n") folded in the sidebar.
     folded_groups: Vec<String>,
@@ -104,6 +107,7 @@ impl Default for Prefs {
             account_expanded: true,
             show_side: true,
             side_agenda: false,
+            side_history: false,
             cal_week: false,
             folded_groups: vec![],
             ai_shares: vec![],
@@ -138,6 +142,8 @@ enum Module {
 enum SideMode {
     Day,
     Agenda,
+    /// the mail exchanged with the person of the open message
+    History,
 }
 
 /// New mail (or a chat message) just received, told about in a note in the corner of the screen.
@@ -209,6 +215,15 @@ pub struct MailApp {
     thread_for: Option<u64>,
     show_side: bool,
     side_mode: SideMode,
+    /// the right bar's history: the mail with one person (cached), who, and the search in it
+    hist: std::cell::RefCell<Option<Arc<history::History>>>,
+    hist_addr: String,
+    hist_name: String,
+    hist_query: String,
+    hist_scope: Scope,
+    /// the open message the person was last worked out for, and the last one picked in the history
+    hist_for: Option<u64>,
+    hist_pick: Option<u64>,
     side_day: NaiveDate,
     side_picker: bool,
     account_expanded: bool,
@@ -490,6 +505,13 @@ impl MailApp {
             thread_for: None,
             show_side: true,
             side_mode: SideMode::Day,
+            hist: Default::default(),
+            hist_addr: String::new(),
+            hist_name: String::new(),
+            hist_query: String::new(),
+            hist_scope: Scope::All,
+            hist_for: None,
+            hist_pick: None,
             side_day: today,
             side_picker: false,
             account_expanded: true,
@@ -656,7 +678,13 @@ impl MailApp {
                 app.tags_open = p.tags_open;
                 app.account_expanded = p.account_expanded;
                 app.show_side = p.show_side;
-                app.side_mode = if p.side_agenda { SideMode::Agenda } else { SideMode::Day };
+                app.side_mode = if p.side_history {
+                    SideMode::History
+                } else if p.side_agenda {
+                    SideMode::Agenda
+                } else {
+                    SideMode::Day
+                };
                 app.cal_view = if p.cal_week { CalView::Week } else { CalView::Month };
                 if p.dark {
                     crate::theme::set_dark(true);
@@ -943,6 +971,10 @@ tel.: 600-100-200".into();
         if std::env::var("POCZTA_START").as_deref() == Ok("folded") {
             app.show_side = false;
         }
+        if std::env::var("POCZTA_START").as_deref() == Ok("history") {
+            app.side_mode = SideMode::History;
+            app.show_side = true;
+        }
         if std::env::var("POCZTA_TAG_TEST").is_ok() {
             let sets: [&[&str]; 4] = [
                 &["\u{1F680}n8n/\u{1F4BC}Wymaga działania", "Natubay"],
@@ -1208,6 +1240,7 @@ tel.: 600-100-200".into();
         p.account_expanded = self.account_expanded;
         p.show_side = self.show_side;
         p.side_agenda = self.side_mode == SideMode::Agenda;
+        p.side_history = self.side_mode == SideMode::History;
         p.cal_week = self.cal_view == CalView::Week;
         eframe::set_value(storage, "prefs", &self.prefs);
         self.finder.save(&self.store.messages);
@@ -1365,6 +1398,20 @@ impl eframe::App for MailApp {
                         ui.painter().text(r.center(), Align2::CENTER_CENTER, "📅", FontId::proportional(17.0), MUTED());
                         if resp.on_hover_text(t!("core.app.show_calendar")).clicked() {
                             self.show_side = true;
+                            if self.side_mode == SideMode::History {
+                                self.side_mode = SideMode::Day;
+                            }
+                            self.save_now = true;
+                        }
+                        // the history with the person of the open message, as in the bar's third tab
+                        let (r, resp) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, CornerRadius::same(4), HOVER());
+                        }
+                        ui.painter().text(r.center(), Align2::CENTER_CENTER, ic::HISTORY, FontId::proportional(17.0), MUTED());
+                        if resp.on_hover_text(t!("ui.history.tip")).clicked() {
+                            self.show_side = true;
+                            self.side_mode = SideMode::History;
                             self.save_now = true;
                         }
                     });

@@ -1,4 +1,10 @@
 ui:
+  history:
+    title: "Historia"
+    tip: "Korespondencja z tą osobą"
+    pick: "Otwórz wiadomość, by zobaczyć całą korespondencję z jej nadawcą."
+    search: "Szukaj w korespondencji z tą osobą"
+    fold: "Zwiń panel na bok"
   settings:
     email_hint: "ty@firma.pl"
     gmail_hint: "ty@gmail.com"

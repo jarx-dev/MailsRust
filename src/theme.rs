@@ -57,6 +57,8 @@ themed! {
     IMPORTANT = 0xFFE38A, 0x5C4812;
     /// behind company logos (most are made for a white page)
     LOGO_BG = 0xFFFFFF, 0xC9CDD3;
+    /// mail you sent (the history with a person), beside the blue of received mail
+    SENT = 0x2E9E5B, 0x5CC48A;
 }
 
 pub const PRIMARY: Color32 = Color32::from_rgb(0x2D, 0x74, 0xE6);
@@ -110,6 +112,7 @@ pub mod ic {
     pub const ATTACH: &str = "\u{E723}";
     pub const FOLDER: &str = "\u{E8B7}";
     pub const ADD: &str = "\u{E710}";
+    pub const HISTORY: &str = "\u{E81C}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

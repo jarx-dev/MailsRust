@@ -893,15 +893,21 @@ impl MailApp {
                 ui.painter().hline(ui.max_rect().x_range(), ui.max_rect().top(), Stroke::new(1.0, BORDER()));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let w = ui.available_width() / 2.0;
+                    let w = ui.available_width() / 3.0;
                     if icon_tab(ui, ic::CALENDAR, self.side_mode == SideMode::Day, w).on_hover_text(t!("ui.sidebar.day")).clicked() {
                         self.side_mode = SideMode::Day;
                     }
                     if icon_tab(ui, ic::LIST, self.side_mode == SideMode::Agenda, w).on_hover_text(t!("ui.sidebar.upcoming")).clicked() {
                         self.side_mode = SideMode::Agenda;
                     }
+                    if icon_tab(ui, ic::HISTORY, self.side_mode == SideMode::History, w).on_hover_text(t!("ui.history.tip")).clicked() {
+                        self.side_mode = SideMode::History;
+                    }
                 });
             });
+        if self.side_mode == SideMode::History {
+            return self.history_side(ui);
+        }
         Frame::new().inner_margin(Margin { left: 14, right: 10, top: 10, bottom: 0 }).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(t!("ui.sidebar.nav.calendar")).font(semibold(16.0)).color(TEXT()));
@@ -948,6 +954,7 @@ impl MailApp {
             }
         });
         match self.side_mode {
+            SideMode::History => {}
             SideMode::Day => {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
