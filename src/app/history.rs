@@ -15,15 +15,19 @@ pub(super) struct History {
 
 const ROW_H: f32 = 50.0;
 
-/// Whether `addr` wrote the message or got it (in "Do" or "DW").
-fn involves(m: &Message, addr: &str) -> bool {
-    // (a quick look without copying the text first: most of the mailbox has nothing to do with them)
-    let has = |s: &str| s.as_bytes().windows(addr.len()).any(|w| w.eq_ignore_ascii_case(addr.as_bytes()));
-    !addr.is_empty()
-        && (m.from_addr.trim().eq_ignore_ascii_case(addr)
-            || ((has(&m.to) || has(&m.cc)) && m.to.split(',').chain(m.cc.split(',')).any(|p| split_address(p).1.trim().eq_ignore_ascii_case(addr))))
+/// Whether the message passed between you and `addr`: they wrote it, or you sent it to them
+/// ("Do"). Mail where they were only one more recipient, or copied in, is not theirs.
+fn between(m: &Message, addr: &str) -> bool {
+    if addr.is_empty() {
+        return false;
+    }
+    if m.folder != Folder::Sent {
+        return m.from_addr.trim().eq_ignore_ascii_case(addr);
+    }
+    // (a quick look without copying the text first: most of what you sent went to others)
+    m.to.as_bytes().windows(addr.len()).any(|w| w.eq_ignore_ascii_case(addr.as_bytes()))
+        && m.to.split(',').any(|p| split_address(p).1.trim().eq_ignore_ascii_case(addr))
 }
-
 
 impl MailApp {
     /// Every address of the person's own accounts, in small letters.
@@ -38,8 +42,8 @@ impl MailApp {
     }
 
     /// The person of the open message: its sender, or for your own mail the first person it went
-    /// to. A message picked in the history itself keeps the person (going through their mail
-    /// does not switch to whoever wrote one they were copied on).
+    /// to. A message picked in the history itself keeps the person (going through what you sent
+    /// them does not switch to another recipient).
     fn follow_person(&mut self) {
         if self.selected == self.hist_for {
             return;
@@ -48,12 +52,12 @@ impl MailApp {
         // (a pick counts once: the same message chosen later in the list follows its own sender)
         let picked = self.hist_pick.take() == self.selected;
         let Some(m) = self.selected.and_then(|id| self.msg(id)) else { return };
-        if picked && involves(m, &self.hist_addr) {
+        if picked && between(m, &self.hist_addr) {
             return;
         }
         let me = self.my_addrs();
         let people = std::iter::once((m.from_name.clone(), m.from_addr.clone()))
-            .chain(m.to.split(',').chain(m.cc.split(',')).filter(|p| !p.trim().is_empty()).map(split_address));
+            .chain(m.to.split(',').filter(|p| !p.trim().is_empty()).map(split_address));
         let found = people.map(|(n, a)| (n, a.trim().to_string())).find(|(_, a)| a.contains('@') && !me.contains(&a.to_lowercase()));
         let (name, addr) = found.unwrap_or_default();
         if !addr.eq_ignore_ascii_case(&self.hist_addr) {
@@ -80,7 +84,7 @@ impl MailApp {
                 .messages
                 .iter()
                 // (drafts and mail still waiting to go are not yet part of the exchange)
-                .filter(|m| !matches!(m.folder, Folder::Trash | Folder::Drafts | Folder::Outbox) && involves(m, &key.0))
+                .filter(|m| !matches!(m.folder, Folder::Trash | Folder::Drafts | Folder::Outbox) && between(m, &key.0))
                 .collect();
             v.sort_by_key(|m| std::cmp::Reverse(m.date));
             Arc::new(v.iter().map(|m| m.id).collect())
@@ -160,6 +164,8 @@ impl MailApp {
         }
         let today = Local::now().date_naive();
         let needle = self.hist_query.trim().to_string();
+        // (test picture: the first row's tooltip shown without a pointer)
+        let tip_shot = self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("history-tip");
         egui::ScrollArea::vertical().id_salt(("history", &self.hist_addr)).auto_shrink([false, false]).show_rows(ui, ROW_H, ids.len(), |ui, range| {
             for &mid in &ids[range] {
                 let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
@@ -182,14 +188,18 @@ impl MailApp {
                 let p = ui.painter();
                 line_mark(p, Pos2::new(r.left() + 34.0, r.top() + 6.0), &subject, font, TEXT(), r.width() - 50.0 - dw, &needle);
                 line_mark(p, Pos2::new(r.left() + 34.0, r.top() + 26.0), &m.preview(), FontId::proportional(12.0), FAINT(), r.width() - 44.0, &needle);
-                // the pointer resting on a row: the subject, when and which way, and more of the text
-                let resp = resp.on_hover_ui(|ui| {
-                    ui.set_max_width(380.0);
+                // the pointer resting on a row: the subject, when and which way, and more of the
+                // text — below the row (or above it), never wider than it: the email view beside
+                // the bar is a window of its own and would cover a tooltip reaching into it
+                let mut tip = egui::Tooltip::for_enabled(&resp).width(r.width() - 24.0);
+                tip.popup = tip.popup.align(egui::RectAlign::BOTTOM_START).align_alternatives(&[egui::RectAlign::TOP_START]);
+                if tip_shot && mid == ids[0] {
+                    tip.popup = tip.popup.open(true);
+                }
+                tip.show(|ui| {
                     ui.label(RichText::new(&subject).strong());
                     let way = if sent { t!("mail.list.scope_sent") } else { t!("mail.list.scope_received") };
-                    // (received mail may come from someone else, with this person copied in)
-                    let who = if sent { String::new() } else { format!(" · {}", if m.from_name.trim().is_empty() { &m.from_addr } else { &m.from_name }) };
-                    ui.label(RichText::new(format!("{way} · {} {}{who}", i18n::date(m.date.date()), m.date.format("%H:%M"))).color(col));
+                    ui.label(RichText::new(format!("{way} · {} {}", i18n::date(m.date.date()), m.date.format("%H:%M"))).color(col));
                     let text = if m.snippet.is_empty() { crate::model::snippet_of(&m.body) } else { m.snippet.clone() };
                     if !text.trim().is_empty() {
                         ui.add_space(4.0);
@@ -215,16 +225,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn involves_whole_addresses_only() {
+    fn only_mail_between_you_and_them() {
         let mut m = Message::blank();
+        m.folder = Folder::Inbox;
         m.from_addr = "ANNA@x.pl".into();
         m.to = "\"Nowak, Jan\" <jan@x.pl>, ola@y.pl".into();
         m.cc = "Ewa <ewa@z.pl>".into();
-        assert!(involves(&m, "anna@x.pl"));
-        assert!(involves(&m, "ola@y.pl"));
-        assert!(involves(&m, "EWA@z.pl"));
-        assert!(!involves(&m, "an@x.pl"));
-        assert!(!involves(&m, "a@y.pl"));
-        assert!(!involves(&m, ""));
+        // received: only the sender counts, not others it went to or copied in
+        assert!(between(&m, "anna@x.pl"));
+        assert!(!between(&m, "ola@y.pl"));
+        assert!(!between(&m, "ewa@z.pl"));
+        assert!(!between(&m, ""));
+        // sent: those you wrote to ("Do"), whole addresses only, not "DW"
+        m.folder = Folder::Sent;
+        assert!(between(&m, "OLA@y.pl"));
+        assert!(between(&m, "jan@x.pl"));
+        assert!(!between(&m, "a@y.pl"));
+        assert!(!between(&m, "ewa@z.pl"));
+        assert!(!between(&m, "anna@x.pl"));
     }
 }
