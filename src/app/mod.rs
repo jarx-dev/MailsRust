@@ -971,7 +971,7 @@ tel.: 600-100-200".into();
         if std::env::var("POCZTA_START").as_deref() == Ok("folded") {
             app.show_side = false;
         }
-        if std::env::var("POCZTA_START").as_deref() == Ok("history") {
+        if matches!(std::env::var("POCZTA_START").as_deref(), Ok("history") | Ok("history-tip")) {
             app.side_mode = SideMode::History;
             app.show_side = true;
         }

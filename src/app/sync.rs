@@ -858,8 +858,6 @@ specjalista ds. Informatyki".into();
                                 m.cc = cc.clone();
                             }
                         }
-                        // (the history with a person depends on DW, which its fingerprint leaves out)
-                        *self.hist.borrow_mut() = None;
                         let email = self.account_ref(acct).email.clone();
                         self.store.copies_read.push(email);
                         self.save_now = true;
