@@ -544,14 +544,8 @@ specjalista ds. Informatyki".into();
             && !self.quitting;
         // one waiting connection for every account that can sign in (each tells of its own inbox;
         // started again when its sign-in changes: new password or Google sign-in)
-        let who = |a: &crate::model::Account| {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            (&a.password, &a.oauth_refresh_token).hash(&mut h);
-            format!("{}|{}|{}|{}|{:x}", a.username, a.imap_host, a.imap_port, a.use_oauth, h.finish())
-        };
         let wanted: Vec<(u32, String)> = if usable {
-            (0..=self.store.extra.len() as u32).map(|i| (i, self.account_ref(i))).filter(|(_, a)| a.can_connect()).map(|(i, a)| (i, who(a))).collect()
+            (0..=self.store.extra.len() as u32).map(|i| (i, self.account_ref(i))).filter(|(_, a)| a.can_connect()).map(|(i, a)| (i, watch_key(a))).collect()
         } else {
             Vec::new()
         };
@@ -573,9 +567,7 @@ specjalista ds. Informatyki".into();
                 self.watch.push((w, stop, rx));
             }
         }
-        if self.watch.iter().fold(false, |any, (_, _, rx)| rx.try_iter().count() > 0 || any) {
-            self.watch_due = true;
-        }
+        // (what the waiting connections said was taken in by `watched`, earlier in this frame)
         if self.watch_due && !self.receiving && !self.ops_running && self.pending_ops.is_empty() {
             self.watch_due = false;
             crate::diag::log("new mail reported by the server: fetching");
@@ -583,6 +575,43 @@ specjalista ds. Informatyki".into();
             self.send_receive();
         } else if self.watch_due {
             self.ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
+    }
+
+    /// What the waiting connections said: the inbox changed, so a full check is due; and the new
+    /// mail they have read already, taken in as a sync step that only adds messages (nothing is
+    /// compared with the server: the window starts past every number, and the sync position
+    /// stays as it is), so the new-mail note doesn't wait for the full check. That mail is left
+    /// to the full check while a sync is running (its picture of the server may be older than
+    /// the mail and would take it for deleted), and when the inbox was never synced or the
+    /// server renumbered it.
+    fn watched(&mut self) -> Option<NetResult> {
+        loop {
+            let (key, w) = self.watch.iter().find_map(|(key, _, rx)| rx.try_recv().ok().map(|w| (key.clone(), w)))?;
+            self.watch_due = true;
+            // shortcut: only as good as the app's count of running syncs. After a sync that failed
+            // for one account the count stays above zero until the next round, and rounds that
+            // overlap after such a failure can still let an older picture through (the message
+            // then goes and comes back with the next check). Upgrade: let the sync itself name
+            // what is gone, from the numbers it knew when it started.
+            if w.new.is_empty() || self.receiving || self.receiving_left > 0 {
+                continue;
+            }
+            let Some(acct) = (0..=self.store.extra.len() as u32).find(|a| watch_key(self.account_ref(*a)) == key) else { continue };
+            let Some(state) = (*self.sync_slot(acct, Folder::Inbox)).filter(|s| s.uidvalidity == w.uidvalidity) else { continue };
+            // counted as running, like every result `poll_net` takes
+            self.busy += 1;
+            return Some(NetResult::Received(net::InboxSync {
+                acct,
+                folder: Folder::Inbox,
+                new: w.new,
+                flags: Default::default(),
+                labels: Default::default(),
+                window_from: Some(u32::MAX),
+                state,
+                full: false,
+                last: false,
+            }));
         }
     }
 
@@ -620,7 +649,7 @@ specjalista ds. Informatyki".into();
             }
             self.images.insert(url, bytes.map(ImgState::Ready).unwrap_or(ImgState::Failed));
         }
-        while let Ok(r) = self.rx.try_recv() {
+        while let Some(r) = self.watched().or_else(|| self.rx.try_recv().ok()) {
             self.touched = true;
             self.busy = self.busy.saturating_sub(1);
             match r {
@@ -1063,6 +1092,14 @@ pub enum Loaded {
     All(Option<crate::db::Db>, Option<Store>, Option<Vec<crate::search::Entry>>),
 }
 pub type Loading = Receiver<Loaded>;
+
+/// What tells one account's waiting connection from another's: where and how it signs in.
+fn watch_key(a: &crate::model::Account) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&a.password, &a.oauth_refresh_token).hash(&mut h);
+    format!("{}|{}|{}|{}|{:x}", a.username, a.imap_host, a.imap_port, a.use_oauth, h.finish())
+}
 
 /// How many of the newest messages are shown while the rest is read.
 const NEWEST: usize = 500;

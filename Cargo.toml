@@ -43,6 +43,8 @@ windows = { version = "0.62", features = ["Win32_UI_Shell", "Win32_System_Com"] 
 tray-icon = "0.26"
 imap = "2.4"
 native-tls = "0.2"
+# (already in the tree through the network crates) keep-alive on the mail connections
+socket2 = "0.6"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "native-tls", "hostname"] }
 mail-parser = "1"
 ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }

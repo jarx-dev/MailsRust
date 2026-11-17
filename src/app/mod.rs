@@ -416,7 +416,7 @@ pub struct MailApp {
     /// clicks on that note (it lives on a thread of its own)
     popup_click: (Sender<()>, Receiver<()>),
     /// the connection waiting for new mail on the server: (which account, stop, signals)
-    watch: Vec<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<()>)>,
+    watch: Vec<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<net::Watched>)>,
     /// the server said something changed: fetch as soon as the current work is done
     watch_due: bool,
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it

@@ -312,8 +312,16 @@ pub fn run(args: &[String]) -> bool {
     if args.iter().any(|a| a == "--idle-check") {
         // read-only: the mailbox's account (run on a copy, POCZTA_DATA_DIR), a wait on its inbox
         let Some(mut store) = db::Db::open().ok().and_then(|mut d| d.load()) else { println!("no mailbox"); return true; };
+        // IDLE_ACCOUNT=1: the first further account instead of the main one
+        if let Some(x) = std::env::var("IDLE_ACCOUNT").ok().and_then(|v| v.parse::<usize>().ok()).and_then(|n| store.extra.get(n.wrapping_sub(1))) {
+            store.account = x.account.clone();
+        }
         if let Some(p) = secret::unprotect(&store.account.password_saved) {
             store.account.password = p;
+        }
+        // IDLE_BACK=1: first the newest message is read the way new mail will be (see the log for the time)
+        if let Some(back) = std::env::var("IDLE_BACK").ok().and_then(|v| v.parse().ok()) {
+            println!("read on a waiting connection: {:?}", net::idle_read_check(&store.account, back));
         }
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel();
@@ -321,8 +329,8 @@ pub fn run(args: &[String]) -> bool {
         net::watch_inbox(store.account.clone(), stop.clone(), tx, eframe::egui::Context::default());
         let secs: u64 = std::env::var("IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(25);
         while t.elapsed().as_secs() < secs {
-            if rx.recv_timeout(std::time::Duration::from_millis(500)).is_ok() {
-                println!("signal from the server after {:.1} s", t.elapsed().as_secs_f32());
+            if let Ok(w) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                println!("signal from the server after {:.1} s ({} new messages read on the waiting connection)", t.elapsed().as_secs_f32(), w.new.len());
             }
         }
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
