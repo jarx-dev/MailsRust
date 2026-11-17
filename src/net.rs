@@ -57,19 +57,34 @@ fn guarded<T>(job: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         .unwrap_or_else(|_| Err(t!("core.net.unexpected_sync").into_owned()))
 }
 
-/// Watches the inbox on the server (IMAP IDLE): the server says at once when mail comes, and
-/// `tx` gets a signal, so the app fetches it within a second or two instead of at the next
-/// regular check. Runs on its own connection until `stop` is set; reconnects after a failure.
-pub fn watch_inbox(account: Account, stop: std::sync::Arc<std::sync::atomic::AtomicBool>, tx: Sender<()>, ctx: eframe::egui::Context) {
+/// What a connection waiting on an inbox tells the app: something changed there (the app then
+/// checks the account in full), and the new mail this connection has read already, of the
+/// inbox numbered `uidvalidity`.
+pub struct Watched {
+    pub uidvalidity: u32,
+    pub new: Vec<Message>,
+}
+
+/// Watches the inbox on the server (IMAP IDLE): the server says at once when mail comes, the
+/// new mail is read on this very connection and goes to `tx`, so the app shows it in about half
+/// a second instead of when a full check has signed in. Runs on its own connection until
+/// `stop` is set; reconnects after a failure.
+pub fn watch_inbox(account: Account, stop: std::sync::Arc<std::sync::atomic::AtomicBool>, tx: Sender<Watched>, ctx: eframe::egui::Context) {
     use std::sync::atomic::Ordering;
     std::thread::spawn(move || {
         let mut wait = 10u64;
         let mut beat = Heartbeat::new(true);
+        // after a failure: what came while nothing was waiting is asked for once connected again
+        let mut again = false;
         while !stop.load(Ordering::Relaxed) {
             let mut seen = Seen::default();
-            match guarded(|| idle_round(&account, &stop, &tx, &ctx, beat.noop, &mut seen)) {
-                Ok(()) => wait = 10,
+            match guarded(|| idle_round(&account, &stop, &tx, &ctx, beat.noop, &mut seen, again)) {
+                Ok(()) => {
+                    wait = 10;
+                    again = false;
+                }
                 Err(e) => {
+                    again = true;
                     // the connection was dropped (not by us): the renewal interval adapts
                     if let Some(last) = seen.last {
                         beat.dropped(seen.longest, last.elapsed());
@@ -134,13 +149,24 @@ struct Seen {
 
 /// One connection waiting for new mail; ends after 25 minutes (a fresh one is opened then:
 /// Google's sign-in lasts an hour). Each wait lasts `renew` (see `Heartbeat`).
-fn idle_round(acc: &Account, stop: &std::sync::atomic::AtomicBool, tx: &Sender<()>, ctx: &eframe::egui::Context, renew: std::time::Duration, seen: &mut Seen) -> Result<(), String> {
+fn idle_round(acc: &Account, stop: &std::sync::atomic::AtomicBool, tx: &Sender<Watched>, ctx: &eframe::egui::Context, renew: std::time::Duration, seen: &mut Seen, again: bool) -> Result<(), String> {
     use std::sync::atomic::Ordering;
     let mut s = open_session(acc)?;
     // only looked at (EXAMINE): waiting changes nothing on the server
-    s.examine("INBOX").map_err(|e| e.to_string())?;
+    let mbox = s.examine("INBOX").map_err(|e| e.to_string())?;
+    let uidvalidity = mbox.uid_validity.unwrap_or(0);
+    // the number the next new message gets (a server that doesn't say: new mail is left to the full check)
+    let mut next = mbox.uid_next;
     seen.last = Some(std::time::Instant::now());
     crate::diag::log("watching the inbox: waiting for new mail (IMAP IDLE)");
+    let tell = |new: Vec<Message>| {
+        let heard = tx.send(Watched { uidvalidity, new }).is_ok();
+        ctx.request_repaint();
+        heard
+    };
+    if again {
+        tell(Vec::new());
+    }
     let started = std::time::Instant::now();
     while !stop.load(Ordering::Relaxed) && started.elapsed() < std::time::Duration::from_secs(25 * 60) {
         // the wait is renewed every `renew` (keeps the connection alive through routers)
@@ -150,14 +176,51 @@ fn idle_round(acc: &Account, stop: &std::sync::atomic::AtomicBool, tx: &Sender<(
         seen.last = Some(std::time::Instant::now());
         if let imap::extensions::idle::WaitOutcome::MailboxChanged = outcome {
             crate::diag::log("watching the inbox: the server reports a change");
-            if tx.send(()).is_err() {
+            // new mail is read right here (no new sign-in, no look through the recent messages),
+            // then the app is told: its full check follows and takes in what came during the read
+            let t = std::time::Instant::now();
+            let got = next.as_mut().map_or(Ok(Vec::new()), |n| read_new(&mut s, n));
+            match &got {
+                Ok(new) => crate::diag::took("watching the inbox: read on this connection", t, format!("{} new messages", new.len())),
+                Err(e) => crate::diag::log(format!("watching the inbox: new mail not read on this connection: {e}")),
+            }
+            // (after a failed read a fresh connection; the wait itself went well, so its renewal interval stays)
+            let failed = got.is_err();
+            if !tell(got.unwrap_or_default()) || failed {
                 break;
             }
-            ctx.request_repaint();
         }
     }
     let _ = s.logout();
     Ok(())
+}
+
+/// The messages numbered `next` and up, read on a waiting connection; `next` moves past them.
+fn read_new(s: &mut Session, next: &mut u32) -> Result<Vec<Message>, String> {
+    // ("n:*" also names the newest message when its number is below n)
+    let uids: Vec<u32> = s.uid_search(format!("UID {next}:*")).map_err(|e| e.to_string())?.into_iter().filter(|u| *u >= *next).collect();
+    let Some(last) = uids.iter().max().copied() else { return Ok(Vec::new()) };
+    let mut new = Vec::new();
+    // (a burst, such as an import or another program moving mail in, is left to the full check)
+    if uids.len() <= 50 {
+        download(s, &uids, &mut new)?;
+    }
+    *next = last.saturating_add(1);
+    Ok(new)
+}
+
+/// Test (`--idle-check` with IDLE_BACK=n): the newest `back` numbers of the inbox read the way
+/// new mail is, on a connection that has just waited; the log gets the time it took.
+pub fn idle_read_check(acc: &Account, back: u32) -> Result<usize, String> {
+    let mut s = open_session(acc)?;
+    let mbox = s.examine("INBOX").map_err(|e| e.to_string())?;
+    let mut next = mbox.uid_next.ok_or("the server gives no next number")?.saturating_sub(back);
+    s.idle().map_err(|e| e.to_string())?.wait_with_timeout(std::time::Duration::from_secs(2)).map_err(|e| e.to_string())?;
+    let t = std::time::Instant::now();
+    let new = read_new(&mut s, &mut next)?;
+    crate::diag::took("watching the inbox: read on this connection", t, format!("{} new messages", new.len()));
+    let _ = s.logout();
+    Ok(new.len())
 }
 
 /// Google sign-in in the browser, on a background thread.
@@ -513,6 +576,13 @@ pub fn fast_tcp(host: &str, port: u16) -> Result<std::net::TcpStream, String> {
             Ok(s) => {
                 let _ = s.set_nodelay(true);
                 let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(120)));
+                // a connection that died without a word (the laptop slept, the network changed) is
+                // noticed within a minute (30 s of silence, then Windows' 10 probes 3 s apart)
+                // instead of at the next renewal of the wait for new mail
+                let alive = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(30)).with_interval(std::time::Duration::from_secs(3));
+                if let Err(e) = socket2::SockRef::from(&s).set_tcp_keepalive(&alive) {
+                    crate::diag::log(format!("    keep-alive not set: {e}"));
+                }
                 crate::diag::took("    network connection", t, a.to_string());
                 return Ok(s);
             }
