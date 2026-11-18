@@ -158,6 +158,8 @@ struct Rule {
     until: Option<NaiveDate>,
     by_day: Vec<(i32, Weekday)>,
     by_month_day: Vec<i32>,
+    /// (read for time zones' changes of clock, e.g. the last Sunday of March)
+    by_month: Vec<u32>,
 }
 
 fn weekday(s: &str) -> Option<Weekday> {
@@ -193,10 +195,108 @@ fn parse_rule(s: &str) -> Rule {
                     .collect()
             }
             "BYMONTHDAY" => r.by_month_day = v.split(',').filter_map(|d| d.trim().parse().ok()).collect(),
+            "BYMONTH" => r.by_month = v.split(',').filter_map(|d| d.trim().parse().ok()).collect(),
             _ => {}
         }
     }
     r
+}
+
+/// One change of a time zone's clock (`STANDARD` / `DAYLIGHT` of a `VTIMEZONE`): from when (on
+/// the clock before it), how it repeats, and the offsets from universal time before and after, in seconds.
+#[derive(Debug)]
+struct Shift {
+    start: NaiveDateTime,
+    rule: Option<Rule>,
+    dates: Vec<NaiveDateTime>,
+    from: i64,
+    to: i64,
+}
+
+impl Shift {
+    /// The last time it happened at or before `t` (both on the zone's clock).
+    fn last(&self, t: NaiveDateTime) -> Option<NaiveDateTime> {
+        let mut at: Vec<NaiveDateTime> = self.dates.iter().copied().chain([self.start]).filter(|d| *d <= t).collect();
+        if let Some(r) = &self.rule {
+            let month = r.by_month.first().copied().unwrap_or(self.start.month());
+            for year in [t.year() - 1, t.year()] {
+                let day = match (r.by_day.first(), r.by_month_day.first()) {
+                    (Some(&(n, wd)), _) => nth_weekday(year, month, wd, if n == 0 { 1 } else { n }),
+                    (None, Some(&md)) => NaiveDate::from_ymd_opt(year, month, md.max(1) as u32),
+                    _ => NaiveDate::from_ymd_opt(year, month, self.start.day()),
+                };
+                if let Some(d) = day.map(|d| d.and_time(self.start.time())) {
+                    if d >= self.start && d <= t && r.until.is_none_or(|u| d.date() <= u) {
+                        at.push(d);
+                    }
+                }
+            }
+        }
+        at.into_iter().max()
+    }
+}
+
+/// "+0100", "-0500", "+053000" → seconds east of universal time.
+fn offset(v: &str) -> Option<i64> {
+    let v = v.trim();
+    let sign = match v.as_bytes().first()? {
+        b'-' => -1,
+        b'+' => 1,
+        _ => return None,
+    };
+    let n = |r: std::ops::Range<usize>| v.get(r).and_then(|s| s.parse::<i64>().ok());
+    Some(sign * (n(1..3)? * 3600 + n(3..5)? * 60 + n(5..7).unwrap_or(0)))
+}
+
+/// The time zones a calendar file describes itself (its `VTIMEZONE` blocks), by name.
+type Zones = HashMap<String, Vec<Shift>>;
+
+fn zones(ics: &str) -> Zones {
+    let mut out: Zones = HashMap::new();
+    let (mut name, mut cur): (Option<String>, Option<Vec<Prop>>) = (None, None);
+    for line in unfold(ics).lines().map(str::trim_end) {
+        let upper = line.to_ascii_uppercase();
+        match upper.as_str() {
+            "BEGIN:VTIMEZONE" => name = Some(String::new()),
+            "END:VTIMEZONE" => name = None,
+            "BEGIN:STANDARD" | "BEGIN:DAYLIGHT" if name.is_some() => cur = Some(Vec::new()),
+            "END:STANDARD" | "END:DAYLIGHT" => {
+                let Some(b) = cur.take() else { continue };
+                let get = |n: &str| b.iter().find(|p| p.name == n);
+                let start = get("DTSTART").and_then(|p| NaiveDateTime::parse_from_str(p.value.trim(), "%Y%m%dT%H%M%S").ok());
+                let (Some(start), Some(from), Some(to)) = (start, get("TZOFFSETFROM").and_then(|p| offset(&p.value)), get("TZOFFSETTO").and_then(|p| offset(&p.value))) else { continue };
+                let dates = b.iter().filter(|p| p.name == "RDATE").flat_map(|p| p.value.split(',')).filter_map(|v| NaiveDateTime::parse_from_str(v.trim(), "%Y%m%dT%H%M%S").ok()).collect();
+                let shift = Shift { start, rule: get("RRULE").map(|p| parse_rule(&p.value)), dates, from, to };
+                if let Some(n) = name.as_ref().filter(|n| !n.is_empty()) {
+                    out.entry(n.clone()).or_default().push(shift);
+                }
+            }
+            _ => {
+                if let (Some(n), None, Some(p)) = (name.as_mut(), &cur, parse_line(line)) {
+                    if p.name == "TZID" {
+                        *n = p.value.trim().to_string();
+                    }
+                } else if let (Some(b), Some(p)) = (cur.as_mut(), parse_line(line)) {
+                    b.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A time on the clock of zone `tzid` (as the file describes it) on this computer's clock;
+/// None when the file does not describe that zone.
+fn zone_to_local(zones: &Zones, tzid: &str, t: NaiveDateTime) -> Option<NaiveDateTime> {
+    let shifts = zones.get(tzid)?;
+    let off = shifts
+        .iter()
+        .filter_map(|s| s.last(t).map(|at| (at, s.to)))
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, to)| to)
+        // before the first change the file knows of: the clock as it was before it
+        .or_else(|| shifts.iter().min_by_key(|s| s.start).map(|s| s.from))?;
+    Some(Utc.from_utc_datetime(&(t - Duration::seconds(off))).with_timezone(&Local).naive_local())
 }
 
 /// The `n`-th `wd` of a month (negative: from the end).
@@ -405,7 +505,7 @@ pub struct Invitation {
     pub start: NaiveDateTime,
     pub minutes: i64,
     pub all_day: bool,
-    /// the time zone the time is written in, when it is not this computer's own for sure
+    /// the time zone the time is written in, when it could not be put on this computer's clock
     pub zone: String,
     /// the organiser called it off (the email says so; nothing to answer)
     pub cancelled: bool,
@@ -431,15 +531,19 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
         (When::Day(s), Some(When::Day(e))) => (e - s).num_days().max(1) * 1440,
         _ => get("DURATION").and_then(|p| parse_duration(&p.value)).unwrap_or(if all_day { 1440 } else { 60 }),
     };
+    // a time in a named zone, on this computer's clock when the file describes the zone
+    let tzid = start_p.params.get("TZID").filter(|_| !all_day);
+    let here = tzid.and_then(|z| zone_to_local(&zones(ics), z, at));
     Some(Invitation {
         uid: get("UID").map(|p| p.value.trim().to_string()).filter(|u| !u.is_empty())?,
         title: get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()),
         location: get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default(),
-        start: at,
+        start: here.unwrap_or(at),
         minutes,
         all_day,
-        // (a time ending in Z is turned into this computer's; one with a named zone is as written)
-        zone: start_p.params.get("TZID").cloned().unwrap_or_default(),
+        // (a time ending in Z is turned into this computer's too; one it could not turn is as
+        // written, its zone named beside it)
+        zone: if here.is_some() { String::new() } else { tzid.cloned().unwrap_or_default() },
         cancelled: method == "CANCEL" || get("STATUS").is_some_and(|p| p.value.eq_ignore_ascii_case("CANCELLED")),
         asks: method == "REQUEST",
         organizer: get("ORGANIZER").map(|p| mailto(&p.value)).unwrap_or_default(),
@@ -465,8 +569,9 @@ pub fn clashes<'a>(events: &'a [Event], inv: &Invitation) -> Vec<&'a Event> {
 
 /// The events of one calendar file between `from` and `to`, in colour `color`.
 pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
-    // every event's lines
+    // every event's lines, and the time zones the file describes
     let blocks = blocks(ics);
+    let zones = zones(ics);
     // changed single days of repeating events: (uid, day) → handled by their own block
     let mut moved: HashSet<(String, NaiveDate)> = HashSet::new();
     for b in &blocks {
@@ -482,6 +587,7 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             continue;
         }
         let Some(start) = get("DTSTART").and_then(parse_when) else { continue };
+        let tz = get("DTSTART").and_then(|p| p.params.get("TZID"));
         let uid = get("UID").map(|p| p.value.clone()).unwrap_or_default();
         let title = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
         let location = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default();
@@ -516,6 +622,12 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             if excluded.contains(&d) || (!is_override && moved.contains(&(uid.clone(), d))) {
                 continue;
             }
+            // on this computer's clock, each repeat on its own (the zone's summer time may start
+            // on another day than here); a zone the file does not describe: as written
+            let (d, time) = match tz.filter(|_| !all_day).and_then(|z| zone_to_local(&zones, z, d.and_time(time))) {
+                Some(at) => (at.date(), at.time()),
+                None => (d, time),
+            };
             for k in 0..days {
                 let day = d + Duration::days(k);
                 if day < from || day > to {
@@ -977,6 +1089,29 @@ mod tests {
         // touching at the end or the start is no clash; the meeting itself and whole days are not counted
         assert_eq!(titles, ["Stand-up"]);
         assert!(clashes(&evs, &Invitation { all_day: true, ..inv }).is_empty());
+    }
+
+    #[test]
+    fn times_in_a_named_zone_are_put_on_this_computers_clock() {
+        let here = |y, mo, d, h, mi| Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap().with_timezone(&Local).naive_local();
+        let ny = "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\nDTSTART:19700308T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\nDTSTART:19701101T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n";
+        let invite = |start: &str| SAMPLE_INVITE.replace("METHOD:REQUEST\r\n", &format!("METHOD:REQUEST\r\n{ny}")).replace("DTSTART:20261120T090000Z", &format!("DTSTART;TZID=America/New_York:{start}")).replace("DTEND:20261120T103000Z", "DURATION:PT1H");
+        // winter (-5) and summer (-4) in New York; the zone is no longer named beside the time
+        let w = invitation(&invite("20261120T090000")).unwrap();
+        assert_eq!((w.start, w.zone.as_str(), w.minutes), (here(2026, 11, 20, 14, 0), "", 60));
+        assert_eq!(invitation(&invite("20260710T090000")).unwrap().start, here(2026, 7, 10, 13, 0));
+        // a zone the file does not describe: as written, named
+        let other = invitation(&invite("20261120T090000").replace("TZID=America/New_York", "TZID=Mars/Base")).unwrap();
+        assert_eq!((other.start.format("%H:%M").to_string().as_str(), other.zone.as_str()), ("09:00", "Mars/Base"));
+        // a weekly meeting at 9:00 in Warsaw across the end of summer time (25 Oct 2026): each repeat on its own
+        let waw = "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:w\r\nDTSTART;TZID=Europe/Warsaw:20261020T090000\r\nDTEND;TZID=Europe/Warsaw:20261020T093000\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:Weekly\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let d = |m, day| NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+        let got: Vec<NaiveDateTime> = parse(waw, 0, d(10, 1), d(12, 1)).iter().map(|e| e.date.and_time(e.start)).collect();
+        assert_eq!(got, [here(2026, 10, 20, 7, 0), here(2026, 10, 27, 8, 0), here(2026, 11, 3, 8, 0)]);
+        // before the first change the file knows of: the clock before it
+        let z = zones(waw);
+        assert_eq!(zone_to_local(&z, "Europe/Warsaw", NaiveDate::from_ymd_opt(1960, 1, 1).unwrap().and_hms_opt(12, 0, 0).unwrap()), Some(Utc.with_ymd_and_hms(1960, 1, 1, 11, 0, 0).unwrap().with_timezone(&Local).naive_local()));
+        assert_eq!((offset("+053000"), offset("-0500"), offset("0100")), (Some(19800), Some(-18000), None));
     }
 
     #[test]
