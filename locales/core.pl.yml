@@ -3,7 +3,7 @@ core:
     show_calendar: "Pokaż kalendarz"
   sync:
     already_open: "Poczta jest już otwarta w innym oknie — zamknij to okno"
-    ai_draft: "AI przygotowało szkic odpowiedzi — znajdziesz go w Szkicach"
+    ai_draft: "AI przygotowało szkic — znajdziesz go w Szkicach"
     toast_head:
       one: "Nowa wiadomość"
       few: "%{n} nowe wiadomości"

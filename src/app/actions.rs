@@ -41,6 +41,33 @@ pub(super) enum Action {
 }
 
 impl MailApp {
+    /// Who a reply goes to and its subject: (to, copies, subject). With `all`, everyone else on
+    /// the message is copied too (not the account it came to).
+    pub(super) fn reply_heads(&self, m: &Message, all: bool) -> (String, String, String) {
+        // (the address of the account the message came to)
+        let me = self.account_ref(m.account).email.to_lowercase();
+        // the person written back to, with their name (unless the name would confuse the list)
+        let to = if m.folder == Folder::Sent {
+            m.to.clone()
+        } else if m.from_name.trim().is_empty() || m.from_name == m.from_addr || m.from_name.contains([',', ';', '"', '<', '>']) {
+            m.from_addr.clone()
+        } else {
+            format!("{} <{}>", m.from_name.trim(), m.from_addr)
+        };
+        let cc = if all {
+            m.to.split(',')
+                .chain(m.cc.split(','))
+                .map(|s| split_address(s).1)
+                .filter(|a| !a.is_empty() && a.to_lowercase() != me && *a != m.from_addr && !to.contains(a.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+        let subj = if m.subject.to_lowercase().starts_with("re:") { m.subject.clone() } else { format!("Re: {}", m.subject) };
+        (to, cc, subj)
+    }
+
     pub(super) fn apply_actions(&mut self) {
         // only the newest messages are in yet (the window is just to look at): nothing is done
         // on this partial copy, it would be lost when the whole mailbox takes its place
@@ -151,31 +178,7 @@ impl MailApp {
                 Action::Reply(id, all) => {
                     self.ensure_body(id);
                     if let Some(m) = self.msg(id).cloned() {
-                        // (the address of the account the message came to)
-                        let me = self.account_ref(m.account).email.to_lowercase();
-                        // the person written back to, with their name (unless the name would confuse the list)
-                        let to = if m.folder == Folder::Sent {
-                            m.to.clone()
-                        } else if m.from_name.trim().is_empty() || m.from_name == m.from_addr || m.from_name.contains([',', ';', '"', '<', '>']) {
-                            m.from_addr.clone()
-                        } else {
-                            format!("{} <{}>", m.from_name.trim(), m.from_addr)
-                        };
-                        let cc = if all {
-                            m.to.split(',')
-                                .chain(m.cc.split(','))
-                                .map(|s| split_address(s).1)
-                                .filter(|a| !a.is_empty() && a.to_lowercase() != me && *a != m.from_addr && !to.contains(a.as_str()))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        } else {
-                            String::new()
-                        };
-                        let subj = if m.subject.to_lowercase().starts_with("re:") {
-                            m.subject.clone()
-                        } else {
-                            format!("Re: {}", m.subject)
-                        };
+                        let (to, cc, subj) = self.reply_heads(&m, all);
                         self.compose_account = m.account;
                         self.open_composer(to, cc, subj, String::new(), None, Some(Original::from(&m, false)));
                     }
@@ -305,6 +308,10 @@ impl MailApp {
                         self.open_composer(m.to, m.cc, m.subject, m.body, Some(id), None);
                         if let Some(c) = self.composers.last_mut() {
                             c.images = pics;
+                            // written by an AI agent: said under the text until it is sent
+                            if m.ai {
+                                c.error = Some(t!("compose.window.ai_draft").into_owned());
+                            }
                         }
                     }
                 }

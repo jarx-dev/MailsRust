@@ -31,6 +31,7 @@ compose:
     drop_to_attach: "Drop to attach"
     hint_reply: "Write a reply…"
     hint_message: "Write a message…"
+    ai_draft: "Written by an AI agent — check the recipients and the text before sending"
   view:
     bold: "Bold (Ctrl+B)"
     italic: "Italic (Ctrl+I)"

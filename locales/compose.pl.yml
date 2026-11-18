@@ -31,6 +31,7 @@ compose:
     drop_to_attach: "Upuść, aby załączyć"
     hint_reply: "Napisz odpowiedź…"
     hint_message: "Napisz wiadomość…"
+    ai_draft: "Szkic napisał agent AI — przed wysłaniem sprawdź adresatów i treść"
   view:
     bold: "Pogrubienie (Ctrl+B)"
     italic: "Kursywa (Ctrl+I)"

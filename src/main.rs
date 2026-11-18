@@ -24,6 +24,7 @@ mod html;
 mod i18n;
 mod htmlview;
 mod icon;
+mod mcp;
 mod model;
 mod net;
 mod notify;

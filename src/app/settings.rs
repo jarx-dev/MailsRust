@@ -49,6 +49,89 @@ impl MailApp {
         self.fetch_full_if_partial(m.id, true);
     }
 
+    /// Agent access (MCP): when switched on, the server runs on the Tailscale address and lets in
+    /// whoever has the key; switched off, agents are turned away (shared links keep working).
+    pub(super) fn start_agents(&mut self) {
+        self.agents_tried = std::time::Instant::now();
+        let key = if self.prefs.mcp_on { crate::secret::unprotect(&self.prefs.mcp_key) } else { None };
+        let on = key.is_some();
+        self.hub.set_key(key);
+        if !on || self.shot.is_some() || self.read_only {
+            // (switched on, but no key could be made or read back: said in the settings)
+            self.agents_err = (self.prefs.mcp_on && !on).then(|| t!("ui.settings.ai.agents_no_key").into_owned());
+            return;
+        }
+        let Some(ip) = crate::share::tailscale_ip() else {
+            self.agents_err = Some(t!("ui.settings.tailscale_off").into_owned());
+            return;
+        };
+        match self.hub.start(ip, self.prefs.ai_port) {
+            Ok(addr) => {
+                if addr.port() != self.prefs.ai_port {
+                    self.prefs.ai_port = addr.port();
+                    self.save_now = true;
+                }
+                self.hub.set_account(&self.store.account);
+                self.agents_err = None;
+            }
+            Err(e) => self.agents_err = Some(e),
+        }
+    }
+
+    /// Settings → AI: agents' access to the mailbox.
+    fn agents_settings_ui(&mut self, ui: &mut Ui) {
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(RichText::new(t!("ui.settings.ai.agents_title")).strong());
+        ui.label(RichText::new(t!("ui.settings.ai.agents_intro")).small().color(MUTED()));
+        let mut on = self.prefs.mcp_on;
+        if ui.checkbox(&mut on, t!("ui.settings.ai.agents_on")).changed() {
+            self.prefs.mcp_on = on;
+            if on && crate::secret::unprotect(&self.prefs.mcp_key).is_none() {
+                self.prefs.mcp_key = crate::share::new_key().map(|k| crate::secret::protect(&k)).unwrap_or_default();
+            }
+            self.save_now = true;
+            self.start_agents();
+        }
+        if !self.prefs.mcp_on {
+            return;
+        }
+        // (a picture shows a made-up address: it never starts the server)
+        let url = self.hub.mcp_url().or_else(|| self.shot.is_some().then(|| "http://laptop.example.ts.net:8766/mcp".to_string()));
+        let (Some(url), Some(key)) = (url, self.hub.key()) else {
+            if let Some(e) = &self.agents_err {
+                ui.label(RichText::new(e.as_str()).small().color(FLAG));
+            }
+            return;
+        };
+        ui.horizontal(|ui| {
+            ui.label(t!("ui.settings.ai.agents_address"));
+            ui.label(RichText::new(&url).monospace());
+        });
+        let mut copied = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(t!("ui.settings.ai.agents_claude")).on_hover_text(t!("ui.settings.ai.agents_copy_hint")).clicked() {
+                copied = Some(format!("claude mcp add --transport http --scope user poczta {url} --header \"Authorization: Bearer {key}\""));
+            }
+            if ui.button(t!("ui.settings.ai.agents_codex")).on_hover_text(t!("ui.settings.ai.agents_copy_hint")).clicked() {
+                copied = Some(format!("[mcp_servers.poczta]\nurl = \"{url}\"\nhttp_headers = {{ Authorization = \"Bearer {key}\" }}\n"));
+            }
+            if ui.button(t!("ui.settings.ai.agents_key")).on_hover_text(t!("ui.settings.ai.agents_copy_hint")).clicked() {
+                copied = Some(key.clone());
+            }
+            if ui.button(t!("ui.settings.ai.agents_new_key")).on_hover_text(t!("ui.settings.ai.agents_new_key_hint")).clicked() {
+                self.prefs.mcp_key = crate::share::new_key().map(|k| crate::secret::protect(&k)).unwrap_or_default();
+                self.save_now = true;
+                self.start_agents();
+                self.flash(&t!("ui.settings.ai.agents_new_key_done"));
+            }
+        });
+        if let Some(c) = copied {
+            ui.ctx().copy_text(c);
+            self.flash(&t!("ui.settings.ai.agents_copied"));
+        }
+    }
+
     /// Links shared before (and not expired) work again after the app restarts.
     pub(super) fn restore_ai_shares(&mut self) {
         let now = Local::now().timestamp();
@@ -577,6 +660,7 @@ impl MailApp {
         if self.ai_check.is_some() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
         }
+        self.agents_settings_ui(ui);
     }
 
     /// The AI settings and the Google Calendar each in a window of their own.

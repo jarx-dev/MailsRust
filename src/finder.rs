@@ -63,6 +63,45 @@ pub struct Finder {
 /// An answer from the searching thread: (search, results best first, found by meaning only).
 type Found = ((String, u64, usize), Vec<u64>, std::collections::HashSet<u64>);
 
+/// The word index and, when ready, the meaning model with every message's meaning.
+pub struct Snapshot {
+    pub index: Arc<search::Index>,
+    pub model: Option<Arc<Model>>,
+    pub vectors: Option<Arc<HashMap<u64, Vec<i8>>>>,
+}
+
+impl Snapshot {
+    /// Messages for a search, best first: exact words first, then messages that mean the same
+    /// thing in other words (those also come back on their own). Runs off the window's thread.
+    pub fn rank(&self, q: &str) -> (Vec<u64>, std::collections::HashSet<u64>) {
+        let mut score: HashMap<u64, f32> = HashMap::new();
+        // every message with the words (the list shows them newest first, so none is cut off)
+        let lex = self.index.search(q, usize::MAX);
+        let top_lex = lex.first().map(|x| x.1).unwrap_or(1.0).max(1e-6);
+        for (id, s) in &lex {
+            score.insert(*id, 0.7 * s / top_lex);
+        }
+        let mut by_meaning = std::collections::HashSet::new();
+        if let (Some(model), Some(vectors)) = (&self.model, &self.vectors) {
+            let qv = model.embed(q);
+            let mut sims: Vec<(u64, f32)> = vectors.iter().map(|(id, v)| (*id, semantic::similarity(&qv, v))).collect();
+            sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let top = sims.first().map(|x| x.1).unwrap_or(0.0);
+            // only messages that really mean something close to the search
+            let threshold = (top * 0.65).max(0.28);
+            for (id, s) in sims.into_iter().take(200).filter(|x| x.1 >= threshold) {
+                if !score.contains_key(&id) {
+                    by_meaning.insert(id);
+                }
+                *score.entry(id).or_default() += 0.45 * s / top.max(1e-6);
+            }
+        }
+        let mut ranked: Vec<(u64, f32)> = score.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        (ranked.into_iter().map(|x| x.0).collect(), by_meaning)
+    }
+}
+
 impl Finder {
     pub fn new(enabled: bool) -> Self {
         let (index_tx, index_rx) = channel();
@@ -350,33 +389,19 @@ impl Finder {
         // the search runs on another thread, so typing never waits for it; the results shown so
         // far stay until the new ones come
         std::thread::spawn(move || {
-            let mut score: HashMap<u64, f32> = HashMap::new();
-            // every message with the words (the list shows them newest first, so none is cut off)
-            let lex = idx.search(&q, usize::MAX);
-            let top_lex = lex.first().map(|x| x.1).unwrap_or(1.0).max(1e-6);
-            for (id, s) in &lex {
-                score.insert(*id, 0.7 * s / top_lex);
-            }
-            let mut by_meaning = std::collections::HashSet::new();
-            if let (Some(model), Some(vectors)) = (model, vectors) {
-                let qv = model.embed(&q);
-                let mut sims: Vec<(u64, f32)> = vectors.iter().map(|(id, v)| (*id, semantic::similarity(&qv, v))).collect();
-                sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                let top = sims.first().map(|x| x.1).unwrap_or(0.0);
-                // only messages that really mean something close to the search
-                let threshold = (top * 0.65).max(0.28);
-                for (id, s) in sims.into_iter().take(200).filter(|x| x.1 >= threshold) {
-                    if !score.contains_key(&id) {
-                        by_meaning.insert(id);
-                    }
-                    *score.entry(id).or_default() += 0.45 * s / top.max(1e-6);
-                }
-            }
-            let mut ranked: Vec<(u64, f32)> = score.into_iter().filter(|(id, _)| !trash.contains(id)).collect();
-            ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            let _ = tx.send((key, ranked.into_iter().map(|x| x.0).collect(), by_meaning));
+            let snap = Snapshot { index: idx, model, vectors };
+            let (ranked, by_meaning) = snap.rank(&q);
+            let _ = tx.send((key, ranked.into_iter().filter(|id| !trash.contains(id)).collect(), by_meaning));
             ctx.request_repaint();
         });
+    }
+
+    /// What a search on another thread needs (shared, not copied), once the word index is ready.
+    pub fn snapshot(&self) -> Option<Snapshot> {
+        let index = self.index.clone()?;
+        let model = self.model.clone();
+        let vectors = model.is_some().then(|| self.vectors.clone());
+        Some(Snapshot { index, model, vectors })
     }
 
     fn start_loading(&mut self, ctx: &eframe::egui::Context) {

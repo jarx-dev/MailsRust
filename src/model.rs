@@ -108,6 +108,13 @@ pub struct Message {
     /// The text is in the database, not in memory; it is read when the message is opened.
     #[serde(skip)]
     pub on_disk: bool,
+    /// A draft an AI agent wrote: the writing window warns to check it before sending.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ai: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Message {
@@ -137,6 +144,7 @@ impl Message {
             partial: false,
             snippet: String::new(),
             on_disk: false,
+            ai: false,
         }
     }
 }
@@ -553,6 +561,7 @@ impl Store {
                 partial: false,
                 snippet: String::new(),
                 on_disk: false,
+                ai: false,
             });
         }
 

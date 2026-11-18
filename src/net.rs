@@ -1521,6 +1521,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         partial: false,
         snippet: String::new(),
         on_disk: false,
+        ai: false,
     })
 }
 

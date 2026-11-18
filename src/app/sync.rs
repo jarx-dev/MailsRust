@@ -162,51 +162,136 @@ specjalista ds. Informatyki".into();
             }
         }
         self.restore_ai_shares();
+        self.start_agents();
     }
 
-    /// Reply drafts written by an AI agent: they go to Drafts, ready to check and send.
+    /// Drafts written by an AI agent: they go to Drafts, ready to check and send.
     pub(super) fn poll_ai_drafts(&mut self) {
-        while let Ok((oid, text)) = self.hub.drafts.try_recv() {
-            self.ensure_body(oid);
-            let Some(orig) = self.msg(oid).cloned() else { continue };
-            let subject = if orig.subject.to_lowercase().starts_with("re:") { orig.subject.clone() } else { format!("Re: {}", orig.subject) };
-            let to = if orig.from_name.is_empty() || orig.from_name == orig.from_addr {
-                orig.from_addr.clone()
-            } else {
-                format!("{} <{}>", orig.from_name, orig.from_addr)
-            };
-            let mut body = text;
-            body.push_str(&Original::from(&orig, false).as_text());
-            let id = self.store.new_id();
-            let acc = self.store.account.clone();
-            self.store.messages.push(Message {
-                id,
-                folder: Folder::Drafts,
-                account: 0,
-                from_name: acc.display_name.clone(),
-                from_addr: acc.email.clone(),
-                to,
-                cc: String::new(),
-                subject,
-                body,
-                date: Local::now().naive_local(),
-                read: true,
-                flagged: false,
-                attachments: vec![],
-                sample: false,
-                html_path: String::new(),
-                inline: vec![],
-                attachment_files: vec![],
-                labels: vec![],
-                uid: None,
-                body_path: String::new(),
-                partial: false,
-                snippet: String::new(),
-                on_disk: false,
-            });
-            self.save_now = true;
-            self.set_status(t!("core.sync.ai_draft"));
-            self.touched = true;
+        while let Ok(d) = self.hub.drafts.try_recv() {
+            let said = self.save_ai_draft(&d);
+            if let Err(e) = &said {
+                crate::diag::log(format!("agents: draft not saved: {e}"));
+            }
+            if let Some(tx) = d.done {
+                let _ = tx.send(said);
+            }
+        }
+    }
+
+    fn save_ai_draft(&mut self, d: &crate::share::Draft) -> Result<String, String> {
+        // (this window only reads the mailbox another window has open: a draft would be lost)
+        if self.read_only {
+            return Err("Poczta is open in another window; this one can't save drafts.".into());
+        }
+        let (account, to, cc, subject, body) = match d.reply_to {
+            Some(oid) => {
+                self.ensure_body(oid);
+                let orig = self.msg(oid).filter(|m| m.id < reading::FILE_IDS).cloned().ok_or_else(|| format!("There is no message {oid}."))?;
+                // the reply goes from the account the message came to, to the people Poczta picks
+                let (to, cc, subject) = self.reply_heads(&orig, d.reply_all);
+                let mut body = d.body.clone();
+                body.push_str(&Original::from(&orig, false).as_text());
+                (orig.account, to, cc, subject, body)
+            }
+            None => {
+                let from = d.from.trim().to_lowercase();
+                let account = match from.as_str() {
+                    "" => 0,
+                    _ => (0..=self.store.extra.len() as u32)
+                        .find(|a| self.account_ref(*a).email.to_lowercase() == from)
+                        .ok_or_else(|| format!("No account has the address {}.", d.from.trim()))?,
+                };
+                (account, d.to.clone(), d.cc.clone(), d.subject.clone(), d.body.clone())
+            }
+        };
+        let acc = self.account_for(account);
+        let id = self.store.new_id();
+        let said = format!(
+            "Draft {id} saved in Drafts ({}): to {to}{}, subject \"{subject}\". Nothing was sent; the person checks and sends it in Poczta (show_in_poczta opens it).",
+            acc.email,
+            if cc.is_empty() { String::new() } else { format!(", cc {cc}") }
+        );
+        self.store.messages.push(Message {
+            id,
+            folder: Folder::Drafts,
+            account,
+            from_name: acc.display_name.clone(),
+            from_addr: acc.email.clone(),
+            to,
+            cc,
+            subject,
+            body,
+            date: Local::now().naive_local(),
+            read: true,
+            flagged: false,
+            attachments: vec![],
+            sample: false,
+            html_path: String::new(),
+            inline: vec![],
+            attachment_files: vec![],
+            labels: vec![],
+            uid: None,
+            body_path: String::new(),
+            partial: false,
+            snippet: String::new(),
+            on_disk: false,
+            ai: true,
+        });
+        self.save_now = true;
+        self.set_status(t!("core.sync.ai_draft"));
+        self.touched = true;
+        Ok(said)
+    }
+
+    /// What AI agents ask for (MCP), answered between frames from what the app holds; the
+    /// searching and reading itself happens on the server's threads.
+    pub(super) fn poll_agent_asks(&mut self) {
+        use crate::mcp::{Ask, Full, Head};
+        while let Ok(ask) = self.hub.asks.try_recv() {
+            match ask {
+                Ask::Search(tx) => {
+                    let _ = tx.send(self.finder.snapshot());
+                }
+                Ask::Heads(ids, filter, tx) => {
+                    let heads = ids
+                        .iter()
+                        .filter_map(|id| self.msg(*id))
+                        .filter(|m| m.id < reading::FILE_IDS)
+                        .filter(|m| filter.keeps(m, &self.account_ref(m.account).email))
+                        .take(filter.limit)
+                        .map(|m| Head::of(m, &self.account_ref(m.account).email))
+                        .collect();
+                    let _ = tx.send(heads);
+                }
+                Ask::Message(id, tx) => {
+                    let full = self.msg(id).filter(|m| m.id < reading::FILE_IDS).cloned().map(|msg| Full {
+                        account: self.account_ref(msg.account).email.clone(),
+                        reader: self.db.as_ref().map(|d| d.reader()).or_else(|| self.preview.clone()),
+                        msg,
+                    });
+                    if full.as_ref().is_some_and(|f| f.msg.partial) {
+                        // (asked for by an agent, as if the person opened it: tried again after a failure)
+                        self.fetch_full_if_partial(id, true);
+                    }
+                    let _ = tx.send(full);
+                }
+                Ask::Show(id, tx) => {
+                    let Some(m) = self.msg(id).filter(|m| m.id < reading::FILE_IDS) else {
+                        let _ = tx.send(Err(format!("There is no message {id}.")));
+                        continue;
+                    };
+                    let draft = m.folder == Folder::Drafts;
+                    let ctx = self.ctx.clone();
+                    self.show_window(&ctx);
+                    if !draft {
+                        self.actions.push(Action::OpenWindow(id));
+                    } else if !self.composers.iter().any(|c| c.draft_id == Some(id)) {
+                        self.actions.push(Action::EditDraft(id));
+                    }
+                    crate::diag::log(format!("agents: message {id} shown"));
+                    let _ = tx.send(Ok(if draft { "The draft is open in Poczta's writing window." } else { "The message is open in a window of its own in Poczta." }.to_string()));
+                }
+            }
         }
     }
 
