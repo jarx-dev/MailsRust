@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 /// The settings as n8n keeps them (one row of its table).
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Rules {
     pub enabled: bool,
@@ -30,7 +30,7 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// What is wrong with them, in the person's words (n8n checks the same and refuses).
+    /// What is wrong with them, in the person's words (n8n checks these and the texts' length, and refuses).
     pub fn problem(&self) -> Option<String> {
         let day = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
         match (day(&self.date_start), day(&self.date_end)) {
@@ -41,10 +41,26 @@ impl Rules {
             return Some(t!("ui.settings.autoresponder.bad_hours").into_owned());
         }
         let a = self.target_address.trim();
-        if a.is_empty() || a.contains(char::is_whitespace) || a.split('@').count() != 2 {
+        if a.contains(char::is_whitespace) || !matches!(a.split_once('@'), Some((who, domain)) if !who.is_empty() && domain.contains('.') && !domain.contains('@')) {
             return Some(t!("ui.settings.autoresponder.bad_address").into_owned());
         }
         None
+    }
+
+    /// The settings from JSON (n8n's row, or the AI's changes laid over `base`): a missing or null
+    /// field keeps `base`'s value.
+    pub fn over(base: &Rules, json: serde_json::Value) -> Result<Rules, String> {
+        let serde_json::Value::Object(changes) = json else {
+            return Err("not a JSON object".into());
+        };
+        let mut v = serde_json::to_value(base).map_err(|e| e.to_string())?;
+        v["updated_by"] = base.updated_by.clone().into();
+        for (k, x) in changes {
+            if !x.is_null() {
+                v[k] = x;
+            }
+        }
+        serde_json::from_value(v).map_err(|e| e.to_string())
     }
 }
 
@@ -67,8 +83,10 @@ pub struct Link {
 }
 
 impl Link {
+    /// An https address and a token that can go in a header (the token never in an error message).
     pub fn is_set(&self) -> bool {
-        !self.url.trim().is_empty() && !self.token.trim().is_empty()
+        let t = self.token.trim();
+        self.url.trim().starts_with("https://") && !t.is_empty() && t.bytes().all(|b| b.is_ascii_graphic())
     }
 }
 
@@ -85,12 +103,15 @@ pub fn load() -> Link {
     l
 }
 
-pub fn save(l: &Link) {
+pub fn save(l: &Link) -> Result<(), String> {
     let mut l = l.clone();
     l.token_saved = crate::secret::protect(l.token.trim());
-    if let Ok(t) = serde_json::to_string_pretty(&l) {
-        let _ = std::fs::write(path(), t);
+    let not_saved = |e: String| t!("ui.settings.autoresponder.not_saved", error = e).into_owned();
+    if l.token_saved.is_empty() {
+        return Err(not_saved("DPAPI".into()));
     }
+    let t = serde_json::to_string_pretty(&l).map_err(|e| not_saved(e.to_string()))?;
+    std::fs::write(path(), t).map_err(|e| not_saved(e.to_string()))
 }
 
 fn call(l: &Link, body: serde_json::Value) -> Result<Rules, String> {
@@ -98,20 +119,22 @@ fn call(l: &Link, body: serde_json::Value) -> Result<Rules, String> {
         return Err(t!("ui.settings.autoresponder.no_link").into_owned());
     }
     let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
-    let agent = ureq::AgentBuilder::new().tls_connector(std::sync::Arc::new(tls)).timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build();
+    // no redirects: ureq would carry the token header to wherever one points
+    let agent = ureq::AgentBuilder::new().tls_connector(std::sync::Arc::new(tls)).redirects(0).timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build();
     let resp = agent.post(l.url.trim()).set("X-Poczta-Token", l.token.trim()).send_json(body).map_err(|e| match e {
         ureq::Error::Status(401, _) => t!("ui.settings.autoresponder.token_rejected").into_owned(),
-        ureq::Error::Status(code, r) => {
-            let said = r.into_json::<serde_json::Value>().ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_else(|| format!("HTTP {code}"));
+        ureq::Error::Status(400, r) => {
+            let said: String = r.into_json::<serde_json::Value>().ok().and_then(|v| v["error"].as_str().map(|s| s.chars().take(300).collect())).unwrap_or_else(|| "HTTP 400".into());
             t!("ui.settings.autoresponder.rejected", error = said).into_owned()
         }
+        ureq::Error::Status(code, _) => t!("ui.settings.autoresponder.unavailable", error = format!("HTTP {code}")).into_owned(),
         ureq::Error::Transport(t) => t!("ui.settings.autoresponder.unavailable", error = t.to_string()).into_owned(),
     })?;
     let v: serde_json::Value = resp.into_json().map_err(|_| t!("ui.settings.autoresponder.bad_answer").into_owned())?;
     if v["ok"] != true {
         return Err(t!("ui.settings.autoresponder.bad_answer").into_owned());
     }
-    serde_json::from_value(v["settings"].clone()).map_err(|_| t!("ui.settings.autoresponder.bad_answer").into_owned())
+    Rules::over(&Rules::default(), v["settings"].clone()).map_err(|_| t!("ui.settings.autoresponder.bad_answer").into_owned())
 }
 
 /// The settings n8n has now.
@@ -139,9 +162,15 @@ mod tests {
         assert!(Rules { hour_end: 15, ..ok.clone() }.problem().is_some());
         assert!(Rules { hour_start: 25, ..ok.clone() }.problem().is_some());
         assert!(Rules { target_address: "a b@c".into(), ..ok.clone() }.problem().is_some());
-        // n8n's answer carries more fields (id, key, dates of the row): they are ignored
-        let r: Rules = serde_json::from_value(serde_json::json!({ "id": 1, "key": "main", "enabled": true, "hour_start": 15, "updated_by": "Poczta" })).unwrap();
-        assert!(r.enabled && r.hour_start == 15 && r.updated_by == "Poczta");
+        assert!(Rules { target_address: "@".into(), ..ok.clone() }.problem().is_some());
+        // n8n's answer carries more fields (id, key, dates of the row): they are ignored; a null
+        // column keeps the default
+        let r = Rules::over(&Rules::default(), serde_json::json!({ "id": 1, "key": "main", "enabled": true, "hour_start": 15, "text_before": null, "updated_by": "Poczta" })).unwrap();
+        assert!(r.enabled && r.hour_start == 15 && r.text_before.is_empty() && r.updated_by == "Poczta");
         assert!(serde_json::to_value(&r).unwrap().get("updated_by").is_none());
+        // the AI's partial answer changes only what it names
+        let by_ai = Rules::over(&Rules { ignored: "x@y.pl".into(), updated_by: "Poczta".into(), ..ok.clone() }, serde_json::json!({ "hour_start": 16, "enabled": true })).unwrap();
+        assert!(by_ai.hour_start == 16 && by_ai.enabled && by_ai.ignored == "x@y.pl" && by_ai.target_address == "a@b.pl" && by_ai.updated_by == "Poczta");
+        assert!(Rules::over(&ok, serde_json::json!([1])).is_err());
     }
 }

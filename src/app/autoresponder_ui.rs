@@ -5,7 +5,10 @@ type Answer = Result<(Rules, String), String>;
 
 /// The autoresponder window (☰ → Autoresponder): its state lives while the window is open.
 pub(super) struct AutoUi {
+    /// the webhook the form was read from, and where Save writes
     link: Link,
+    /// the address and token as typed; they become `link` on "Connect"
+    draft: Link,
     /// the settings being edited; None until n8n answered
     rules: Option<Rules>,
     /// the days as typed (DD-MM-RRRR)
@@ -19,10 +22,12 @@ pub(super) struct AutoUi {
 }
 
 impl AutoUi {
-    pub(super) fn new(ctx: &egui::Context) -> Self {
-        let mut a = Self { link: crate::autoresponder::load(), rules: None, from: String::new(), to: String::new(), sentence: String::new(), busy: None, said: None };
-        if std::env::var("POCZTA_START").as_deref() == Ok("autoresponder") && crate::unseen() {
-            // a test picture: a filled form without n8n
+    /// `demo`: a test run or picture, which never reads the saved webhook.
+    pub(super) fn new(ctx: &egui::Context, demo: bool) -> Self {
+        let link = if demo { Link::default() } else { crate::autoresponder::load() };
+        let mut a = Self { draft: link.clone(), link, rules: None, from: String::new(), to: String::new(), sentence: String::new(), busy: None, said: None };
+        if demo {
+            // a filled form without n8n
             a.show(Rules {
                 enabled: true,
                 date_start: "2026-11-19".into(),
@@ -36,8 +41,7 @@ impl AutoUi {
                 updated_by: "Poczta 2026-11-18T12:41:11Z".into(),
             });
         } else if a.link.is_set() {
-            let link = a.link.clone();
-            a.run(ctx, t!("ui.settings.autoresponder.loading").into_owned(), move || crate::autoresponder::fetch(&link).map(|r| (r, t!("ui.settings.autoresponder.loaded").into_owned())));
+            a.load(ctx);
         }
         a
     }
@@ -59,22 +63,31 @@ impl AutoUi {
         self.said = None;
     }
 
-    /// The form as settings to send: its days back in RRRR-MM-DD, checked.
-    fn edited(&self) -> Result<Rules, String> {
+    fn load(&mut self, ctx: &egui::Context) {
+        let link = self.link.clone();
+        self.run(ctx, t!("ui.settings.autoresponder.loading").into_owned(), move || crate::autoresponder::fetch(&link).map(|r| (r, t!("ui.settings.autoresponder.loaded").into_owned())));
+    }
+
+    /// The form as settings: its days back in RRRR-MM-DD (empty when not a day).
+    fn form(&self) -> Rules {
         let mut r = self.rules.clone().unwrap_or_default();
-        r.date_start = iso_day(&self.from).ok_or_else(|| t!("ui.settings.autoresponder.bad_dates").into_owned())?;
-        r.date_end = iso_day(&self.to).ok_or_else(|| t!("ui.settings.autoresponder.bad_dates").into_owned())?;
-        match r.problem() {
-            Some(p) => Err(p),
-            None => Ok(r),
-        }
+        r.date_start = iso_day(&self.from).unwrap_or_default();
+        r.date_end = iso_day(&self.to).unwrap_or_default();
+        r
+    }
+
+    /// The form as settings to send, checked.
+    fn edited(&self) -> Result<Rules, String> {
+        let r = self.form();
+        r.problem().map_or(Ok(r), Err)
     }
 }
 
 impl MailApp {
     pub(super) fn autoresponder_ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let a = self.auto_ui.get_or_insert_with(|| AutoUi::new(&ctx));
+        let demo = self.shot.is_some() || crate::unseen();
+        let a = self.auto_ui.get_or_insert_with(|| AutoUi::new(&ctx, demo));
         if let Some(answer) = a.busy.as_ref().and_then(|(_, rx)| rx.try_recv().ok()) {
             a.busy = None;
             match answer {
@@ -91,16 +104,22 @@ impl MailApp {
         egui::CollapsingHeader::new(t!("ui.settings.autoresponder.link")).id_salt("auto-link").default_open(!a.link.is_set()).show(ui, |ui| {
             egui::Grid::new("auto-link-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label(t!("ui.settings.autoresponder.url"));
-                ui.add(egui::TextEdit::singleline(&mut a.link.url).hint_text("https://…/webhook/poczta-autoresponder").desired_width(380.0));
+                ui.add(egui::TextEdit::singleline(&mut a.draft.url).hint_text("https://…/webhook/poczta-autoresponder").desired_width(380.0));
                 ui.end_row();
                 ui.label(t!("ui.settings.autoresponder.token"));
-                ui.add(egui::TextEdit::singleline(&mut a.link.token).password(true).desired_width(380.0));
+                ui.add(egui::TextEdit::singleline(&mut a.draft.token).password(true).desired_width(380.0));
                 ui.end_row();
             });
-            if ui.add_enabled(!busy && a.link.is_set(), egui::Button::new(t!("ui.settings.autoresponder.connect")).small()).clicked() {
-                crate::autoresponder::save(&a.link);
-                let link = a.link.clone();
-                a.run(&ctx, t!("ui.settings.autoresponder.loading").into_owned(), move || crate::autoresponder::fetch(&link).map(|r| (r, t!("ui.settings.autoresponder.loaded").into_owned())));
+            if ui.add_enabled(!busy && a.draft.is_set(), egui::Button::new(t!("ui.settings.autoresponder.connect")).small()).clicked() {
+                match crate::autoresponder::save(&a.draft) {
+                    Ok(()) => {
+                        // the form read from the old webhook must not be saved to the new one
+                        a.link = a.draft.clone();
+                        a.rules = None;
+                        a.load(&ctx);
+                    }
+                    Err(e) => a.said = Some(Err(e)),
+                }
             }
         });
         let mut ask = false;
@@ -118,9 +137,9 @@ impl MailApp {
                 egui::Grid::new("auto-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label(t!("ui.settings.autoresponder.dates"));
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut a.from).hint_text("DD-MM-RRRR").desired_width(96.0));
+                        ui.add(egui::TextEdit::singleline(&mut a.from).desired_width(96.0));
                         ui.label("–");
-                        ui.add(egui::TextEdit::singleline(&mut a.to).hint_text("DD-MM-RRRR").desired_width(96.0));
+                        ui.add(egui::TextEdit::singleline(&mut a.to).desired_width(96.0));
                         ui.label(RichText::new(t!("ui.settings.autoresponder.dates_hint")).small().color(MUTED()));
                     });
                     ui.end_row();
@@ -155,25 +174,22 @@ impl MailApp {
                 ui.label(RichText::new(t!("ui.settings.autoresponder.last", who = who)).small().color(MUTED()));
             }
         }
-        // (asked for after the form, which holds `a.rules` borrowed while drawn)
+        // (asked for after the form, which holds `a.rules` borrowed while drawn); the form need not
+        // be valid yet, the answer is checked
         if ask {
-            match a.edited() {
-                Ok(current) => {
-                    let (sentence, now) = (a.sentence.trim().to_string(), chrono::Local::now().format("%Y-%m-%d (%A) %H:%M").to_string());
-                    let keep_by = current.updated_by.clone();
-                    a.run(&ctx, t!("ui.settings.autoresponder.asking").into_owned(), move || {
-                        let current_json = serde_json::to_string_pretty(&current).unwrap_or_default();
-                        let answer = crate::ai::autoresponder(&crate::ai::load(), &now, &current_json, &sentence)?;
-                        let mut r: Rules = serde_json::from_str(&answer).map_err(|e| t!("ui.settings.autoresponder.bad_ai", error = e.to_string()).into_owned())?;
-                        if let Some(p) = r.problem() {
-                            return Err(t!("ui.settings.autoresponder.bad_ai", error = p).into_owned());
-                        }
-                        r.updated_by = keep_by;
-                        Ok((r, t!("ui.settings.autoresponder.ai_done").into_owned()))
-                    });
+            let current = a.form();
+            let (sentence, now) = (a.sentence.trim().to_string(), chrono::Local::now().format("%Y-%m-%d (%A) %H:%M").to_string());
+            a.run(&ctx, t!("ui.settings.autoresponder.asking").into_owned(), move || {
+                let bad = |e: String| t!("ui.settings.autoresponder.bad_ai", error = e).into_owned();
+                let current_json = serde_json::to_string_pretty(&current).unwrap_or_default();
+                let answer = crate::ai::autoresponder(&crate::ai::load(), &now, &current_json, &sentence).map_err(bad)?;
+                let v = serde_json::from_str(&answer).map_err(|e| bad(e.to_string()))?;
+                let r = Rules::over(&current, v).map_err(bad)?;
+                match r.problem() {
+                    Some(p) => Err(bad(p)),
+                    None => Ok((r, t!("ui.settings.autoresponder.ai_done").into_owned())),
                 }
-                Err(e) => a.said = Some(Err(e)),
-            }
+            });
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -188,8 +204,7 @@ impl MailApp {
                     }
                 }
                 if ui.add_enabled(!busy && a.link.is_set(), egui::Button::new(t!("ui.settings.autoresponder.reload"))).clicked() {
-                    let link = a.link.clone();
-                    a.run(&ctx, t!("ui.settings.autoresponder.loading").into_owned(), move || crate::autoresponder::fetch(&link).map(|r| (r, t!("ui.settings.autoresponder.loaded").into_owned())));
+                    a.load(&ctx);
                 }
             }
             if let Some((what, _)) = &a.busy {
