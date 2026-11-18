@@ -1068,6 +1068,14 @@ tel.: 600-100-200".into();
                             "<p>Dodaj proszę punkt o <b>terminach pierwszego przeglądu</b>:</p><ul><li>wstępny harmonogram</li><li>kto przygotowuje dane</li></ul><p style=\"color:#1a6\">Dzięki!</p>".as_bytes(),
                             "html",
                         );
+                        if std::env::var("POCZTA_INVITE_CARD").is_ok() {
+                            // test picture: the unfolded card is an invitation, with a link that
+                            // shows one site and opens another
+                            let ics = crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string());
+                            m.attachments.push("invite.ics".into());
+                            m.attachment_files.push(crate::model::cache_put(ics.as_bytes(), "ics"));
+                            m.html_path = crate::model::cache_put("<p>Logowanie do panelu: <a href=\"https://evil.example/login\">www.mojbank.pl</a> · <a href=\"https://www.mojbank.pl/x\">mojbank.pl</a></p>".as_bytes(), "html");
+                        }
                     }
                     if *mine {
                         m.folder = Folder::Sent;

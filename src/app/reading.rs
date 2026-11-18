@@ -39,6 +39,12 @@ pub(super) fn same_meeting(a: &crate::model::Event, b: &crate::model::Event) -> 
     a.date == b.date && a.start == b.start && a.all_day == b.all_day && a.title == b.title
 }
 
+/// The mark after a link that shows one address and opens another site: that site, and on
+/// hover what it means (as in the email page, see `webview.rs`).
+fn link_warning(ui: &mut Ui, host: &str) {
+    ui.label(RichText::new(format!(" {} {host}", ic::WARNING)).size(12.0).font(semibold(12.0)).color(WARN())).on_hover_text(t!("mail.reading.link_goes_elsewhere", host = host));
+}
+
 /// Attachments the app can show itself (the Edge engine shows PDFs, pictures and texts).
 pub(super) fn previewable(name: &str) -> bool {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -285,6 +291,9 @@ impl MailApp {
                                 match &r.link {
                                     Some(url) => {
                                         ui.add(egui::Hyperlink::from_label_and_url(t.color(r.color.map(rgb).unwrap_or(ACCENT())), url));
+                                        if let Some(host) = html::link_elsewhere(&r.text, url) {
+                                            link_warning(ui, &host);
+                                        }
                                     }
                                     None => {
                                         ui.add(egui::Label::new(t.color(r.color.map(rgb).unwrap_or(TEXT()))).selectable(true));
@@ -294,6 +303,8 @@ impl MailApp {
                         });
                     };
                     let links: Vec<&String> = runs.iter().filter_map(|r| r.link.as_ref()).collect();
+                    // (centred text is laid out as one block: its marked link is said below it)
+                    let elsewhere = if *center { runs.iter().find_map(|r| r.link.as_ref().and_then(|u| html::link_elsewhere(&r.text, u))) } else { None };
                     let has_icons = runs.iter().any(|r| r.img.is_some());
                     if has_icons {
                         // pictures in the text: drawn one by one (centred if the text is)
@@ -339,6 +350,9 @@ impl MailApp {
                         }
                     } else {
                         draw(ui);
+                    }
+                    if let (false, Some(host)) = (has_icons, &elsewhere) {
+                        ui.vertical_centered(|ui| link_warning(ui, host));
                     }
                     ui.add_space(6.0);
                 }
@@ -1070,7 +1084,7 @@ impl MailApp {
     /// An email inviting to a meeting (it carries a calendar file): what and when, above the
     /// text, what else is in the calendar then, and the answer, written to the meeting in Google
     /// Calendar (Google tells the organiser); the answer already given is read from there.
-    fn invitation_bar(&mut self, ui: &mut Ui, m: &Message) {
+    pub(super) fn invitation_bar(&mut self, ui: &mut Ui, m: &Message) {
         let Some(file) = m.attachment_files.iter().find(|f| f.ends_with(".ics")) else { return };
         let Some(inv) = self.invitation_to_calendar(file) else { return };
         let test = self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("invite");
@@ -1367,6 +1381,7 @@ impl MailApp {
                                 }
                             });
                         }
+                        self.invitation_bar(ui, &m);
                         ui.add_space(6.0);
                         // the text: formatted (Edge engine) when there is a formatted version
                         let avail = ui.available_rect_before_wrap();

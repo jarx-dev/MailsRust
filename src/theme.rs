@@ -59,6 +59,8 @@ themed! {
     LOGO_BG = 0xFFFFFF, 0xC9CDD3;
     /// mail you sent (the history with a person), beside the blue of received mail
     SENT = 0x2E9E5B, 0x5CC48A;
+    /// a warning about a link that opens another site than it shows (as in the email page)
+    WARN = 0xB45309, 0xF59E0B;
 }
 
 pub const PRIMARY: Color32 = Color32::from_rgb(0x2D, 0x74, 0xE6);
@@ -113,6 +115,7 @@ pub mod ic {
     pub const FOLDER: &str = "\u{E8B7}";
     pub const ADD: &str = "\u{E710}";
     pub const HISTORY: &str = "\u{E81C}";
+    pub const WARNING: &str = "\u{E7BA}";
 }
 
 /// An icon of `ic` centred at `at`; "reply all" is the reply arrow with a second arrowhead.

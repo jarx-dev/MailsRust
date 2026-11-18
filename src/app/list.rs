@@ -387,6 +387,8 @@ impl MailApp {
                     // the text uses the card's whole width (the same margin as on the right)
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
+                        // an invitation: its meeting and the answer, as on the open message
+                        self.invitation_bar(ui, x);
                         let blocks = self.card_blocks(x);
                         let body = x.body.trim();
                         if let Some(b) = blocks.filter(|b| !b.is_empty()) {
