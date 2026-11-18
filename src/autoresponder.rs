@@ -24,6 +24,10 @@ pub struct Rules {
     pub text_after: String,
     /// addresses never answered, one per line
     pub ignored: String,
+    /// unavailable the whole day: in those days the reply goes at any hour, with `text_all_day`
+    /// (the hours and the other two texts are kept for later)
+    pub all_day: bool,
+    pub text_all_day: String,
     /// who changed it last, and when (written by n8n)
     #[serde(skip_serializing)]
     pub updated_by: String,
@@ -45,6 +49,9 @@ impl Rules {
         let a = self.target_address.trim();
         if a.contains(char::is_whitespace) || !matches!(a.split_once('@'), Some((who, domain)) if !who.is_empty() && domain.contains('.') && !domain.contains('@')) {
             return Some(t!("ui.settings.autoresponder.bad_address").into_owned());
+        }
+        if self.all_day && self.text_all_day.trim().is_empty() {
+            return Some(t!("ui.settings.autoresponder.no_all_day_text").into_owned());
         }
         None
     }
@@ -171,6 +178,8 @@ mod tests {
         assert!(Rules { hour_start: 25, ..ok.clone() }.problem().is_some());
         assert!(Rules { target_address: "a b@c".into(), ..ok.clone() }.problem().is_some());
         assert!(Rules { target_address: "@".into(), ..ok.clone() }.problem().is_some());
+        assert!(Rules { all_day: true, ..ok.clone() }.problem().is_some());
+        assert_eq!(Rules { all_day: true, text_all_day: "Nie ma mnie".into(), ..ok.clone() }.problem(), None);
         // n8n's answer carries more fields (id, key, dates of the row): they are ignored; a null
         // column keeps the default
         let r = Rules::over(&Rules::default(), serde_json::json!({ "id": 1, "key": "main", "enabled": true, "hour_start": 15, "text_before": null, "updated_by": "Poczta" })).unwrap();

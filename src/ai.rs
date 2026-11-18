@@ -302,10 +302,12 @@ pub fn autoresponder(s: &Settings, today: &str, current: &str, ask_for: &str) ->
          hour_start, hour_end — godziny pracy 0–24, odpowiedź idzie przed hour_start i od hour_end. \
          Gdy ktoś jest niedostępny tylko w godzinach X–Y, ustaw hour_start=Y i hour_end=X (odpowiedź wtedy tylko między X a Y). \
          text_before — treść wysyłana przed godzinami pracy, text_after — po nich (zwykły tekst; {{od}} {{do}} {{start}} {{koniec}} wstawiają daty i godziny). \
+         all_day — niedostępny cały dzień (urlop, choroba, wyjazd): w te dni odpowiedź idzie o każdej porze treścią text_all_day, a godzin i dwóch pozostałych tekstów wtedy nie zmieniaj. \
+         Gdy prośba mówi o całym dniu, ustaw all_day=true i napisz lub dopasuj text_all_day (nie może być pusty; te same {{od}} {{do}}); gdy znów o godzinach, ustaw all_day=false. \
          target_address i ignored zostaw, chyba że prośba ich dotyczy.\n\
          Zmień tylko to, o co chodzi w prośbie; teksty dopasuj, gdy przestały pasować do nowej sytuacji, w tym samym języku i tonie.\n\n\
          Prośba: {ask_for}\n\n\
-         Odpowiedz wyłącznie pełnym JSON-em z polami enabled, date_start, date_end, hour_start, hour_end, target_address, text_before, text_after, ignored, wewnątrz <wynik>…</wynik>."
+         Odpowiedz wyłącznie pełnym JSON-em z polami enabled, date_start, date_end, hour_start, hour_end, all_day, target_address, text_before, text_after, text_all_day, ignored, wewnątrz <wynik>…</wynik>."
     );
     let t = std::time::Instant::now();
     let (text, stop, model) = ask(s, &prompt, 8_000, Duration::from_secs(60))?;
