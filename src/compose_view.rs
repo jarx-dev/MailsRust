@@ -509,6 +509,10 @@ fn esc(s: &str) -> String {
 /// Only the page's own script runs (CSP with a nonce): a quoted or draft email keeps its
 /// `onerror=`, `javascript:` links and the like, and they must not touch the draft.
 pub fn page(content: &str) -> String {
+    // one nonce per run: the same page then stays one file in the cache (`body_of` removes every
+    // `<script` of the email, so knowing the nonce gives an email nothing to run)
+    static NONCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let nonce = NONCE.get_or_init(crate::share::new_token);
     format!(
         r##"<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'"><meta name="color-scheme" content="light">
 <style>
@@ -702,7 +706,7 @@ window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,bloc
 }})();
 </script></body></html>"##,
         content = content,
-        nonce = crate::share::new_token(),
+        nonce = nonce,
         // the texts of the page (made when the window opens: a language switch reaches new windows)
         t_bold = t!("compose.view.bold"),
         t_italic = t!("compose.view.italic"),
