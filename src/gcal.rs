@@ -111,8 +111,15 @@ fn parse_when(p: &Prop) -> Option<When> {
 
 fn parse_value(v: &str, date_only: bool) -> Option<When> {
     let v = v.trim();
+    // (only plain digits: a signed or longer year chrono would take may overflow later sums)
+    if !v.get(..8).is_some_and(|d| d.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
     if date_only || v.len() == 8 {
-        return NaiveDate::parse_from_str(v.get(..8).unwrap_or(v), "%Y%m%d").ok().map(When::Day);
+        return NaiveDate::parse_from_str(&v[..8], "%Y%m%d").ok().map(When::Day);
+    }
+    if !v.get(8..15).is_some_and(|t| t.starts_with('T') && t[1..].bytes().all(|b| b.is_ascii_digit())) {
+        return None;
     }
     let t = NaiveDateTime::parse_from_str(v.trim_end_matches('Z'), "%Y%m%dT%H%M%S").ok()?;
     if v.ends_with('Z') {
@@ -560,6 +567,17 @@ impl Invitation {
         !self.recurrence.is_empty()
     }
 
+    /// The day of the series this one day was first set for (it may have been moved since).
+    /// shortcut: RECURRENCE-ID with a TZID is taken as written, not moved to this computer's
+    /// clock; upgrade if a day called off far from here misses its copy.
+    pub fn day(&self) -> NaiveDate {
+        match parse_value(&self.recurrence, false) {
+            Some(When::Day(d)) => d,
+            Some(When::At(t)) => t.date(),
+            None => self.start.date(),
+        }
+    }
+
     /// What an answer is kept under: the meeting (or its one day) as of this change of it (a
     /// meeting moved by its organiser asks for the answer anew).
     pub fn key(&self) -> String {
@@ -644,8 +662,9 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
         let Some(start) = get("DTSTART").and_then(parse_when) else { continue };
         let tz = get("DTSTART").and_then(|p| p.params.get("TZID"));
         let uid = get("UID").map(|p| p.value.clone()).unwrap_or_default();
-        let title = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
-        let location = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default();
+        // (cut short: every repeat keeps its own copy, a huge one would be kept hundreds of times)
+        let title: String = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()).chars().take(300).collect();
+        let location: String = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default().chars().take(300).collect();
         let end = get("DTEND").and_then(parse_when);
         let dur = get("DURATION").and_then(|p| parse_duration(&p.value));
         // length: minutes for timed events, days for whole-day ones
@@ -1179,6 +1198,11 @@ mod tests {
         // the newest word wins; one day of a series is told apart
         let i = invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:3\r\nDTSTAMP:20261118T070000Z\r\nRECURRENCE-ID:20261127T090000Z\r\nUID:")).unwrap();
         assert_eq!((i.version.0, i.version.1.as_str(), i.instance(), i.recurrence.as_str()), (3, "20261118T070000Z", true, "20261127T090000Z"));
+        // its day is the one the series set, wherever it was moved to
+        assert_eq!(i.day(), NaiveDate::from_ymd_opt(2026, 11, 27).unwrap());
+        // a year chrono would take but no sum could reach past it (the bar adds the length)
+        assert!(invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART:+2621421231T235900")).is_none());
+        assert!(parse_value("2026 1 1T090000", false).is_none() && parse_value("20261120 T0900000", false).is_none());
         assert!(!invitation(SAMPLE_INVITE).unwrap().instance());
         // an answer is kept per meeting, its one day and its change count
         assert_ne!(i.key(), invitation(SAMPLE_INVITE).unwrap().key());

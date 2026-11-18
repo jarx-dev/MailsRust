@@ -961,40 +961,51 @@ impl MailApp {
         // Only the newest word about a meeting changes the calendar or is answered: an older
         // email opened later (or one not from its organiser) is only shown.
         let known = self.prefs.invite_versions.iter().find(|v| v.0 == inv.uid);
-        let newer = inv.instance() || known.is_none_or(|(_, seq, stamp, org)| (org.is_empty() || org.eq_ignore_ascii_case(&inv.organizer)) && (inv.version.0, &inv.version.1) >= (*seq, stamp));
+        // (one day of a series has a version of its own: only its organiser is checked)
+        let newer = known.is_none_or(|(_, seq, stamp, org)| (org.is_empty() || org.eq_ignore_ascii_case(&inv.organizer)) && (inv.instance() || (inv.version.0, &inv.version.1) >= (*seq, stamp)));
         inv.stale = !newer;
         self.invites.insert(file.to_string(), Some(inv.clone()));
         if !newer {
             return Some(inv);
         }
         let before = self.store.events.len();
+        let mut changed = false;
         if inv.instance() {
             // one day of a repeating meeting: the series stays as it is; that day goes when it is called off
             if inv.cancelled {
-                let day = inv.start.date();
+                let day = inv.day();
                 self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, day));
             }
         } else {
             let version = (inv.uid.clone(), inv.version.0, inv.version.1.clone(), inv.organizer.clone());
-            if known != Some(&version) {
+            changed = known != Some(&version);
+            if changed {
                 self.prefs.invite_versions.retain(|v| v.0 != inv.uid);
                 self.prefs.invite_versions.push(version);
                 let over = self.prefs.invite_versions.len().saturating_sub(200);
                 self.prefs.invite_versions.drain(..over);
-                self.save_now = true;
+                // emails of this meeting already shown in this run are older now: only shown
+                for i in self.invites.values_mut().flatten() {
+                    if i.uid == inv.uid && !i.instance() && i.version < inv.version {
+                        i.stale = true;
+                    }
+                }
             }
-            self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
-            // (a meeting Google has, answered or declined, is shown as Google has it)
-            if !inv.cancelled && self.invite_said.get(&key).map(String::as_str) != Some("declined") && !self.gcal_uids.contains(&inv.uid) {
-                for e in crate::gcal::invite_events(&ics, Local::now().date_naive()) {
-                    if !self.store.events.iter().any(|x| x.google && same_meeting(x, &e)) {
-                        self.store.events.push(e);
+            // (the same version already in the calendar stays as it is, days called off since included)
+            if changed || !self.store.events.iter().any(|e| e.id == crate::gcal::invite_id(&inv.uid, e.date)) {
+                self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
+                // (a meeting Google has, answered or declined, is shown as Google has it)
+                if !inv.cancelled && self.invite_said.get(&key).map(String::as_str) != Some("declined") && !self.gcal_uids.contains(&inv.uid) {
+                    for e in crate::gcal::invite_events(&ics, Local::now().date_naive()) {
+                        if !self.store.events.iter().any(|x| x.google && same_meeting(x, &e)) {
+                            self.store.events.push(e);
+                        }
                     }
                 }
             }
         }
         // (put back as it was is a change too: a meeting moved is reminded of at its new time)
-        if self.store.events.len() != before || !inv.instance() {
+        if self.store.events.len() != before || changed {
             self.save_now = true;
             self.touched = true;
             self.remind_next = 0.0;
@@ -1065,6 +1076,10 @@ impl MailApp {
             return false;
         };
         let reply_file = crate::model::cache_put(reply.as_bytes(), "ics");
+        if !std::path::Path::new(&reply_file).exists() {
+            self.set_status(t!("cal.invite.no_reply"));
+            return false;
+        }
         let name = if acc.display_name.trim().is_empty() { acc.email.trim().to_string() } else { acc.display_name.trim().to_string() };
         let (subject, body) = match answer {
             "accepted" => (t!("cal.invite.mail_accepted", title = inv.title), t!("cal.invite.said_accepted", name = name)),

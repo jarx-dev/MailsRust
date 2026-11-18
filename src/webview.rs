@@ -139,8 +139,9 @@ fn file_url(path: &std::path::Path) -> String {
 pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::WebView, wry::WebContext), String> {
     let html = prepare(m).ok_or("brak wersji sformatowanej")?;
     // (one file a message: every page differs by its script's number, so a name made from the
-    // content would leave a new file at each opening)
-    let path = crate::model::cache_dir().join(format!("reader-{}.html", m.id)).to_string_lossy().into_owned();
+    // content would leave a new file at each opening; a test copy writes into its own folder)
+    let folder = std::env::var("POCZTA_DATA_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| crate::model::cache_dir());
+    let path = folder.join(format!("reader-{}.html", m.id)).to_string_lossy().into_owned();
     std::fs::write(&path, html.as_bytes()).map_err(|e| e.to_string())?;
     let dir = data_dir(false);
     let mut context = wry::WebContext::new(dir);
@@ -308,7 +309,7 @@ fn prepare(m: &Message) -> Option<String> {
     // another site (the usual trick of a fake bank email): the real site is written after it.
     // shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
     // and the like), not the public suffix list; upgrade if it marks or misses real cases.
-    let head = "<meta charset=\"utf-8\"><base target=\"_blank\"><meta name=\"color-scheme\" content=\"light\">\
+    let head = "<base target=\"_blank\"><meta name=\"color-scheme\" content=\"light\">\
         <style>html{background:#fff;color-scheme:light}\
         ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:transparent}\
         ::-webkit-scrollbar-thumb{background:#cfd3d8;border-radius:5px;border:2px solid #fff}::-webkit-scrollbar-thumb:hover{background:#aeb4bb}\
@@ -345,17 +346,9 @@ fn prepare(m: &Message) -> Option<String> {
     }
     .replace("PZ-NONCE", &nonce)
     .replace("PZ-ELSEWHERE", &t!("mail.reading.link_goes_elsewhere", host = "%{host}").replace('\\', "\\\\").replace('\'', "\\'"));
-    let head = head.as_str();
-    let lower = html.to_lowercase();
-    if let Some(i) = lower.find("<head>") {
-        html.insert_str(i + 6, head);
-    } else if let Some(i) = lower.find("<html") {
-        let end = lower[i..].find('>').map(|e| i + e + 1).unwrap_or(0);
-        html.insert_str(end, &format!("<head>{head}</head>"));
-    } else {
-        html = format!("<!doctype html><html><head>{head}</head><body>{html}</body></html>");
-    }
-    only_own_script(&mut html, &nonce);
+    // (ahead of the email's own <head>, which the browser then joins to it: a "<head>" written
+    // inside a comment can no longer swallow the app's script)
+    only_own_script(&mut html, &nonce, &head);
     Some(html)
 }
 
@@ -376,18 +369,23 @@ fn theme() -> wry::Theme {
 
 /// Nothing in an email runs: its scripts, `onclick=`-like attributes and `javascript:` links are
 /// refused by the browser, and so are frames and plug-ins. Only the app's own script may run
-/// (it carries `nonce`, a number made anew for every page, which an email cannot know).
-fn only_own_script(html: &mut String, nonce: &str) {
-    let rule = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'\">");
+/// (it carries `nonce`, a number made anew for every page, which an email cannot know). `head`
+/// (the app's own styles and script) goes in right after the rule.
+fn only_own_script(html: &mut String, nonce: &str, head: &str) {
+    let rule = format!("<meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'\">");
     // The rule holds for what comes after it, so it is the very first thing of the page, before
-    // anything of the email (however its comments end). Only the email's own doctype goes ahead
-    // of it, copied there (the one written later is then ignored): a tag before the doctype
-    // would change how the page is laid out. The doctype counts when only blanks and comments
-    // stand before it.
+    // anything of the email (however its comments end), and it says the page is UTF-8 before
+    // the email can say otherwise. Only the email's own doctype goes ahead of it, copied there
+    // (the one written later is then ignored): a tag before the doctype would change how the
+    // page is laid out. The doctype counts when only blanks and comments stand before it, and
+    // only a short one in plain letters is copied.
+    if html.starts_with('\u{feff}') {
+        html.remove(0);
+    }
     let lower = html.to_ascii_lowercase();
     let mut at = 0;
     loop {
-        at = lower.len() - lower[at..].trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']).len();
+        at = lower.len() - lower[at..].trim_start_matches([' ', '\t', '\r', '\n']).len();
         if !lower[at..].starts_with("<!--") {
             break;
         }
@@ -396,8 +394,14 @@ fn only_own_script(html: &mut String, nonce: &str) {
             None => break,
         }
     }
-    let doctype = lower[at..].starts_with("<!doctype").then(|| lower[at..].find('>').map(|e| html[at..at + e + 1].to_string())).flatten();
-    html.insert_str(0, &format!("{}{rule}", doctype.unwrap_or_default()));
+    let doctype = lower[at..]
+        .starts_with("<!doctype")
+        .then(|| lower[at..].find('>').map(|e| &html[at..at + e + 1]))
+        .flatten()
+        .filter(|d| d.len() <= 200 && d.bytes().all(|b| (b' '..=b'~').contains(&b)));
+    // (a bare piece of HTML is laid out as a modern page, as it was when the app wrapped it)
+    let doctype = doctype.map(str::to_string).unwrap_or_else(|| if lower.contains("<html") { String::new() } else { "<!doctype html>".into() });
+    html.insert_str(0, &format!("{doctype}{rule}{head}"));
 }
 
 impl MailView {
@@ -667,29 +671,32 @@ mod tests {
     fn email_scripts_are_refused_before_anything_of_the_email() {
         let rule_at = |page: &str| {
             let mut h = page.to_string();
-            only_own_script(&mut h, "n1");
-            h.find("Content-Security-Policy").unwrap()
+            only_own_script(&mut h, "n1", "<style></style>");
+            h.find("<meta charset").unwrap()
         };
-        // the email's doctype copied ahead of the rule, then the email as it was
-        let mut h = "<!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>".to_string();
-        only_own_script(&mut h, "n1");
-        assert!(h.starts_with("<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\""));
-        assert!(h.contains("script-src 'nonce-n1'") && h.ends_with("\"><!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>"));
+        // the email's doctype copied ahead of the rule and the app's head, then the email as it was
+        let mut h = "\u{feff}<!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>".to_string();
+        only_own_script(&mut h, "n1", "<style></style>");
+        assert!(h.starts_with("<!DOCTYPE html><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\""));
+        assert!(h.contains("script-src 'nonce-n1'") && h.ends_with("\"><style></style><!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>"));
         // anything else: the rule is the very first thing, before all of the email
-        let first = "<meta http-equiv=\"".len();
         for page in [
-            "<script>x()</script><!doctype html><p>a",
-            "<p onclick=\"x()\">a",
+            "<script>x()</script><!doctype html><html><p>a",
+            "<html><p onclick=\"x()\">a",
             "x<!doctype html><html><head><script>x()</script>",
             "<!-- <!doctype html> --><html><body><script>x()</script>",
-            "<!-- not closed <!doctype html><script>x()</script>",
+            "<!-- not closed <!doctype html><html><script>x()</script>",
             // a comment ended the other way the browser knows: still before its script
             "<!--x--!><script>x()</script><!--y--><html><head></head>",
+            // a doctype with anything but plain letters (a switch of the text's encoding) is not copied
+            "<!doctype html \u{1b}$B><html><script>x()</script>",
         ] {
-            assert_eq!(rule_at(page), first, "{page}");
+            assert_eq!(rule_at(page), 0, "{page}");
         }
         // (a doctype the scan takes from a comment ended so only moves to the front: the rule still leads the email)
-        assert_eq!(rule_at("<!--x--!><script>x()</script><!--y--><!doctype html>"), "<!doctype html>".len() + first);
+        assert_eq!(rule_at("<!--x--!><script>x()</script><!--y--><!doctype html>"), "<!doctype html>".len());
+        // a bare piece of HTML is laid out as a modern page
+        assert_eq!(rule_at("<p>a"), "<!doctype html>".len());
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);
