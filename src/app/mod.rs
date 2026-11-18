@@ -75,6 +75,10 @@ struct Prefs {
     ai_shares: Vec<(String, u64, i64)>,
     /// the port the sharing server used last time (links keep working after a restart)
     ai_port: u16,
+    /// AI agents may search the mail, read messages and leave drafts (MCP, over Tailscale)
+    mcp_on: bool,
+    /// the key agents use for it, encrypted
+    mcp_key: String,
     /// a sound and a note in the corner when new mail comes
     notify: bool,
     /// Google Calendar's secret iCal addresses (one per line), encrypted
@@ -122,6 +126,8 @@ impl Default for Prefs {
             ai_shares: vec![],
             dark: false,
             ai_port: 0,
+            mcp_on: false,
+            mcp_key: String::new(),
             notify: true,
             gcal_saved: String::new(),
             gcal_key: String::new(),
@@ -421,6 +427,9 @@ pub struct MailApp {
     read_only: bool,
     /// emails shared with AI agents over Tailscale
     hub: crate::share::Hub,
+    /// why agents can't reach the mailbox (e.g. Tailscale is off), and when that was last tried
+    agents_err: Option<String>,
+    agents_tried: std::time::Instant,
     /// the icon next to the clock, and what was clicked on it
     _tray: Option<tray_icon::TrayIcon>,
     tray_rx: Receiver<TrayMsg>,
@@ -734,6 +743,8 @@ impl MailApp {
             sig_blocks: None,
             read_only: false,
             hub: crate::share::Hub::new(Some(cc.egui_ctx.clone())),
+            agents_err: None,
+            agents_tried: std::time::Instant::now(),
         };
         // Panel sizes come from the app's own saved layout, not from the toolkit's older copy.
         cc.egui_ctx.memory_mut(|mem| mem.data.clear());
@@ -795,7 +806,12 @@ impl MailApp {
             }
         }
         // test pictures: the AI settings, the Google Calendar window
-        app.ai_open = std::env::var("POCZTA_START").as_deref() == Ok("ai-settings");
+        app.ai_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("ai-settings" | "ai-agents"));
+        if std::env::var("POCZTA_START").as_deref() == Ok("ai-agents") && app.shot.is_some() {
+            // (agents' access switched on; a picture never starts the server, see `start_agents`)
+            app.prefs.mcp_on = true;
+            app.hub.set_key(Some("test".into()));
+        }
         app.auto_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("autoresponder" | "autoresponder-days" | "autoresponder-allday"));
         app.about_open = std::env::var("POCZTA_START").as_deref() == Ok("about");
         app.gcal_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("account-calendar") | Ok("google-check"));
@@ -1673,6 +1689,14 @@ impl eframe::App for MailApp {
             self.poll_net();
         }
         self.poll_ai_drafts();
+        self.poll_agent_asks();
+        // agent access switched on, but Tailscale wasn't up yet: tried again now and then
+        if self.prefs.mcp_on && self.hub.addr.is_none() && self.loading.is_none() && !self.read_only {
+            if self.agents_tried.elapsed().as_secs() >= 60 {
+                self.start_agents();
+            }
+            ctx.request_repaint_after(std::time::Duration::from_secs(60));
+        }
         let done: Vec<(u64, Result<String, String>)> = self.translating.iter().filter_map(|(id, rx)| rx.try_recv().ok().map(|r| (*id, r))).collect();
         for (id, res) in done {
             self.translating.remove(&id);

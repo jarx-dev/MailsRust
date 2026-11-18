@@ -63,7 +63,7 @@ impl Shared {
             attachments: m.attachments.iter().cloned().zip(m.attachment_files.iter().cloned().chain(std::iter::repeat(String::new()))).collect(),
             images: m.inline.clone(),
             partial: m.partial,
-            uid: if m.folder == Folder::Inbox { m.uid } else { None },
+            uid: if m.folder == Folder::Inbox && m.account == 0 { m.uid } else { None },
             from_name: m.from_name.clone(),
             from_addr: m.from_addr.clone(),
             when: m.date,
@@ -172,36 +172,92 @@ impl Shared {
     }
 }
 
-/// A reply draft an agent sent: (email id, text).
-pub type Draft = (u64, String);
+/// A draft an agent sent; the app puts it in Drafts.
+pub struct Draft {
+    /// the email answered (None: a new email)
+    pub reply_to: Option<u64>,
+    /// a new email: recipients, copies and subject (a reply: Poczta sets them itself)
+    pub to: String,
+    pub cc: String,
+    pub subject: String,
+    pub body: String,
+    /// a reply to everyone on the email, not only the sender
+    pub reply_all: bool,
+    /// a new email: the address of the account it goes from ("" for the main one)
+    pub from: String,
+    /// where the app says what it saved, or why it couldn't
+    pub done: Option<Sender<Result<String, String>>>,
+}
 
-/// The sharing server and the emails it serves.
-pub struct Hub {
-    shares: Arc<Mutex<HashMap<String, Shared>>>,
-    drafts_tx: Sender<Draft>,
-    pub drafts: Receiver<Draft>,
-    /// where the server listens, once started
-    pub addr: Option<SocketAddr>,
-    /// this computer's name in the Tailscale network (MagicDNS), used in the links
-    pub name: Option<String>,
-    ctx: Option<eframe::egui::Context>,
+impl Draft {
+    pub fn reply(id: u64, body: String) -> Self {
+        Draft { reply_to: Some(id), to: String::new(), cc: String::new(), subject: String::new(), body, reply_all: false, from: String::new(), done: None }
+    }
+}
+
+/// What every connection of the server reaches.
+#[derive(Clone)]
+pub struct Env {
+    pub(crate) shares: Arc<Mutex<HashMap<String, Shared>>>,
+    pub(crate) drafts: Sender<Draft>,
+    pub(crate) asks: Sender<crate::mcp::Ask>,
+    pub(crate) ctx: Option<eframe::egui::Context>,
     /// the mail account, to fetch original messages (.eml) from the server
     account: Arc<Mutex<Option<Account>>>,
     /// originals already fetched: message id → .eml
     raw: Arc<Mutex<HashMap<u64, Arc<Vec<u8>>>>>,
+    /// the key agents use for the mailbox (MCP); None while that is switched off
+    key: Arc<Mutex<Option<String>>>,
+    /// counts key changes: a request let in under an older key leaves no new link behind
+    pub(crate) key_gen: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// The sharing server and the emails it serves.
+pub struct Hub {
+    env: Env,
+    pub drafts: Receiver<Draft>,
+    /// what agents ask the app for (searches, messages)
+    pub asks: Receiver<crate::mcp::Ask>,
+    /// where the server listens, once started
+    pub addr: Option<SocketAddr>,
+    /// this computer's name in the Tailscale network (MagicDNS), used in the links; looked up
+    /// in the background, as Tailscale's tool takes a moment
+    name: Arc<Mutex<Option<String>>>,
 }
 
 impl Hub {
     pub fn new(ctx: Option<eframe::egui::Context>) -> Self {
         let (drafts_tx, drafts) = channel();
-        Hub { shares: Default::default(), drafts_tx, drafts, addr: None, name: None, ctx, account: Default::default(), raw: Default::default() }
+        let (asks_tx, asks) = channel();
+        let env = Env { shares: Default::default(), drafts: drafts_tx, asks: asks_tx, ctx, account: Default::default(), raw: Default::default(), key: Default::default(), key_gen: Default::default() };
+        Hub { env, drafts, asks, addr: None, name: Default::default() }
     }
 
     /// The account used to fetch original messages for .eml links (only if it can connect).
     pub fn set_account(&self, acc: &Account) {
-        if let Ok(mut a) = self.account.lock() {
+        if let Ok(mut a) = self.env.account.lock() {
             *a = acc.can_connect().then(|| acc.clone());
         }
+    }
+
+    /// Lets agents in (with this key) or keeps them out (None). A new key, or none, also ends the
+    /// links agents were given for attachments.
+    pub fn set_key(&self, key: Option<String>) {
+        let key = key.filter(|k| !k.is_empty());
+        if let Ok(mut k) = self.env.key.lock() {
+            if *k != key {
+                self.env.key_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Ok(mut s) = self.env.shares.lock() {
+                    s.retain(|t, _| !t.starts_with(AGENT_LINK));
+                }
+            }
+            *k = key;
+        }
+    }
+
+    /// The key agents use, while their access is on.
+    pub fn key(&self) -> Option<String> {
+        self.env.key.lock().ok().and_then(|k| k.clone())
     }
 
     /// Starts the server on the given address (normally the Tailscale one), once: on the port
@@ -226,44 +282,46 @@ impl Hub {
         });
         let listener = listener.ok_or_else(|| t!("cal.share.cannot_listen", ip = ip, err = last_err).into_owned())?;
         let addr = listener.local_addr().map_err(|e| e.to_string())?;
-        let shares = self.shares.clone();
-        let drafts = self.drafts_tx.clone();
-        let ctx = self.ctx.clone();
-        let (account, raw) = (self.account.clone(), self.raw.clone());
+        let env = self.env.clone();
         std::thread::spawn(move || {
             for conn in listener.incoming() {
                 let Ok(conn) = conn else { continue };
-                let (shares, drafts, ctx) = (shares.clone(), drafts.clone(), ctx.clone());
-                let (account, raw) = (account.clone(), raw.clone());
+                let env = env.clone();
                 std::thread::spawn(move || {
-                    let _ = handle(conn, &shares, &drafts, ctx.as_ref(), &account, &raw);
+                    let _ = handle(conn, &env);
                 });
             }
         });
         crate::diag::log(format!("copy for AI: sharing server listening on {addr}"));
         self.addr = Some(addr);
-        self.name = tailscale_name();
-        crate::diag::log(format!("copy for AI: links use {}", self.name.as_deref().unwrap_or("the Tailscale address (no name found)")));
+        let name = self.name.clone();
+        std::thread::spawn(move || {
+            let n = tailscale_name();
+            crate::diag::log(format!("copy for AI: links use {}", n.as_deref().unwrap_or("the Tailscale address (no name found)")));
+            if let Ok(mut x) = name.lock() {
+                *x = n;
+            }
+        });
         Ok(addr)
     }
 
     /// Fetches the original .eml in the background right away, so the agent gets it at once.
     pub fn warm(&self, s: &Shared) {
-        let (s, account, raw) = (s.clone(), self.account.clone(), self.raw.clone());
+        let (s, account, raw) = (s.clone(), self.env.account.clone(), self.env.raw.clone());
         std::thread::spawn(move || {
             let _ = eml_of(&s, &account, &raw);
         });
     }
 
     pub fn put(&self, token: &str, s: Shared) {
-        if let Ok(mut m) = self.shares.lock() {
+        if let Ok(mut m) = self.env.shares.lock() {
             m.insert(token.to_string(), s);
         }
     }
 
     /// Refreshes the shared copy of an email (e.g. after its full text arrived).
     pub fn update(&self, m: &Message) {
-        if let Ok(mut map) = self.shares.lock() {
+        if let Ok(mut map) = self.env.shares.lock() {
             for s in map.values_mut().filter(|s| s.id == m.id) {
                 *s = Shared::of(m);
             }
@@ -271,19 +329,29 @@ impl Hub {
     }
 
     pub fn clear(&self) {
-        if let Ok(mut m) = self.shares.lock() {
+        if let Ok(mut m) = self.env.shares.lock() {
             m.clear();
         }
     }
 
-    /// The link for one shared email: by this computer's Tailscale name (e.g.
-    /// laptop.tailnet.ts.net), or by its Tailscale address when the name isn't known.
-    pub fn url(&self, token: &str) -> Option<String> {
+    /// The server's address: by this computer's Tailscale name (e.g. laptop.tailnet.ts.net),
+    /// or by its Tailscale address when the name isn't known.
+    fn base(&self) -> Option<String> {
         let a = self.addr?;
-        Some(match &self.name {
-            Some(n) => format!("http://{n}:{}/m/{token}", a.port()),
-            None => format!("http://{a}/m/{token}"),
+        Some(match self.name.lock().ok().and_then(|n| n.clone()) {
+            Some(n) => format!("http://{n}:{}", a.port()),
+            None => format!("http://{a}"),
         })
+    }
+
+    /// The link for one shared email.
+    pub fn url(&self, token: &str) -> Option<String> {
+        Some(format!("{}/m/{token}", self.base()?))
+    }
+
+    /// Where agents reach the mailbox (MCP).
+    pub fn mcp_url(&self) -> Option<String> {
+        Some(format!("{}/mcp", self.base()?))
     }
 }
 
@@ -293,6 +361,16 @@ pub fn new_token() -> String {
     let _ = getrandom::fill(&mut b);
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
+
+/// A new key for agents (256 bits); None if the system gave no randomness.
+pub fn new_key() -> Option<String> {
+    let mut b = [0u8; 32];
+    getrandom::fill(&mut b).ok()?;
+    Some(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// How links handed to agents start (they end when agents' key changes; see `set_key`).
+pub const AGENT_LINK: &str = "ag";
 
 /// This computer's full name in the Tailscale network (MagicDNS), as Tailscale itself reports
 /// it (e.g. "laptop.tail1234.ts.net"). None if Tailscale's command-line tool isn't found or
@@ -343,15 +421,9 @@ fn respond(conn: &mut TcpStream, status: &str, kind: &str, extra: &str, body: &[
     conn.flush()
 }
 
-fn handle(
-    mut conn: TcpStream,
-    shares: &Mutex<HashMap<String, Shared>>,
-    drafts: &Sender<Draft>,
-    ctx: Option<&eframe::egui::Context>,
-    account: &Mutex<Option<Account>>,
-    raw: &Mutex<HashMap<u64, Arc<Vec<u8>>>>,
-) -> std::io::Result<()> {
+fn handle(mut conn: TcpStream, env: &Env) -> std::io::Result<()> {
     conn.set_read_timeout(Some(std::time::Duration::from_secs(15)))?;
+    conn.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
     // the request head (up to 16 KB), then a body of up to 1 MB for drafts
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -375,16 +447,54 @@ fn handle(
     let path = first.next().unwrap_or("/").split('?').next().unwrap_or("/").to_string();
     let mut length = 0usize;
     let mut host = String::new();
+    let (mut origin, mut chunked) = (false, false);
+    let mut auth = String::new();
     for l in lines {
         if let Some((k, v)) = l.split_once(':') {
             if k.eq_ignore_ascii_case("content-length") {
                 length = v.trim().parse().unwrap_or(0);
             } else if k.eq_ignore_ascii_case("host") {
                 host = v.trim().to_string();
+            } else if k.eq_ignore_ascii_case("origin") {
+                origin = true;
+            } else if k.eq_ignore_ascii_case("transfer-encoding") {
+                chunked = true;
+            } else if k.eq_ignore_ascii_case("authorization") {
+                auth = v.trim().to_string();
             }
         }
     }
     let text = "text/plain; charset=utf-8";
+    let host = if host.is_empty() { conn.local_addr().map(|a| a.to_string()).unwrap_or_default() } else { host };
+    if path.trim_end_matches('/') == "/mcp" {
+        // (the key and its generation read together, under the same lock as a change of key)
+        let (key, key_gen) = env.key.lock().ok().map(|k| (k.clone(), env.key_gen.load(std::sync::atomic::Ordering::SeqCst))).unwrap_or_default();
+        let Some(key) = key else {
+            return respond(&mut conn, "404 Not Found", text, "", "Agent access is switched off in Poczta (Settings → AI).\n".as_bytes());
+        };
+        // web pages always say where they come from: none of them may use the mailbox
+        if origin {
+            return respond(&mut conn, "403 Forbidden", text, "", b"Not for web pages.\n");
+        }
+        let given = auth.strip_prefix("Bearer ").unwrap_or("").trim();
+        if !same(given.as_bytes(), key.as_bytes()) {
+            crate::diag::log("agents: a request with a wrong or missing key");
+            return respond(&mut conn, "401 Unauthorized", text, "WWW-Authenticate: Bearer\r\n", b"A key is needed (Settings -> AI in Poczta).\n");
+        }
+        if method != "POST" {
+            return respond(&mut conn, "405 Method Not Allowed", text, "Allow: POST\r\n", b"");
+        }
+        if chunked {
+            return respond(&mut conn, "411 Length Required", text, "", b"");
+        }
+        let Some(body) = read_body(&mut conn, &buf[head_end..], length)? else {
+            return respond(&mut conn, "413 Payload Too Large", text, "", b"");
+        };
+        return match crate::mcp::answer(env, &format!("http://{host}"), key_gen, &body) {
+            Some(v) => respond(&mut conn, "200 OK", "application/json", "", v.to_string().as_bytes()),
+            None => respond(&mut conn, "202 Accepted", text, "", b""),
+        };
+    }
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     if parts.first() != Some(&"m") || parts.len() < 2 {
         return respond(&mut conn, "404 Not Found", text, "", "Nie ma tu nic. Użyj linku skopiowanego z aplikacji pocztowej.\n".as_bytes());
@@ -393,13 +503,13 @@ fn handle(
         Some((t, f)) => (t.to_string(), f.to_string()),
         None => (parts[1].to_string(), String::new()),
     };
-    let Some(shared) = shares.lock().ok().and_then(|m| m.get(&token).cloned()) else {
+    let Some(shared) = env.shares.lock().ok().and_then(|m| m.get(&token).cloned()) else {
         return respond(&mut conn, "404 Not Found", text, "", "Ten link wygasł albo udostępnianie zostało wyłączone.\n".as_bytes());
     };
-    let base = format!("http://{}/m/{token}", if host.is_empty() { conn.local_addr().map(|a| a.to_string()).unwrap_or_default() } else { host });
+    let base = format!("http://{host}/m/{token}");
     match (method.as_str(), parts.get(2).copied(), parts.get(3).copied()) {
         ("GET", None, _) if format == "eml" => {
-            let eml = eml_of(&shared, account, raw);
+            let eml = eml_of(&shared, &env.account, &env.raw);
             // where to leave a reply draft, as an extra header line at the very top
             let mut out = format!("X-Reply-Draft-URL: {base}/draft\r\n").into_bytes();
             out.extend_from_slice(&eml);
@@ -440,24 +550,15 @@ fn handle(
             }
         }
         ("POST", Some("draft"), _) => {
-            if length > 1024 * 1024 {
+            let Some(body) = read_body(&mut conn, &buf[head_end..], length)? else {
                 return respond(&mut conn, "413 Payload Too Large", text, "", "Szkic jest za długi (najwyżej 1 MB).\n".as_bytes());
-            }
-            let mut body = buf[head_end..].to_vec();
-            while body.len() < length {
-                let n = conn.read(&mut chunk)?;
-                if n == 0 {
-                    break;
-                }
-                body.extend_from_slice(&chunk[..n]);
-            }
-            body.truncate(length);
+            };
             let draft = String::from_utf8_lossy(&body).trim().to_string();
             if draft.is_empty() {
                 return respond(&mut conn, "400 Bad Request", text, "", "Pusty szkic — wyślij treść odpowiedzi jako zwykły tekst.\n".as_bytes());
             }
-            let _ = drafts.send((shared.id, draft));
-            if let Some(c) = ctx {
+            let _ = env.drafts.send(Draft::reply(shared.id, draft));
+            if let Some(c) = &env.ctx {
                 c.request_repaint();
             }
             crate::diag::log("copy for AI: a reply draft arrived");
@@ -465,6 +566,30 @@ fn handle(
         }
         _ => respond(&mut conn, "404 Not Found", text, "", "Nieznany adres. Dostępne: GET …, GET ….json, GET …/html, GET …/a/N, POST …/draft\n".as_bytes()),
     }
+}
+
+/// The request's body (`length` bytes, some already read with the head); None when over 1 MB.
+fn read_body(conn: &mut TcpStream, start: &[u8], length: usize) -> std::io::Result<Option<Vec<u8>>> {
+    if length > 1024 * 1024 {
+        return Ok(None);
+    }
+    let mut body = start.to_vec();
+    let mut chunk = [0u8; 4096];
+    while body.len() < length {
+        let n = conn.read(&mut chunk)?;
+        if n == 0 {
+            // cut short: never acted on
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        body.extend_from_slice(&chunk[..n]);
+    }
+    body.truncate(length);
+    Ok(Some(body))
+}
+
+/// Compares two keys in the same time whatever they hold (so timing doesn't give the key away).
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn percent(s: &str) -> String {

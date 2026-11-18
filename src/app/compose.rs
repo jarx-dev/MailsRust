@@ -1360,6 +1360,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         partial: false,
                         snippet: String::new(),
                         on_disk: false,
+                        ai: false,
                     });
                     id
                 }

@@ -1119,6 +1119,7 @@ impl MailApp {
             partial: false,
             snippet: String::new(),
             on_disk: false,
+            ai: false,
         };
         let out = Outgoing { id, to: sent.to.clone(), cc: String::new(), subject: sent.subject.clone(), body: sent.body.clone(), html: None, inline: vec![], files: vec![reply_file] };
         self.store.messages.push(sent);
