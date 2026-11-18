@@ -8,6 +8,11 @@ pub(super) enum ImgState {
     Failed,
 }
 
+/// Ids of messages opened from .eml files (the mailbox's own ids never get this high).
+pub(super) const FILE_IDS: u64 = 1 << 62;
+/// A .eml file read in the background: its message, or the file's name when it can't be read.
+pub(super) type FileRead = Result<Message, String>;
+
 /// A message opened in a window of its own.
 pub(super) struct ReaderWin {
     pub(super) key: u64,
@@ -1335,6 +1340,83 @@ impl MailApp {
 
     // ------------------------------------------------------------ windows
 
+    /// Email files (.eml) handed over by a start from Explorer (see open_file), each in a reading
+    /// window. They are read in the background (a big file, or one on a network drive, would
+    /// hold every window) and come back through `files`.
+    pub(super) fn open_files(&mut self) {
+        // (a copy closing for an update leaves them to the new one)
+        if self.quitting {
+            return;
+        }
+        let files = crate::open_file::take();
+        if files.is_empty() {
+            return;
+        }
+        // (counted until opened: an update waits for them, see `install_update`)
+        self.files_pending += files.len();
+        self.files_show = true;
+        let (tx, ctx) = (self.files.0.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            for path in files {
+                let name = std::path::Path::new(&path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                // (an email file is a few MB; a huge one is not read whole into the app's memory;
+                // a crash in the parser comes back as "unreadable", or the count would never drop)
+                let read = || -> Option<Message> {
+                    use std::io::Read;
+                    let mut raw = vec![];
+                    std::fs::File::open(&path).ok()?.take((200 << 20) + 1).read_to_end(&mut raw).ok()?;
+                    (raw.len() <= 200 << 20).then(|| crate::net::parse(&raw, true, false)).flatten()
+                };
+                let _ = tx.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).ok().flatten().ok_or(name));
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    /// The .eml files read meanwhile, each opened in a reading window. The message is not in the
+    /// mailbox: its id is from the top of the range, where `msg` finds it among the open windows
+    /// (for reply, forward and its attachments).
+    pub(super) fn files_read(&mut self) {
+        if self.files_pending == 0 {
+            return;
+        }
+        // A reading window is made only while the main window is drawn (minimized or in the tray
+        // it isn't), and one made before the main window comes to the front would end up under
+        // it: the main window comes back first, then the message opens over it. (The accounts
+        // are known once the mailbox is read: the reply's account is chosen from them.)
+        let minimized = self.ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if self.files_show && (self.hidden || minimized) && !self.focus_pending {
+            self.files_show = false;
+            let ctx = self.ctx.clone();
+            self.show_window(&ctx);
+        }
+        // (on the first frame the main window is not on screen yet)
+        if self.drawn == 0 || self.loading.is_some() || self.hidden || minimized || self.focus_pending {
+            return;
+        }
+        while let Ok(read) = self.files.1.try_recv() {
+            self.files_pending = self.files_pending.saturating_sub(1);
+            match read {
+                Ok(mut m) => {
+                    let key = self.next_key;
+                    self.next_key += 1;
+                    m.id = FILE_IDS + key;
+                    // (answered from the account it came to, when it is one of them)
+                    let to: Vec<String> = people_in(&m.to).into_iter().chain(people_in(&m.cc)).map(|(_, a)| a.to_lowercase()).collect();
+                    if let Some(a) = (0..=self.store.extra.len() as u32).find(|&a| to.contains(&self.account_ref(a).email.to_lowercase())) {
+                        m.account = a;
+                    }
+                    self.readers.push(ReaderWin { key, msg: m, web: None, failed: false, tries: 0, last: None });
+                    crate::diag::log("email files: a .eml file opened in a reading window");
+                }
+                Err(name) => {
+                    crate::diag::log("email files: a .eml file could not be read");
+                    self.set_status(t!("core.open_file.unreadable", name = name));
+                }
+            }
+        }
+    }
+
     /// Messages opened in windows of their own: frameless, movable and resizable, with the
     /// formatted text, the attachments and reply / forward / AI link.
     pub(super) fn readers_ui(&mut self, ctx: &egui::Context) {
@@ -1413,6 +1495,10 @@ impl MailApp {
                             (ic::REPLY, t!("mail.reading.reply")),
                         ];
                         for (k, (icon, tip)) in acts.iter().enumerate() {
+                            // (a message from a file has no lasting id for an AI link to come back to)
+                            if k == 0 && m.id >= FILE_IDS {
+                                continue;
+                            }
                             let rr = Rect::from_center_size(Pos2::new(x, sr.top() + 36.0), Vec2::splat(26.0));
                             let resp = ui.interact(rr, id(("reader-act", r.key, k)), Sense::click());
                             if resp.hovered() {
@@ -1464,6 +1550,7 @@ impl MailApp {
                                     if let Some(hwnd) = crate::compose_view::find_window(&reader_marker(r.key)) {
                                         match crate::webview::standalone(hwnd, &m, rect) {
                                             Ok(v) => {
+                                                crate::diag::log("reading window: formatted view shown");
                                                 r.web = Some(v);
                                                 r.last = Some(rect);
                                             }

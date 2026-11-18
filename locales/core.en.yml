@@ -54,3 +54,6 @@ core:
     registry_write: "registry write: error %{code}"
     registry_delete: "registry removal: error %{code}"
     windows_only: "Windows only"
+  open_file:
+    type_name: "Email message"
+    unreadable: "Can't read a message from the file %{name}"
