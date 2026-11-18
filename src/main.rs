@@ -27,6 +27,7 @@ mod model;
 mod net;
 mod notify;
 mod oauth;
+mod open_file;
 mod popup;
 mod prof;
 mod rawimap;
@@ -85,10 +86,19 @@ fn main() -> eframe::Result<()> {
     // (a test copy with its own data folder counts as a program of its own). A new build that
     // finds a copy started meanwhile (during the swap) still reports itself ready, or the update
     // guard would take the good build back.
+    // an email file opened from Explorer goes on the list of the copy that runs: this one, or the
+    // one woken below (see open_file)
+    if shot.is_none() {
+        open_file::hand_over(&open_file::from_args(&args));
+    }
     #[cfg(windows)]
     if shot.is_none() && app::another_copy_shown() {
         update::startup_complete(true);
         return Ok(());
+    }
+    // (only the real copy offers itself for .eml files: a test copy's EXE is in a test folder)
+    if !test_run && std::env::var_os("POCZTA_DATA_DIR").is_none() {
+        std::thread::spawn(open_file::register);
     }
 
     // a window size saved while the window was minimized (tiny) is forgotten: the window then

@@ -710,6 +710,8 @@ impl MailApp {
                 app.store.account.oauth_client_secret = secret;
             }
         }
+        // started with an email file (double click in Explorer): it opens in a window of its own
+        app.open_files();
         // a key pressed inside the email wakes the app
         app.mail_view.wake = Some(cc.egui_ctx.clone());
         let _ = APP_CTX.set(cc.egui_ctx.clone());
@@ -1175,6 +1177,8 @@ tel.: 600-100-200".into();
             }
         }
         self.store.messages.iter().find(|m| m.id == id)
+            // (a message opened from a .eml file is only in its reading window)
+            .or_else(|| self.readers.iter().map(|r| &r.msg).find(|m| m.id == id && id >= reading::FILE_IDS))
     }
 
     fn msg_mut(&mut self, id: u64) -> Option<&mut Message> {
@@ -1767,6 +1771,8 @@ impl eframe::App for MailApp {
         // the tray icon (or the program started again): show the window again, or quit for good
         if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
             self.show_window(ctx);
+            // (started again with an email file: it opens in a window of its own)
+            self.open_files();
         }
         // (eframe shows the window after its first frame: started into the tray, hidden then,
         // once — unless it was asked to show meanwhile)

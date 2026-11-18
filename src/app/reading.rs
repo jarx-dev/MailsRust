@@ -8,6 +8,9 @@ pub(super) enum ImgState {
     Failed,
 }
 
+/// Ids of messages opened from .eml files (the mailbox's own ids never get this high).
+pub(super) const FILE_IDS: u64 = 1 << 62;
+
 /// A message opened in a window of its own.
 pub(super) struct ReaderWin {
     pub(super) key: u64,
@@ -1034,6 +1037,28 @@ impl MailApp {
     }
 
     // ------------------------------------------------------------ windows
+
+    /// Email files (.eml) handed over by a start from Explorer (see open_file), each in a reading
+    /// window. The message is not in the mailbox: its id is from the top of the range, where
+    /// `msg` finds it among the open windows (for reply, forward and its attachments).
+    pub(super) fn open_files(&mut self) {
+        for path in crate::open_file::take() {
+            let name = std::path::Path::new(&path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            match std::fs::read(&path).ok().and_then(|raw| crate::net::parse(&raw, true, false)) {
+                Some(mut m) => {
+                    let key = self.next_key;
+                    self.next_key += 1;
+                    m.id = FILE_IDS + key;
+                    self.readers.push(ReaderWin { key, msg: m, web: None, failed: false, tries: 0, last: None });
+                    crate::diag::log("email files: a .eml file opened in a reading window");
+                }
+                None => {
+                    crate::diag::log("email files: a .eml file could not be read");
+                    self.set_status(t!("core.open_file.unreadable", name = name));
+                }
+            }
+        }
+    }
 
     /// Messages opened in windows of their own: frameless, movable and resizable, with the
     /// formatted text, the attachments and reply / forward / AI link.

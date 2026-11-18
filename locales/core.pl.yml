@@ -58,3 +58,6 @@ core:
     registry_write: "zapis do rejestru: błąd %{code}"
     registry_delete: "usunięcie z rejestru: błąd %{code}"
     windows_only: "tylko w Windows"
+  open_file:
+    type_name: "Wiadomość e-mail"
+    unreadable: "Nie da się odczytać wiadomości z pliku %{name}"
