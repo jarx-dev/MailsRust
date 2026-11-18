@@ -66,6 +66,8 @@ cal:
     accept: "Przyjmij"
     maybe: "Wstępnie"
     decline: "Odrzuć"
+    clash: "W tym samym czasie: %{title}"
+    clash_more: "W tym samym czasie: %{title} (+%{n})"
   google:
     api_disabled: "w Twoim projekcie Google Cloud nie jest włączone %{api} — włącz je (przycisk w tym oknie), odczekaj minutę i spróbuj ponownie"
     no_consent: "brak zgody na dostęp — kliknij „Zaloguj ponownie przez Google” i zaznacz dostęp do kalendarza i kontaktów"

@@ -370,6 +370,23 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
     })
 }
 
+/// The events of the calendar at the same time as an invitation's meeting (not whole days, not
+/// the meeting itself: its copy from the invitation, or Google's with the same title and start).
+pub fn clashes<'a>(events: &'a [Event], inv: &Invitation) -> Vec<&'a Event> {
+    if inv.all_day {
+        return Vec::new();
+    }
+    let end = inv.start + Duration::minutes(inv.minutes.max(1));
+    events
+        .iter()
+        .filter(|e| !e.all_day && e.id != invite_id(&inv.uid, e.date))
+        .filter(|e| {
+            let s = e.date.and_time(e.start);
+            s < end && s + Duration::minutes(e.minutes.max(1)) > inv.start && !(s == inv.start && e.title == inv.title)
+        })
+        .collect()
+}
+
 /// The events of one calendar file between `from` and `to`, in colour `color`.
 pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
     // every event's lines
@@ -857,5 +874,32 @@ mod tests {
         assert!(weekly.iter().all(|e| is_invite(e.id) && e.id == invite_id("invite-1@example.com", e.date) && e.google && e.gid.is_empty()));
         assert!(!is_invite(stable_id("invite-1@example.com", today, 0)) && !is_invite(7));
         assert!(invite_events(&SAMPLE_INVITE.replace("UID:", "STATUS:CANCELLED\r\nUID:"), today).is_empty());
+    }
+
+    #[test]
+    fn what_an_invitation_clashes_with() {
+        let inv = invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;TZID=X:20261120T090000").replace("DTEND:20261120T103000Z", "DURATION:PT90M")).unwrap();
+        let day = inv.start.date();
+        let ev = |title: &str, h: u32, m: u32, minutes: i64| Event {
+            id: 7,
+            title: title.into(),
+            date: day,
+            start: NaiveTime::from_hms_opt(h, m, 0).unwrap(),
+            minutes,
+            location: String::new(),
+            color: 0,
+            google: false,
+            all_day: false,
+            gid: String::new(),
+        };
+        let mut own = ev(&inv.title, 9, 0, 90);
+        own.id = invite_id(&inv.uid, day);
+        let mut whole = ev("Urlop", 0, 0, 1440);
+        whole.all_day = true;
+        let evs = [ev("Stand-up", 10, 15, 15), ev("Lunch", 10, 30, 30), ev("Early", 8, 0, 60), own, ev(&inv.title, 9, 0, 90), whole];
+        let titles: Vec<&str> = clashes(&evs, &inv).iter().map(|e| e.title.as_str()).collect();
+        // touching at the end or the start is no clash; the meeting itself and whole days are not counted
+        assert_eq!(titles, ["Stand-up"]);
+        assert!(clashes(&evs, &Invitation { all_day: true, ..inv }).is_empty());
     }
 }

@@ -175,11 +175,14 @@ impl MailApp {
         if let Some(res) = self.gcal_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.gcal_rx = None;
             match res {
-                Ok(evs) => {
+                Ok((evs, uids)) => {
                     let n = evs.len();
-                    // (meetings put in from invitations stay, unless Google now has them itself)
-                    self.store.events.retain(|e| !e.google || (crate::gcal::is_invite(e.id) && !evs.iter().any(|g| super::reading::same_meeting(g, e))));
+                    // (meetings put in from invitations stay, unless Google now has them itself,
+                    // answered or declined)
+                    let google_has = |e: &Event| uids.iter().any(|u| e.id == crate::gcal::invite_id(u, e.date)) || evs.iter().any(|g| super::reading::same_meeting(g, e));
+                    self.store.events.retain(|e| !e.google || (crate::gcal::is_invite(e.id) && !google_has(e)));
                     self.store.events.extend(evs);
+                    self.gcal_uids = uids;
                     self.gcal_said = Some(Ok(format!("{}, {}", i18n::plural("ui.settings.google_events", n), Local::now().format("%H:%M"))));
                     crate::diag::log(format!("Google calendar: {n} events"));
                     self.save_now = true;
@@ -204,13 +207,12 @@ impl MailApp {
                 }
                 Err(e) => {
                     crate::diag::log(format!("Google calendar save: {e}"));
-                    // (an answer to an invitation that did not go through is not shown as given)
-                    self.invite_said.clear();
                     self.set_status(t!("ui.settings.gcal.save_failed", e = e));
                 }
             }
             self.touched = true;
         }
+        self.invite_answers();
         if self.prefs.gcal_key.is_empty() {
             self.prefs.gcal_key = crate::share::new_token() + &crate::share::new_token();
             self.save_now = true;
@@ -234,7 +236,7 @@ impl MailApp {
         let key = self.prefs.gcal_key.clone();
         let acc = self.store.account.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(if oauth { crate::google::calendar_events(&acc) } else { crate::gcal::sync(&urls, &key) });
+            let _ = tx.send(if oauth { crate::google::calendar_events(&acc) } else { crate::gcal::sync(&urls, &key).map(|evs| (evs, HashSet::new())) });
             ctx.request_repaint();
         });
         self.gcal_rx = Some(rx);

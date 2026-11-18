@@ -941,7 +941,8 @@ impl MailApp {
         let before = self.store.events.len();
         self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
         let mut changed = self.store.events.len() != before;
-        if !inv.cancelled && self.invite_said.get(&inv.uid) != Some(&"declined") {
+        // (a meeting Google has, answered or declined, is shown as Google has it)
+        if !inv.cancelled && self.invite_said.get(&inv.uid).map(String::as_str) != Some("declined") && !self.gcal_uids.contains(&inv.uid) {
             for e in crate::gcal::invite_events(&ics, Local::now().date_naive()) {
                 if !self.store.events.iter().any(|x| x.google && same_meeting(x, &e)) {
                     self.store.events.push(e);
@@ -956,19 +957,74 @@ impl MailApp {
         Some(inv)
     }
 
+    /// What Google says back about invitations: the answer already given (here or on another
+    /// device), or why an answer given here did not go through (then it is asked for anew).
+    pub(super) fn invite_answers(&mut self) {
+        let got: Vec<InviteNews> =self.invite_rx.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
+        for (uid, given, res) in got {
+            match res {
+                Ok(Some(answer)) => {
+                    if answer == "declined" {
+                        self.store.events.retain(|e| e.id != crate::gcal::invite_id(&uid, e.date));
+                        self.save_now = true;
+                    }
+                    if given {
+                        // Google's own copy of the meeting, changed, is read at once
+                        self.gcal_last = -1e9;
+                        self.set_status(t!("ui.settings.gcal.saved"));
+                    }
+                    self.invite_said.insert(uid, answer);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    crate::diag::log(format!("invitation answer: {e}"));
+                    if given {
+                        // not shown as given; what Google has is asked for when the bar shows again
+                        self.invite_said.remove(&uid);
+                        self.invite_asked.remove(&uid);
+                        self.set_status(t!("ui.settings.gcal.save_failed", e = e));
+                    }
+                }
+            }
+            self.touched = true;
+        }
+    }
+
+    /// Asks Google in the background, once a run per meeting, about an invitation: with `answer`,
+    /// gives that answer; without, reads the one already given. It comes back to `invite_answers`.
+    fn ask_google_invite(&mut self, uid: &str, answer: Option<&'static str>) {
+        let (acc, uid, ctx) = (self.store.account.clone(), uid.to_string(), self.ctx.clone());
+        let tx = self.invite_rx.get_or_insert_with(std::sync::mpsc::channel).0.clone();
+        std::thread::spawn(move || {
+            let res = match answer {
+                Some(a) => crate::google::answer_invitation(&acc, &uid, a).map(|_| Some(a.to_string())),
+                None => crate::google::invitation_answer(&acc, &uid),
+            };
+            let _ = tx.send((uid, answer.is_some(), res));
+            ctx.request_repaint();
+        });
+    }
+
     /// An email inviting to a meeting (it carries a calendar file): what and when, above the
-    /// text, and the answer, written to the meeting in Google Calendar (Google tells the organiser).
+    /// text, what else is in the calendar then, and the answer, written to the meeting in Google
+    /// Calendar (Google tells the organiser); the answer already given is read from there.
     fn invitation_bar(&mut self, ui: &mut Ui, m: &Message) {
         let Some(file) = m.attachment_files.iter().find(|f| f.ends_with(".ics")) else { return };
         let Some(inv) = self.invitation_to_calendar(file) else { return };
         let test = self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("invite");
-        let can_answer = inv.asks && !inv.cancelled && ((m.account == 0 && self.google_calendar()) || test);
+        let google = m.account == 0 && self.google_calendar();
+        let can_answer = inv.asks && !inv.cancelled && (google || test);
+        if can_answer && !test && self.invite_asked.insert(inv.uid.clone()) {
+            self.ask_google_invite(&inv.uid, None);
+        }
         let end = inv.start + chrono::Duration::minutes(inv.minutes);
         let when = if inv.all_day {
             format!("{}, {}", i18n::date(inv.start.date()), t!("cal.invite.all_day"))
         } else {
             format!("{} {}–{}", i18n::date(inv.start.date()), inv.start.format("%H:%M"), end.format("%H:%M"))
         };
+        // (a pass over the events in memory, only while an invitation is shown)
+        let clash = if inv.cancelled { Vec::new() } else { crate::gcal::clashes(&self.store.events, &inv).into_iter().map(|e| e.title.clone()).collect() };
         ui.add_space(10.0);
         Frame::new().fill(HOVER()).stroke(Stroke::new(1.0, BORDER())).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -986,26 +1042,25 @@ impl MailApp {
                     ui.label(RichText::new(&inv.location).size(13.5).color(MUTED()));
                 }
             });
+            if let Some(first) = clash.first() {
+                let text = if clash.len() == 1 { t!("cal.invite.clash", title = first) } else { t!("cal.invite.clash_more", title = first, n = clash.len() - 1) };
+                ui.label(RichText::new(text).size(13.0).color(FLAG));
+            }
             if can_answer {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let said = self.invite_said.get(&inv.uid).copied();
+                    let said = self.invite_said.get(&inv.uid).cloned();
                     for (answer, label) in [("accepted", t!("cal.invite.accept")), ("tentative", t!("cal.invite.maybe")), ("declined", t!("cal.invite.decline"))] {
-                        if ui.add(egui::Button::new(RichText::new(label).size(13.5)).selected(said == Some(answer))).clicked() && said != Some(answer) && !test {
-                            self.invite_said.insert(inv.uid.clone(), answer);
+                        let on = said.as_deref() == Some(answer);
+                        if ui.add(egui::Button::new(RichText::new(label).size(13.5)).selected(on)).clicked() && !on && !test {
+                            self.invite_said.insert(inv.uid.clone(), answer.to_string());
                             if answer == "declined" {
                                 // (Google's own copy goes at the next reading: declined meetings are not read)
                                 self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
                                 self.save_now = true;
                                 self.touched = true;
                             }
-                            let (acc, uid, ctx) = (self.store.account.clone(), inv.uid.clone(), self.ctx.clone());
-                            // (the answer comes back like any change written to the calendar)
-                            let tx = self.gcal_push.get_or_insert_with(std::sync::mpsc::channel).0.clone();
-                            std::thread::spawn(move || {
-                                let _ = tx.send((None, crate::google::answer_invitation(&acc, &uid, answer)));
-                                ctx.request_repaint();
-                            });
+                            self.ask_google_invite(&inv.uid, Some(answer));
                         }
                     }
                 });

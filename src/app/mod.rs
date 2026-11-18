@@ -197,6 +197,12 @@ fn open_with_windows(path: &std::path::Path) {
     let _ = std::process::Command::new("explorer.exe").arg(path).spawn();
 }
 
+/// The calendar read anew: its events, and the calendar-file ids of the meetings Google has.
+type CalRead = Result<(Vec<Event>, HashSet<String>), String>;
+/// What Google says about an invitation: the meeting's id, whether an answer was being given,
+/// and the answer there (None: no such meeting or guest) or why it could not be had or given.
+type InviteNews = (String, bool, Result<Option<String>, String>);
+
 pub struct MailApp {
     store: Store,
     module: Module,
@@ -422,7 +428,9 @@ pub struct MailApp {
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it
     gcal_text: String,
     gcal_loaded: bool,
-    gcal_rx: Option<Receiver<Result<Vec<Event>, String>>>,
+    /// the calendar read anew, and the calendar-file ids of the meetings Google has (none from an iCal address)
+    gcal_rx: Option<Receiver<CalRead>>,
+    gcal_uids: HashSet<String>,
     gcal_last: f64,
     gcal_said: Option<Result<String, String>>,
     /// "Sprawdź połączenie": the calendar and the contacts, each working or what is missing
@@ -430,10 +438,15 @@ pub struct MailApp {
     google_check_rx: Option<Receiver<(Result<String, String>, Result<String, String>)>>,
     /// events written to Google: (event here, made here and to be replaced by Google's copy, answer)
     gcal_push: Option<(Sender<(Option<u64>, Result<(), String>)>, Receiver<(Option<u64>, Result<(), String>)>)>,
-    /// invitations read from emails' calendar files (by file; None: not an invitation), and
-    /// the answers given in this run (by the meeting's id)
+    /// invitations read from emails' calendar files (by file; None: not an invitation), the
+    /// answers as Google has them or as given here (by the meeting's id: `accepted`,
+    /// `tentative`, `declined`, `needsAction`), the meetings already asked Google about in this
+    /// run, and what Google says back (the meeting, whether an answer was being given, and the
+    /// answer or why it could not be had or given)
     invites: HashMap<String, Option<crate::gcal::Invitation>>,
-    invite_said: HashMap<String, &'static str>,
+    invite_said: HashMap<String, String>,
+    invite_asked: HashSet<String>,
+    invite_rx: Option<(Sender<InviteNews>, Receiver<InviteNews>)>,
     /// ending for good (not just closing the window)
     quitting: bool,
     /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
@@ -640,6 +653,7 @@ impl MailApp {
             gcal_text: String::new(),
             gcal_loaded: false,
             gcal_rx: None,
+            gcal_uids: HashSet::new(),
             gcal_last: -1e9,
             gcal_said: None,
             google_check: None,
@@ -647,6 +661,8 @@ impl MailApp {
             gcal_push: None,
             invites: HashMap::new(),
             invite_said: HashMap::new(),
+            invite_asked: HashSet::new(),
+            invite_rx: None,
             quitting: false,
             hidden: false,
             start_hidden: false,
@@ -889,6 +905,11 @@ tel.: 600-100-200".into();
                 m.attachments.push("invite.ics".into());
                 m.attachment_files.push(file);
             }
+            // answered "maybe" already, and something else in the calendar during the meeting
+            app.invite_said.insert("invite-1@example.com".into(), "tentative".into());
+            let start = chrono::Utc::now().date_naive().and_hms_opt(9, 15, 0).unwrap().and_utc().with_timezone(&Local).naive_local();
+            let id = app.store.new_id();
+            app.store.events.push(Event { id, title: "Stand-up".into(), date: start.date(), start: start.time(), minutes: 15, location: String::new(), color: 1, google: false, all_day: false, gid: String::new() });
         }
         if let Ok(path) = std::env::var("POCZTA_HTML") {
             // test picture: the open message shows this formatted text

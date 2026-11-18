@@ -62,6 +62,8 @@ cal:
     accept: "Accept"
     maybe: "Maybe"
     decline: "Decline"
+    clash: "At the same time: %{title}"
+    clash_more: "At the same time: %{title} (+%{n})"
   google:
     api_disabled: "%{api} is not turned on in your Google Cloud project — turn it on (the button in this window), wait a minute and try again"
     no_consent: "access was not granted — click “Sign in with Google again” and allow access to the calendar and contacts"
