@@ -299,9 +299,10 @@ impl MailApp {
         self.prefs.google_contacts && crate::google::ready(a) && crate::google::has_scope(a, crate::google::SCOPE_CONTACTS)
     }
 
-    /// Writes an event to Google Calendar through the script (in the background). `local`: the
+    /// Writes an event to Google Calendar (in the background): `ev` with how many days a
+    /// whole-day one lasts and the guests to invite, or without `ev` takes it out. `local`: the
     /// copy made here, removed once Google has it.
-    pub(super) fn gcal_write(&mut self, local: Option<u64>, gid: String, ev: Option<Event>) {
+    pub(super) fn gcal_write(&mut self, local: Option<u64>, gid: String, ev: Option<(Event, i64, Vec<String>)>) {
         if !self.google_calendar() {
             return;
         }
@@ -310,7 +311,7 @@ impl MailApp {
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             let res = match &ev {
-                Some(e) => crate::google::save_event(&acc, &gid, &e.title, &e.location, e.date.and_time(e.start), e.minutes).map(|_| ()),
+                Some((e, days, guests)) => crate::google::save_event(&acc, &gid, e, *days, guests).map(|_| ()),
                 None => crate::google::delete_event(&acc, &gid),
             };
             let _ = tx.send((local, res));

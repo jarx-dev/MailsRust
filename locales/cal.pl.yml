@@ -20,6 +20,12 @@ cal:
     save: "Zapisz"
     cancel: "Anuluj"
     delete: "🗑 Usuń"
+    all_day: "Cały dzień"
+    days: "Dni"
+    guests: "Goście"
+    guests_hint: "adres@firma.pl, …"
+    guests_note: "Google wyśle zaproszenie dodanym gościom, a zmianę terminu wszystkim zaproszonym"
+    bad_guest: "To nie jest adres e-mail: %{who}"
   gcal:
     not_shared: "Google nie udostępnia kalendarza pod tym adresem (adres zmieniony albo wyłączony)"
     http_status: "Google odpowiedział %{code}"

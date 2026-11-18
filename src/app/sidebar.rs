@@ -1032,7 +1032,10 @@ impl MailApp {
                         let place = if e.location.is_empty() { String::new() } else { format!(" · {}", e.location) };
                         self.set_status(t!("ui.sidebar.google_event", title = e.title, when = when, place = place));
                     } else {
-                        self.editor = Some(EventEditor::from_event(e));
+                        // a whole-day event in Google: kept as one event a day, all with its id
+                        let same: Vec<NaiveDate> = if e.all_day && !e.gid.is_empty() { self.store.events.iter().filter(|x| x.gid == e.gid).map(|x| x.date).collect() } else { vec![e.date] };
+                        let (first, days) = (same.iter().min().copied().unwrap_or(e.date), same.len() as i64);
+                        self.editor = Some(EventEditor::from_event(e, first, days));
                     }
                 }
             }
@@ -1044,22 +1047,28 @@ impl MailApp {
     pub(super) fn editor_ui(&mut self, ctx: &egui::Context) {
         let google_cal = self.google_calendar();
         let Some(ed) = self.editor.as_mut() else { return };
-        match calendar::event_editor(ctx, ed, &self.store) {
+        // written to Google: a new event (with Google's calendar on), or one that is there
+        let gid_of = ed.id.and_then(|id| self.store.events.iter().find(|e| e.id == id)).map(|e| e.gid.clone()).unwrap_or_default();
+        let to_google = google_cal && (ed.id.is_none() || !gid_of.is_empty());
+        // (test picture: the editor as for Google, without a Google account)
+        let to_google = to_google || (self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("event-editor"));
+        match calendar::event_editor(ctx, ed, &self.store, to_google) {
             EditorResult::Keep => {}
             EditorResult::Close => self.editor = None,
             EditorResult::Delete => {
                 if let Some(id) = ed.id {
-                    let gid = self.store.events.iter().find(|e| e.id == id).map(|e| e.gid.clone()).unwrap_or_default();
-                    self.store.events.retain(|e| e.id != id);
-                    if !gid.is_empty() {
-                        self.gcal_write(None, gid, None);
+                    // (every day of a whole-day event of Google)
+                    self.store.events.retain(|e| e.id != id && (gid_of.is_empty() || e.gid != gid_of));
+                    if !gid_of.is_empty() {
+                        self.gcal_write(None, gid_of, None);
                     }
                 }
                 self.editor = None;
                 self.set_status(t!("ui.sidebar.event_deleted"));
             }
             EditorResult::Save => {
-                let Some(start) = calendar::parse_time(&ed.start) else {
+                let start = if ed.all_day { Some(chrono::NaiveTime::MIN) } else { calendar::parse_time(&ed.start) };
+                let Some(start) = start else {
                     ed.error = Some(t!("ui.sidebar.bad_time").into_owned());
                     return;
                 };
@@ -1067,32 +1076,40 @@ impl MailApp {
                     ed.error = Some(t!("ui.sidebar.need_title").into_owned());
                     return;
                 }
+                let guests: Vec<String> = if to_google { ed.guests.split([',', ';']).map(str::trim).filter(|g| !g.is_empty()).map(String::from).collect() } else { vec![] };
+                if let Some(bad) = guests.iter().find(|g| g.parse::<lettre::Address>().is_err()) {
+                    ed.error = Some(t!("cal.calendar.bad_guest", who = bad).into_owned());
+                    return;
+                }
+                let days = if ed.all_day && to_google { ed.days.clamp(1, 31) } else { 1 };
                 let ev = Event {
                     id: 0,
                     title: ed.title.trim().to_string(),
                     date: ed.date,
                     start,
-                    minutes: ed.minutes,
+                    minutes: if ed.all_day { 24 * 60 } else { ed.minutes },
                     location: ed.location.clone(),
                     color: ed.color,
                     google: false,
-                    all_day: false,
+                    all_day: ed.all_day,
                     gid: String::new(),
                 };
                 let date = ed.date;
-                let to_google = google_cal;
                 match ed.id {
                     Some(id) => {
-                        let mut write: Option<(String, Event)> = None;
+                        // (the other days of a whole-day event of Google come back with Google's copy)
+                        if !gid_of.is_empty() {
+                            self.store.events.retain(|e| e.id == id || e.gid != gid_of);
+                        }
+                        let mut write: Option<Event> = None;
                         if let Some(e) = self.store.events.iter_mut().find(|e| e.id == id) {
-                            let (google, gid) = (e.google, e.gid.clone());
-                            *e = Event { id, google, gid: gid.clone(), ..ev };
-                            if !gid.is_empty() {
-                                write = Some((gid, e.clone()));
+                            *e = Event { id, google: e.google, gid: e.gid.clone(), ..ev };
+                            if !gid_of.is_empty() {
+                                write = Some(e.clone());
                             }
                         }
-                        if let Some((gid, e)) = write {
-                            self.gcal_write(None, gid, Some(e));
+                        if let Some(e) = write {
+                            self.gcal_write(None, gid_of, Some((e, days, guests)));
                         }
                     }
                     None => {
@@ -1102,7 +1119,7 @@ impl MailApp {
                         // with the calendar script, new events go to Google (the copy here is
                         // replaced by Google's own after the next reading)
                         if to_google {
-                            self.gcal_write(Some(id), String::new(), Some(e));
+                            self.gcal_write(Some(id), String::new(), Some((e, days, guests)));
                         }
                     }
                 }

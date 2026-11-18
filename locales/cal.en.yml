@@ -20,6 +20,12 @@ cal:
     save: "Save"
     cancel: "Cancel"
     delete: "🗑 Delete"
+    all_day: "All day"
+    days: "Days"
+    guests: "Guests"
+    guests_hint: "name@company.com, …"
+    guests_note: "Google sends the invitation to guests added here, and word of changes to everyone invited"
+    bad_guest: "This is not an e-mail address: %{who}"
   gcal:
     not_shared: "Google does not share the calendar at this address (the address was changed or turned off)"
     http_status: "Google responded %{code}"

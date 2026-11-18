@@ -915,6 +915,11 @@ tel.: 600-100-200".into();
                 }
             }
         }
+        if std::env::var("POCZTA_START").as_deref() == Ok("event-editor") {
+            // test picture: a new whole-day event of two days, with guests (POCZTA_EDITOR_TIMED: with an hour)
+            let timed = std::env::var("POCZTA_EDITOR_TIMED").is_ok();
+            app.editor = Some(EventEditor { title: "Warsztaty wdrożeniowe".into(), all_day: !timed, days: 2, guests: "anna@example.com, piotr@example.com".into(), ..EventEditor::new(Local::now().date_naive(), None) });
+        }
         if std::env::var("POCZTA_START").as_deref() == Ok("remind") {
             // test: a meeting in 5 minutes (the log says it was reminded of, once)
             let at = Local::now().naive_local() + Duration::minutes(5);
