@@ -42,6 +42,8 @@ use chat_ui::*;
 
 mod settings;
 
+mod autoresponder_ui;
+
 mod window;
 use window::*;
 #[cfg(windows)]
@@ -252,6 +254,9 @@ pub struct MailApp {
     account_open: bool,
     /// the windows with the AI settings and with the Google Calendar
     ai_open: bool,
+    /// the autoresponder window (☰), and its state while open
+    auto_open: bool,
+    auto_ui: Option<autoresponder_ui::AutoUi>,
     gcal_open: bool,
     /// the window about the program (author, source code)
     about_open: bool,
@@ -533,6 +538,8 @@ impl MailApp {
             next_key: 1,
             account_open: false,
             ai_open: false,
+            auto_open: false,
+            auto_ui: None,
             about_open: false,
             gcal_open: false,
             ai_set: None,
@@ -726,6 +733,7 @@ impl MailApp {
         }
         // test pictures: the AI settings, the Google Calendar window
         app.ai_open = std::env::var("POCZTA_START").as_deref() == Ok("ai-settings");
+        app.auto_open = std::env::var("POCZTA_START").as_deref() == Ok("autoresponder");
         app.about_open = std::env::var("POCZTA_START").as_deref() == Ok("about");
         app.gcal_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("account-calendar") | Ok("google-check"));
         app.gcal_open |= std::env::var("POCZTA_START").as_deref() == Ok("google-scopes");
@@ -1489,7 +1497,7 @@ impl eframe::App for MailApp {
         self.flash_ui(&ctx);
         // The browser view sits on top of everything, so it steps aside while a menu or dialog is open.
         // (and in the background: an open writing window keeps the screen drawn, but the view stays closed)
-        let covered = self.account_open || self.rules_open || self.extra_edit.is_some() || self.rule_edit.is_some() || self.ai_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
+        let covered = self.account_open || self.rules_open || self.extra_edit.is_some() || self.rule_edit.is_some() || self.ai_open || self.auto_open || self.gcal_open || self.about_open || self.diag_open || self.editor.is_some() || self.module != Module::Mail || self.mail_view.in_background();
         let want = if covered {
             None
         } else {
