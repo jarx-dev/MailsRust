@@ -234,24 +234,25 @@ impl MailApp {
                     ui.label(t!("ui.settings.autoresponder.address"));
                     ui.add(egui::TextEdit::singleline(&mut r.target_address).desired_width(300.0)).on_hover_text(t!("ui.settings.autoresponder.address_hint"));
                     ui.end_row();
-                    // (the texts that will go: the hours' two are kept for later while the whole day is on)
+                    // (the texts that will go: the hours' two are kept for later while the whole day is on;
+                    // each field keeps its own id, or one would undo into another's text)
                     if r.all_day {
                         ui.label(t!("ui.settings.autoresponder.all_day_text"));
-                        ui.add(egui::TextEdit::multiline(&mut r.text_all_day).desired_rows(3).desired_width(420.0));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_all_day).id_salt("auto-all-day").desired_rows(3).desired_width(420.0));
                         ui.end_row();
                     } else {
                         ui.label(t!("ui.settings.autoresponder.before"));
-                        ui.add(egui::TextEdit::multiline(&mut r.text_before).desired_rows(2).desired_width(420.0));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_before).id_salt("auto-before").desired_rows(2).desired_width(420.0));
                         ui.end_row();
                         ui.label(t!("ui.settings.autoresponder.after"));
-                        ui.add(egui::TextEdit::multiline(&mut r.text_after).desired_rows(2).desired_width(420.0));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_after).id_salt("auto-after").desired_rows(2).desired_width(420.0));
                         ui.end_row();
                     }
                     ui.label("");
                     ui.add(egui::Label::new(RichText::new(t!("ui.settings.autoresponder.texts_hint")).small().color(MUTED())).wrap());
                     ui.end_row();
                     ui.label(t!("ui.settings.autoresponder.ignored"));
-                    ui.add(egui::TextEdit::multiline(&mut r.ignored).desired_rows(2).desired_width(420.0)).on_hover_text(t!("ui.settings.autoresponder.ignored_hint"));
+                    ui.add(egui::TextEdit::multiline(&mut r.ignored).id_salt("auto-ignored").desired_rows(2).desired_width(420.0)).on_hover_text(t!("ui.settings.autoresponder.ignored_hint"));
                     ui.end_row();
                 });
             });
@@ -270,8 +271,14 @@ impl MailApp {
                 let answer = crate::ai::autoresponder(&crate::ai::load(), &now, &current_json, &sentence).map_err(bad)?;
                 let v = serde_json::from_str(&answer).map_err(|e| bad(e.to_string()))?;
                 let mut r = Rules::over(&current, v).map_err(bad)?;
-                // (who saved last is n8n's to say)
+                // (who saved last is n8n's to say; an empty text from the AI keeps the one there,
+                // which may be the hidden mode's)
                 r.updated_by = current.updated_by.clone();
+                for (t, was) in [(&mut r.text_before, &current.text_before), (&mut r.text_after, &current.text_after), (&mut r.text_all_day, &current.text_all_day)] {
+                    if t.trim().is_empty() {
+                        t.clone_from(was);
+                    }
+                }
                 match r.problem() {
                     Some(p) => Err(bad(p)),
                     None => Ok((r, t!("ui.settings.autoresponder.ai_done").into_owned())),

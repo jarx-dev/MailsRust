@@ -88,7 +88,7 @@ ui:
       hours: "Working hours"
       hours_hint: "The reply goes before and after them. A start later than the end (e.g. 15–13) means: reply only between 13 and 15."
       all_day: "Away all day"
-      all_day_hint: "In those days the reply goes at any hour. The working hours and their texts are kept for later."
+      all_day_hint: "On those days the reply goes at any hour. The working hours and their texts are kept for later."
       all_day_text: "Reply text"
       all_day_text_default: "Thank you for your message. From {od} to {do} I am away. I will reply when I am back."
       address: "To address"
