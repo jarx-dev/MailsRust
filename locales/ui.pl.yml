@@ -88,6 +88,10 @@ ui:
       pick_day: "Wybierz w kalendarzu"
       hours: "Godziny pracy"
       hours_hint: "Odpowiedź idzie przed nimi i po nich. Początek później niż koniec (np. 15–13) znaczy: odpowiadaj tylko między 13 a 15."
+      all_day: "Niedostępny cały dzień"
+      all_day_hint: "W te dni odpowiedź idzie o każdej porze. Godziny pracy i ich teksty zostają na później."
+      all_day_text: "Treść odpowiedzi"
+      all_day_text_default: "Dziękuję za wiadomość. W dniach od {od} do {do} jestem niedostępny. Odpowiem po powrocie."
       address: "Na adres"
       address_hint: "Odpowiadaj tylko na maile wysłane na ten adres"
       before: "Przed godzinami pracy"
@@ -111,6 +115,7 @@ ui:
       bad_hours: "Godziny od 0 do 24, początek inny niż koniec."
       bad_address: "Wpisz adres e-mail."
       bad_ai: "AI nie zwróciło poprawnych ustawień: %{error}"
+      no_all_day_text: "Wpisz treść odpowiedzi na cały dzień."
     about:
       title: "O programie"
       tagline: "Klient poczty dla Windows, napisany w Rust."

@@ -199,8 +199,8 @@ pub fn run(args: &[String]) -> bool {
         link.token = std::env::var("POCZTA_AUTORESPONDER_TOKEN").unwrap_or_default();
         match crate::autoresponder::fetch(&link) {
             Ok(r) => println!(
-                "autoresponder: on {} | days {}..{} | working hours {}-{} | texts {}+{} chars | {} ignored | problem: {:?}",
-                r.enabled, r.date_start, r.date_end, r.hour_start, r.hour_end, r.text_before.chars().count(), r.text_after.chars().count(), r.ignored.lines().filter(|l| !l.trim().is_empty()).count(), r.problem()
+                "autoresponder: on {} | days {}..{} | working hours {}-{} | all day {} | texts {}+{}+{} chars | {} ignored | problem: {:?}",
+                r.enabled, r.date_start, r.date_end, r.hour_start, r.hour_end, r.all_day, r.text_before.chars().count(), r.text_after.chars().count(), r.text_all_day.chars().count(), r.ignored.lines().filter(|l| !l.trim().is_empty()).count(), r.problem()
             ),
             Err(e) => println!("autoresponder: {e}"),
         }

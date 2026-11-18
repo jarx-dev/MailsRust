@@ -87,6 +87,10 @@ ui:
       pick_day: "Pick in the calendar"
       hours: "Working hours"
       hours_hint: "The reply goes before and after them. A start later than the end (e.g. 15–13) means: reply only between 13 and 15."
+      all_day: "Away all day"
+      all_day_hint: "In those days the reply goes at any hour. The working hours and their texts are kept for later."
+      all_day_text: "Reply text"
+      all_day_text_default: "Thank you for your message. From {od} to {do} I am away. I will reply when I am back."
       address: "To address"
       address_hint: "Reply only to mail sent to this address"
       before: "Before working hours"
@@ -110,6 +114,7 @@ ui:
       bad_hours: "Hours from 0 to 24, the start different from the end."
       bad_address: "Enter an email address."
       bad_ai: "AI did not return valid settings: %{error}"
+      no_all_day_text: "Type the reply for the whole day."
     about:
       title: "About"
       tagline: "A mail client for Windows, written in Rust."

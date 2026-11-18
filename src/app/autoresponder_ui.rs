@@ -77,6 +77,8 @@ impl AutoUi {
                 text_after: "Dziękuję za wiadomość. Zajmę się tą sprawą następnego dnia roboczego po {start}:00.".into(),
                 ignored: "biuro@example.com\nfaktury@example.com".into(),
                 updated_by: "Poczta 2026-11-18T12:41:11Z".into(),
+                all_day: std::env::var("POCZTA_START").as_deref() == Ok("autoresponder-allday"),
+                text_all_day: "Dziękuję za wiadomość. W dniach od {od} do {do} jestem niedostępny. Odpowiem po powrocie.".into(),
             });
             if std::env::var("POCZTA_START").as_deref() == Ok("autoresponder-days") {
                 a.picking = typed_day(&a.from).map(|d| (false, d));
@@ -212,23 +214,37 @@ impl MailApp {
                     ui.end_row();
                     ui.label(t!("ui.settings.autoresponder.hours"));
                     ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut r.hour_start).range(0..=24).suffix(":00"));
-                        ui.label("–");
-                        ui.add(egui::DragValue::new(&mut r.hour_end).range(0..=24).suffix(":00"));
+                        ui.add_enabled_ui(!r.all_day, |ui| {
+                            ui.add(egui::DragValue::new(&mut r.hour_start).range(0..=24).suffix(":00"));
+                            ui.label("–");
+                            ui.add(egui::DragValue::new(&mut r.hour_end).range(0..=24).suffix(":00"));
+                        });
+                        ui.add_space(12.0);
+                        if ui.checkbox(&mut r.all_day, t!("ui.settings.autoresponder.all_day")).changed() && r.all_day && r.text_all_day.trim().is_empty() {
+                            r.text_all_day = t!("ui.settings.autoresponder.all_day_text_default").into_owned();
+                        }
                     });
                     ui.end_row();
                     ui.label("");
-                    ui.add(egui::Label::new(RichText::new(t!("ui.settings.autoresponder.hours_hint")).small().color(MUTED())).wrap());
+                    let hint = if r.all_day { t!("ui.settings.autoresponder.all_day_hint") } else { t!("ui.settings.autoresponder.hours_hint") };
+                    ui.add(egui::Label::new(RichText::new(hint).small().color(MUTED())).wrap());
                     ui.end_row();
                     ui.label(t!("ui.settings.autoresponder.address"));
                     ui.add(egui::TextEdit::singleline(&mut r.target_address).desired_width(300.0)).on_hover_text(t!("ui.settings.autoresponder.address_hint"));
                     ui.end_row();
-                    ui.label(t!("ui.settings.autoresponder.before"));
-                    ui.add(egui::TextEdit::multiline(&mut r.text_before).desired_rows(2).desired_width(420.0));
-                    ui.end_row();
-                    ui.label(t!("ui.settings.autoresponder.after"));
-                    ui.add(egui::TextEdit::multiline(&mut r.text_after).desired_rows(2).desired_width(420.0));
-                    ui.end_row();
+                    // (the texts that will go: the hours' two are kept for later while the whole day is on)
+                    if r.all_day {
+                        ui.label(t!("ui.settings.autoresponder.all_day_text"));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_all_day).desired_rows(3).desired_width(420.0));
+                        ui.end_row();
+                    } else {
+                        ui.label(t!("ui.settings.autoresponder.before"));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_before).desired_rows(2).desired_width(420.0));
+                        ui.end_row();
+                        ui.label(t!("ui.settings.autoresponder.after"));
+                        ui.add(egui::TextEdit::multiline(&mut r.text_after).desired_rows(2).desired_width(420.0));
+                        ui.end_row();
+                    }
                     ui.label("");
                     ui.add(egui::Label::new(RichText::new(t!("ui.settings.autoresponder.texts_hint")).small().color(MUTED())).wrap());
                     ui.end_row();
