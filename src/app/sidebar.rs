@@ -281,6 +281,10 @@ impl MailApp {
                     self.ai_open = true;
                     ui.close();
                 }
+                if ui.button(t!("ui.sidebar.menu.autoresponder")).on_hover_text(t!("ui.sidebar.menu.autoresponder_hint")).clicked() {
+                    self.auto_open = true;
+                    ui.close();
+                }
                 if ui.button(t!("ui.sidebar.menu.google")).on_hover_text(t!("ui.sidebar.menu.google_hint")).clicked() {
                     self.gcal_open = true;
                     ui.close();

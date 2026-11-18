@@ -191,6 +191,21 @@ pub fn run(args: &[String]) -> bool {
         println!("texts: {} MB", body / 1_048_576);
         return true;
     }
+    if args.iter().any(|a| a == "--autoresponder-check") {
+        // Read-only: the autoresponder's settings from n8n (POCZTA_AUTORESPONDER_URL and
+        // POCZTA_AUTORESPONDER_TOKEN), shown without their texts and addresses.
+        let mut link = crate::autoresponder::Link::default();
+        link.url = std::env::var("POCZTA_AUTORESPONDER_URL").unwrap_or_default();
+        link.token = std::env::var("POCZTA_AUTORESPONDER_TOKEN").unwrap_or_default();
+        match crate::autoresponder::fetch(&link) {
+            Ok(r) => println!(
+                "autoresponder: on {} | days {}..{} | working hours {}-{} | texts {}+{} chars | {} ignored | problem: {:?}",
+                r.enabled, r.date_start, r.date_end, r.hour_start, r.hour_end, r.text_before.chars().count(), r.text_after.chars().count(), r.ignored.lines().filter(|l| !l.trim().is_empty()).count(), r.problem()
+            ),
+            Err(e) => println!("autoresponder: {e}"),
+        }
+        return true;
+    }
     if let Some(uid) = args.iter().position(|a| a == "--eml-check").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<u32>().ok()) {
         // Read-only: fetch one inbox message's original .eml and check it reads back (no contents shown).
         let Some(mut store) = db::Db::open().ok().and_then(|mut d| d.load()) else {

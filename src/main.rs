@@ -7,6 +7,7 @@ i18n!("locales", fallback = "en");
 
 mod ai;
 mod app;
+mod autoresponder;
 mod autostart;
 mod book;
 mod cli;

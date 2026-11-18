@@ -291,6 +291,33 @@ pub fn rewrite(s: &Settings, style: &str, html: &str) -> Result<String, String> 
     restore(&text, html).map_err(|e| t!("misc.ai.rejected", reason = e).into_owned())
 }
 
+/// The autoresponder's settings changed as a sentence asks (e.g. "jutro 13–15 mam spotkanie"):
+/// the model gets the current settings (JSON) and today's date and answers with all of them as
+/// JSON. The caller parses and checks them, and the person saves them.
+pub fn autoresponder(s: &Settings, today: &str, current: &str, ask_for: &str) -> Result<String, String> {
+    let prompt = format!(
+        "Ustawiasz automatyczną odpowiedź na maile. Dziś jest {today}.\n\
+         Obecne ustawienia (JSON):\n{current}\n\n\
+         Znaczenie pól: enabled — czy odpowiadać; date_start, date_end — dni RRRR-MM-DD, oba włącznie; \
+         hour_start, hour_end — godziny pracy 0–24, odpowiedź idzie przed hour_start i od hour_end. \
+         Gdy ktoś jest niedostępny tylko w godzinach X–Y, ustaw hour_start=Y i hour_end=X (odpowiedź wtedy tylko między X a Y). \
+         text_before — treść wysyłana przed godzinami pracy, text_after — po nich (zwykły tekst; {{od}} {{do}} {{start}} {{koniec}} wstawiają daty i godziny). \
+         target_address i ignored zostaw, chyba że prośba ich dotyczy.\n\
+         Zmień tylko to, o co chodzi w prośbie; teksty dopasuj, gdy przestały pasować do nowej sytuacji, w tym samym języku i tonie.\n\n\
+         Prośba: {ask_for}\n\n\
+         Odpowiedz wyłącznie pełnym JSON-em z polami enabled, date_start, date_end, hour_start, hour_end, target_address, text_before, text_after, ignored, wewnątrz <wynik>…</wynik>."
+    );
+    let t = std::time::Instant::now();
+    let (text, stop, model) = ask(s, &prompt, 8_000, Duration::from_secs(60))?;
+    crate::diag::log(format!("autoresponder z AI: model {model}, {:.1} s", t.elapsed().as_secs_f32()));
+    if stop == "max_tokens" {
+        return Err(t!("misc.ai.cut_off").into_owned());
+    }
+    let (_, rest) = text.split_once("<wynik>").ok_or_else(|| t!("misc.ai.no_text").into_owned())?;
+    let out = rest.rsplit_once("</wynik>").ok_or_else(|| t!("misc.ai.no_text").into_owned())?.0.trim();
+    Ok(out.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim().to_string())
+}
+
 /// A short question to check the address, the key and the model: the model's name and the time.
 pub fn test(s: &Settings) -> Result<String, String> {
     let t = std::time::Instant::now();

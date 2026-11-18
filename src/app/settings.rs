@@ -617,6 +617,15 @@ impl MailApp {
         } else {
             self.ai_set = None;
         }
+        if self.auto_open {
+            let mut open = true;
+            crate::theme::dialog(ctx, "autoresponder", &t!("ui.settings.autoresponder.dialog"), 640.0, &mut open, |ui| self.autoresponder_ui(ui));
+            if !open {
+                self.auto_open = false;
+            }
+        } else {
+            self.auto_ui = None;
+        }
         if self.gcal_open {
             let mut open = true;
             crate::theme::dialog(ctx, "google", &t!("ui.settings.gcal.dialog"), 620.0, &mut open, |ui| self.gcal_settings_ui(ui));
