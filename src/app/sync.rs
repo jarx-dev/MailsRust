@@ -253,6 +253,10 @@ specjalista ds. Informatyki".into();
                     let _ = tx.send(self.finder.snapshot());
                 }
                 Ask::Heads(ids, filter, tx) => {
+                    // (messages changed this frame: the positions are made again first)
+                    if self.touched {
+                        self.refresh_caches();
+                    }
                     // (by the index only: an id gone from the mailbox is skipped, not looked for)
                     let heads = ids
                         .iter()

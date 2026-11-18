@@ -161,6 +161,8 @@ impl MailApp {
         }
         self.hub.set_account(&self.store.account);
         for (token, id, _) in self.prefs.ai_shares.clone() {
+            // (the text is still on disk after a restart; the shared copy needs it)
+            self.ensure_body(id);
             if let Some(m) = self.msg(id) {
                 self.hub.put(&token, crate::share::Shared::of(m));
             }

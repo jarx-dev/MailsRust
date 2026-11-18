@@ -368,7 +368,10 @@ fn get_email(env: &Env, base: &str, key_gen: u64, args: &Value) -> Result<String
         }
         let known = m.iter().find(|(t, s)| t.starts_with(crate::share::AGENT_LINK) && s.id == id).map(|(t, _)| t.clone());
         let token = known.unwrap_or_else(|| format!("{}{}", crate::share::AGENT_LINK, crate::share::new_token()));
-        m.insert(token.clone(), Shared::of(&msg));
+        // (a late copy with only the header never replaces the whole message shared before)
+        if !m.contains_key(&token) || !msg.partial {
+            m.insert(token.clone(), Shared::of(&msg));
+        }
         token
     };
     let link = format!("{base}/m/{token}");
@@ -424,6 +427,9 @@ fn create_draft(env: &Env, args: &Value) -> Result<String, String> {
         v => Some(message_id(env, v)?),
     };
     let (to, cc, subject) = (text("to"), text("cc"), text("subject"));
+    if subject.chars().count() > 2000 || text("from").chars().count() > 2000 {
+        return Err("`subject` or `from` is too long (2000 characters at most).".into());
+    }
     if reply_to.is_some() && !(to.is_empty() && cc.is_empty() && subject.is_empty()) {
         return Err("In a reply Poczta sets the recipients and the subject itself. To write to someone else, create a new draft without `reply_to`.".into());
     }
