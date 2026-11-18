@@ -77,6 +77,7 @@ cal:
     clash: "W tym samym czasie: %{title}"
     clash_more: "W tym samym czasie: %{title} (+%{n})"
     goes_to: "Odpowiedź pójdzie mailem do %{who}"
+    no_reply: "Nie udało się przygotować odpowiedzi: brak pliku kalendarza zaproszenia albo nie podaje on organizatora"
     mail_accepted: "Przyjęto: %{title}"
     mail_tentative: "Wstępnie przyjęto: %{title}"
     mail_declined: "Odrzucono: %{title}"

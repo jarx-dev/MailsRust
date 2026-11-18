@@ -1030,7 +1030,7 @@ impl MailApp {
                     // a whole-day event in Google: kept as one event a day, all with its id (read
                     // up to 31 days: a longer one is not changed here, or saving would shorten it)
                     let same: Vec<NaiveDate> = if e.all_day && !e.gid.is_empty() { self.store.events.iter().filter(|x| x.gid == e.gid).map(|x| x.date).collect() } else { vec![e.date] };
-                    if e.google && (e.gid.is_empty() || same.len() >= 31) {
+                    if e.google && (e.gid.is_empty() || same.len() > 31) {
                         let when = if e.all_day { t!("ui.sidebar.all_day").into_owned() } else { format!("{} – {}", e.start.format("%H:%M"), (e.start + Duration::minutes(e.minutes)).format("%H:%M")) };
                         let place = if e.location.is_empty() { String::new() } else { format!(" · {}", e.location) };
                         self.set_status(t!("ui.sidebar.google_event", title = e.title, when = when, place = place));

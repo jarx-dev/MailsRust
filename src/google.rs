@@ -165,7 +165,8 @@ pub fn calendar_events(acc: &Account) -> Result<(Vec<Event>, std::collections::H
                 let title = e["summary"].as_str().filter(|t| !t.trim().is_empty()).map(String::from).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
                 let location = e["location"].as_str().unwrap_or_default().to_string();
                 let editable = primary && e["recurringEventId"].is_null();
-                let days = if all_day { (en.date() - s.date()).num_days().clamp(1, 31) } else { 1 };
+                // (one day over the editor's 31: a longer event shows as one the editor leaves alone)
+                let days = if all_day { (en.date() - s.date()).num_days().clamp(1, 32) } else { 1 };
                 for k in 0..days {
                     let day = s.date() + Duration::days(k);
                     let minutes = if all_day { 24 * 60 } else { (en - s).num_minutes().min(24 * 60 - (s.time() - NaiveTime::MIN).num_minutes()).max(15) };

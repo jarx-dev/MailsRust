@@ -138,7 +138,10 @@ fn file_url(path: &std::path::Path) -> String {
 /// A formatted email shown in its own window (`hwnd`), filling `rect` of it.
 pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::WebView, wry::WebContext), String> {
     let html = prepare(m).ok_or("brak wersji sformatowanej")?;
-    let path = crate::model::cache_put(html.as_bytes(), "html");
+    // (one file a message: every page differs by its script's number, so a name made from the
+    // content would leave a new file at each opening)
+    let path = crate::model::cache_dir().join(format!("reader-{}.html", m.id)).to_string_lossy().into_owned();
+    std::fs::write(&path, html.as_bytes()).map_err(|e| e.to_string())?;
     let dir = data_dir(false);
     let mut context = wry::WebContext::new(dir);
     let start = file_url(std::path::Path::new(&path));
@@ -376,10 +379,11 @@ fn theme() -> wry::Theme {
 /// (it carries `nonce`, a number made anew for every page, which an email cannot know).
 fn only_own_script(html: &mut String, nonce: &str) {
     let rule = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'\">");
-    // The rule holds for what comes after it, so it goes first: past the comments and blanks
-    // the page starts with, and right after the doctype when that comes next (ahead of the
-    // doctype it would change how the page is laid out). A comment not closed: the very first
-    // thing. It can never land inside a comment or after the email's own text or tags.
+    // The rule holds for what comes after it, so it is the very first thing of the page, before
+    // anything of the email (however its comments end). Only the email's own doctype goes ahead
+    // of it, copied there (the one written later is then ignored): a tag before the doctype
+    // would change how the page is laid out. The doctype counts when only blanks and comments
+    // stand before it.
     let lower = html.to_ascii_lowercase();
     let mut at = 0;
     loop {
@@ -389,16 +393,11 @@ fn only_own_script(html: &mut String, nonce: &str) {
         }
         match lower[at..].find("-->") {
             Some(e) => at += e + 3,
-            None => {
-                at = 0;
-                break;
-            }
+            None => break,
         }
     }
-    if lower[at..].starts_with("<!doctype") {
-        at = lower[at..].find('>').map_or(0, |e| at + e + 1);
-    }
-    html.insert_str(at, &rule);
+    let doctype = lower[at..].starts_with("<!doctype").then(|| lower[at..].find('>').map(|e| html[at..at + e + 1].to_string())).flatten();
+    html.insert_str(0, &format!("{}{rule}", doctype.unwrap_or_default()));
 }
 
 impl MailView {
@@ -671,18 +670,26 @@ mod tests {
             only_own_script(&mut h, "n1");
             h.find("Content-Security-Policy").unwrap()
         };
-        // after the doctype, before the email's own first tag
+        // the email's doctype copied ahead of the rule, then the email as it was
         let mut h = "<!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>".to_string();
         only_own_script(&mut h, "n1");
-        assert!(h.starts_with("<!-- note -->\r\n<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\""));
-        assert!(h.contains("script-src 'nonce-n1'") && h.ends_with("<html><script>x()</script>"));
-        // something of the email before the doctype, or no doctype: the rule is the very first thing
-        assert_eq!(rule_at("<script>x()</script><!doctype html><p>a"), "<meta http-equiv=\"".len());
-        assert_eq!(rule_at("<p onclick=\"x()\">a"), "<meta http-equiv=\"".len());
-        assert_eq!(rule_at("x<!doctype html><html><head><script>x()</script>"), "<meta http-equiv=\"".len());
-        // a doctype written inside a comment is not one: after the comment, before the email
-        assert_eq!(rule_at("<!-- <!doctype html> --><html><body><script>x()</script>"), "<!-- <!doctype html> --><meta http-equiv=\"".len());
-        assert_eq!(rule_at("<!-- not closed <!doctype html><script>x()</script>"), "<meta http-equiv=\"".len());
+        assert!(h.starts_with("<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\""));
+        assert!(h.contains("script-src 'nonce-n1'") && h.ends_with("\"><!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>"));
+        // anything else: the rule is the very first thing, before all of the email
+        let first = "<meta http-equiv=\"".len();
+        for page in [
+            "<script>x()</script><!doctype html><p>a",
+            "<p onclick=\"x()\">a",
+            "x<!doctype html><html><head><script>x()</script>",
+            "<!-- <!doctype html> --><html><body><script>x()</script>",
+            "<!-- not closed <!doctype html><script>x()</script>",
+            // a comment ended the other way the browser knows: still before its script
+            "<!--x--!><script>x()</script><!--y--><html><head></head>",
+        ] {
+            assert_eq!(rule_at(page), first, "{page}");
+        }
+        // (a doctype the scan takes from a comment ended so only moves to the front: the rule still leads the email)
+        assert_eq!(rule_at("<!--x--!><script>x()</script><!--y--><!doctype html>"), "<!doctype html>".len() + first);
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);

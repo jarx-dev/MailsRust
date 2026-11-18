@@ -211,9 +211,10 @@ fn open_with_windows(path: &std::path::Path) {
 
 /// The calendar read anew: its events, and the calendar-file ids of the meetings Google has.
 type CalRead = Result<(Vec<Event>, HashSet<String>), String>;
-/// What Google says about an invitation: the meeting's id, whether an answer was being given,
-/// and the answer there (None: no such meeting or guest) or why it could not be had or given.
-type InviteNews = (String, bool, Result<Option<String>, String>);
+/// What Google says about an invitation: the meeting's id, what the answer is kept under (see
+/// `Invitation::key`), whether an answer was being given, and the answer there (None: no such
+/// meeting or guest) or why it could not be had or given.
+type InviteNews = (String, String, bool, Result<Option<String>, String>);
 
 pub struct MailApp {
     store: Store,
@@ -938,7 +939,9 @@ tel.: 600-100-200".into();
                 m.attachment_files.push(file);
             }
             // answered "maybe" already, and something else in the calendar during the meeting
-            app.invite_said.insert("invite-1@example.com".into(), "tentative".into());
+            if let Some(inv) = crate::gcal::invitation(crate::gcal::SAMPLE_INVITE) {
+                app.invite_said.insert(inv.key(), "tentative".into());
+            }
             let start = chrono::Utc::now().date_naive().and_hms_opt(9, 15, 0).unwrap().and_utc().with_timezone(&Local).naive_local();
             let id = app.store.new_id();
             app.store.events.push(Event { id, title: "Stand-up".into(), date: start.date(), start: start.time(), minutes: 15, location: String::new(), color: 1, google: false, all_day: false, gid: String::new() });

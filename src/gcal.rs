@@ -136,17 +136,18 @@ fn parse_duration(s: &str) -> Option<i64> {
             _ => {
                 let n: i64 = num.parse().unwrap_or(0);
                 num.clear();
-                total += n * match c {
+                total = total.saturating_add(n.saturating_mul(match c {
                     'W' => 7 * 24 * 60,
                     'D' => 24 * 60,
                     'H' => 60,
                     'M' => 1,
                     _ => 0,
-                };
+                }));
             }
         }
     }
-    Some(total)
+    // (at most a year: a file from an email must not make the times overflow)
+    Some(total.min(366 * 24 * 60))
 }
 
 /// A repeat rule (RRULE), the parts Google uses.
@@ -200,6 +201,14 @@ fn parse_rule(s: &str) -> Rule {
             _ => {}
         }
     }
+    // (each day once and no more than a month has: repeated ones would only cost time)
+    let mut days = Vec::new();
+    r.by_day.retain(|d| !days.contains(d) && days.len() < 35 && {
+        days.push(*d);
+        true
+    });
+    r.by_month_day.dedup();
+    r.by_month_day.truncate(31);
     r
 }
 
@@ -239,7 +248,8 @@ impl Shift {
                     _ => NaiveDate::from_ymd_opt(year, month, self.start.day()),
                 };
                 if let Some(d) = day.map(|d| d.and_time(self.start.time())) {
-                    if d >= self.start && d <= t && r.until.is_none_or(|u| d.date() <= u) {
+                    // (UNTIL is in universal time, read on this computer's clock: a day of slack)
+                    if d >= self.start && d <= t && r.until.is_none_or(|u| d.date() <= u + Duration::days(1)) {
                         at.push(d);
                     }
                 }
@@ -440,7 +450,7 @@ fn unfold(ics: &str) -> String {
     ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "")
 }
 
-/// The e-mail address of a calendar person (`mailto:a@b`), lower-case; "" when it is not one
+/// The e-mail address of a calendar person (`mailto:a@b`); "" when it is not one
 /// address (an answer is sent to it: never to a list).
 fn mailto(value: &str) -> String {
     let v = value.trim();
@@ -449,7 +459,8 @@ fn mailto(value: &str) -> String {
         _ => v,
     };
     let v = v.trim();
-    if v.parse::<lettre::Address>().is_ok() && !v.contains([',', ';']) { v.to_lowercase() } else { String::new() }
+    // (as written: a mail server may tell the letters of the part before @ apart)
+    if v.parse::<lettre::Address>().is_ok() && !v.contains([',', ';']) { v.to_string() } else { String::new() }
 }
 
 /// The answer to an invitation for its organiser (iTIP `REPLY`, RFC 5546): the meeting named as
@@ -532,13 +543,28 @@ pub struct Invitation {
     pub cancelled: bool,
     /// an invitation asking for an answer (not somebody's answer or a plain calendar file)
     pub asks: bool,
-    /// who to answer (an e-mail address, lower-case; "" when it does not say)
+    /// who to answer (an e-mail address; "" when it does not say)
     pub organizer: String,
     /// how new this word about the meeting is: the organiser's change count and when it was
     /// written (an older email must not undo a newer one)
     pub version: (i64, String),
-    /// about one day of a repeating meeting only (not the series)
-    pub instance: bool,
+    /// about one day of a repeating meeting only (its RECURRENCE-ID as written; "" for the meeting itself)
+    pub recurrence: String,
+    /// older than what the calendar already knows of the meeting (shown, not answered)
+    pub stale: bool,
+}
+
+impl Invitation {
+    /// About one day of a repeating meeting only (not the series).
+    pub fn instance(&self) -> bool {
+        !self.recurrence.is_empty()
+    }
+
+    /// What an answer is kept under: the meeting (or its one day) as of this change of it (a
+    /// meeting moved by its organiser asks for the answer anew).
+    pub fn key(&self) -> String {
+        format!("{}\u{1f}{}\u{1f}{}", self.uid, self.recurrence, self.version.0)
+    }
 }
 
 /// The meeting of an invitation's calendar file (its first event), if it is one.
@@ -574,7 +600,8 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
         asks: method == "REQUEST",
         organizer: get("ORGANIZER").map(|p| mailto(&p.value)).unwrap_or_default(),
         version: (get("SEQUENCE").and_then(|p| p.value.trim().parse().ok()).unwrap_or(0), get("DTSTAMP").map(|p| p.value.trim().to_string()).unwrap_or_default()),
-        instance: get("RECURRENCE-ID").is_some(),
+        recurrence: get("RECURRENCE-ID").map(|p| p.value.trim().to_string()).unwrap_or_default(),
+        stale: false,
     })
 }
 
@@ -1151,8 +1178,13 @@ mod tests {
         let _ = parse(&bad.replace("DTSTART;VALUE=DATE:2026112ż", "DTSTART:20261120T090000Z"), 0, today, today + Duration::days(400));
         // the newest word wins; one day of a series is told apart
         let i = invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:3\r\nDTSTAMP:20261118T070000Z\r\nRECURRENCE-ID:20261127T090000Z\r\nUID:")).unwrap();
-        assert_eq!((i.version.0, i.version.1.as_str(), i.instance), (3, "20261118T070000Z", true));
-        assert!(!invitation(SAMPLE_INVITE).unwrap().instance);
+        assert_eq!((i.version.0, i.version.1.as_str(), i.instance(), i.recurrence.as_str()), (3, "20261118T070000Z", true, "20261127T090000Z"));
+        assert!(!invitation(SAMPLE_INVITE).unwrap().instance());
+        // an answer is kept per meeting, its one day and its change count
+        assert_ne!(i.key(), invitation(SAMPLE_INVITE).unwrap().key());
+        assert_ne!(invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:1\r\nUID:")).unwrap().key(), invitation(SAMPLE_INVITE).unwrap().key());
+        // a length of a thousand years is cut to one
+        assert_eq!(parse_duration("P99999999999999W"), Some(366 * 24 * 60));
         // summer time ending on "the Sunday among the 25th–31st" (as older programs write the last Sunday)
         let z = zones("BEGIN:VTIMEZONE\r\nTZID:W\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=25,26,27,28,29,30,31;BYDAY=SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=-7,-6,-5,-4,-3,-2,-1;BYDAY=SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n");
         let at = |m, d, h| NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(h, 0, 0).unwrap();

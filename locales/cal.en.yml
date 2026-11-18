@@ -73,6 +73,7 @@ cal:
     clash: "At the same time: %{title}"
     clash_more: "At the same time: %{title} (+%{n})"
     goes_to: "The answer goes by email to %{who}"
+    no_reply: "The answer could not be made: the invitation's calendar file is missing or does not say who organises the meeting"
     mail_accepted: "Accepted: %{title}"
     mail_tentative: "Tentative: %{title}"
     mail_declined: "Declined: %{title}"
