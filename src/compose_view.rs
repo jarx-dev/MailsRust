@@ -506,9 +506,15 @@ fn esc(s: &str) -> String {
 }
 
 /// The editor page: `content` is what the field starts with (text, signature, quoted message).
+/// Only the page's own script runs (CSP with a nonce): a quoted or draft email keeps its
+/// `onerror=`, `javascript:` links and the like, and they must not touch the draft.
 pub fn page(content: &str) -> String {
+    // one nonce per run: the same page then stays one file in the cache (`body_of` removes every
+    // `<script` of the email, so knowing the nonce gives an email nothing to run)
+    static NONCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let nonce = NONCE.get_or_init(crate::share::new_token);
     format!(
-        r##"<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="color-scheme" content="light">
+        r##"<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'"><meta name="color-scheme" content="light">
 <style>
 html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:#222;color-scheme:light}}
 #pz-bar{{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:1px;padding:4px 6px;background:#fff;border-bottom:1px solid #e6e8eb;user-select:none;font-family:'Segoe UI',Arial,sans-serif}}
@@ -579,7 +585,7 @@ html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font
 <div id="pz-ed" contenteditable="true" spellcheck="true" lang="pl">{content}</div>
 <div id="pz-img"><button data-w="-" title="{t_pic_smaller}">−</button><span id="pz-w"></span><button data-w="+" title="{t_pic_larger}">+</button><button data-w="fit" title="{t_pic_fit_tip}">{t_pic_fit}</button><button data-w="orig" title="{t_pic_orig}">100%</button><button data-w="del" title="{t_pic_remove}">🗑</button></div>
 <div id="pz-handle" title="{t_drag}"></div>
-<script>
+<script nonce="{nonce}">
 var pzPtr=0;
 document.addEventListener('pointerdown',function(){{pzPtr=Date.now();try{{location.href='pzfocus://in'}}catch(e){{}}}},true);
 window.pzWant=function(){{pzPtr=Date.now();}};
@@ -700,6 +706,7 @@ window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,bloc
 }})();
 </script></body></html>"##,
         content = content,
+        nonce = nonce,
         // the texts of the page (made when the window opens: a language switch reaches new windows)
         t_bold = t!("compose.view.bold"),
         t_italic = t!("compose.view.italic"),
