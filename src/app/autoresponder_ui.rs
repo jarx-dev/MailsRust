@@ -6,7 +6,7 @@ type Answer = Result<(Rules, String), String>;
 /// A day as typed in the form (DD-MM-RRRR), if it is one.
 fn typed_day(s: &str) -> Option<chrono::NaiveDate> {
     use chrono::Datelike;
-    chrono::NaiveDate::parse_from_str(s.trim(), "%d-%m-%Y").ok().filter(|d| d.year() >= 2000)
+    chrono::NaiveDate::parse_from_str(s.trim(), "%d-%m-%Y").ok().filter(|d| (2000..10000).contains(&d.year()))
 }
 
 /// The button next to a day, and the calendar it opens under itself (over the form, which stays
@@ -18,9 +18,17 @@ fn pick_day(ui: &mut Ui, store: &crate::model::Store, picking: &mut Option<(bool
         *picking = (!open).then(|| (end, typed_day(typed).unwrap_or_else(|| chrono::Local::now().date_naive())));
     }
     let (_, shown) = picking.as_mut().filter(|(e, _)| *e == end)?;
+    // Escape closes the calendar only (the dialog would close too, and drop the form)
+    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        *picking = None;
+        return None;
+    }
     let (mut still, mut picked) = (true, None);
-    let sel = typed_day(typed).unwrap_or(*shown);
-    egui::Popup::from_response(&resp).open_bool(&mut still).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    let sel = typed_day(typed).unwrap_or(chrono::NaiveDate::MIN);
+    let popup = egui::Popup::from_response(&resp);
+    // (kept right above the dialog, which a press on the form would otherwise raise over it)
+    ui.ctx().set_sublayer(ui.layer_id(), egui::LayerId::new(egui::Order::Foreground, egui::Popup::default_response_id(&resp)));
+    popup.open_bool(&mut still).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         picked = crate::calendar::day_picker(ui, if end { "auto-to" } else { "auto-from" }, store, shown, sel);
     });
     if !still {
@@ -94,6 +102,8 @@ impl AutoUi {
         });
         self.busy = Some((what, rx));
         self.said = None;
+        // (its answer replaces the form under an open calendar)
+        self.picking = None;
     }
 
     fn load(&mut self, ctx: &egui::Context) {
@@ -184,9 +194,9 @@ impl MailApp {
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut a.from).desired_width(96.0));
                         if let Some(d) = pick_day(ui, store, &mut a.picking, false, &a.from) {
-                            // the start picked: the end next, at least that day
+                            // the start picked: the end next, at least that day (a mistyped end stays to be fixed)
                             a.from = d.format("%d-%m-%Y").to_string();
-                            if typed_day(&a.to).is_none_or(|t| t < d) {
+                            if typed_day(&a.to).map_or(a.to.trim().is_empty(), |t| t < d) {
                                 a.to = a.from.clone();
                             }
                             a.picking = Some((true, d));
