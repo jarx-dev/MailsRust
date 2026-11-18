@@ -73,6 +73,8 @@ compose:
     pic_orig: "Oryginalny rozmiar"
     drag: "Przeciągnij, aby zmienić rozmiar"
     link_prompt: "Adres linku:"
+    link_edit: "Zmień adres"
+    link_remove: "Usuń link"
   ask:
     save_changes_q: "Zapisać zmiany w szkicu?"
     keep_q: "Zachować wiadomość jako szkic?"

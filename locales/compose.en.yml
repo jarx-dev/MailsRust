@@ -73,6 +73,8 @@ compose:
     pic_orig: "Original size"
     drag: "Drag to resize"
     link_prompt: "Link address:"
+    link_edit: "Change address"
+    link_remove: "Remove link"
   ask:
     save_changes_q: "Save changes to the draft?"
     keep_q: "Keep the message as a draft?"
