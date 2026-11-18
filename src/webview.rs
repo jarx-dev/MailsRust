@@ -501,7 +501,8 @@ impl MailView {
     fn build_in(&mut self, frame: &eframe::Frame, dir: Option<std::path::PathBuf>) -> Result<(wry::WebView, wry::WebContext), String> {
         let mut context = wry::WebContext::new(dir);
         let (keys, wake) = (self.keys.0.clone(), self.wake.clone());
-        let (page, page2) = (page_path(), page_path());
+        let page = page_path();
+        let page2 = page.clone();
         let (loaded, wake2, asked) = (self.loaded.clone(), self.wake.clone(), self.asked.clone());
         let built = wry::WebViewBuilder::new_with_web_context(&mut context)
             .with_on_page_load_handler(move |e, _| {
@@ -551,14 +552,15 @@ impl MailView {
                 let Some(args) = args else { return Ok(()) };
                 let mut from = PWSTR::null();
                 args.Source(&mut from)?;
+                // (taken at once: a message that is not text ends below with an error)
+                if !is_page(&webview2_com::take_pwstr(from), &page2) {
+                    return Ok(());
+                }
                 let mut text = PWSTR::null();
                 args.TryGetWebMessageAsString(&mut text)?;
-                let (from, text) = (webview2_com::take_pwstr(from), webview2_com::take_pwstr(text));
-                if is_page(&from, &page2) {
-                    let _ = keys.send(text);
-                    if let Some(c) = &wake {
-                        c.request_repaint();
-                    }
+                let _ = keys.send(webview2_com::take_pwstr(text));
+                if let Some(c) = &wake {
+                    c.request_repaint();
                 }
                 Ok(())
             }));

@@ -609,7 +609,7 @@ bar.addEventListener('click',e=>{{
  if(b.dataset.c){{document.execCommand(b.dataset.c,false,null);}}
  else if(b.dataset.size){{let cur=parseInt(document.queryCommandValue('fontSize'))||3;document.execCommand('fontSize',false,Math.max(1,Math.min(7,cur+parseInt(b.dataset.size))));}}
  else if(b.dataset.block){{const cur=(document.queryCommandValue('formatBlock')||'').toLowerCase();document.execCommand('formatBlock',false,cur===b.dataset.block?'div':b.dataset.block);}}
- else if(b.id==='pz-link'){{const a=linkAt(),u=prompt('{t_link_prompt}',a?a.getAttribute('href')||'':'https://');if(u&&a)a.setAttribute('href',u.trim());else if(u)document.execCommand('createLink',false,u);}}
+ else if(b.id==='pz-link'){{const a=linkAt(),u=prompt('{t_link_prompt}',a?a.getAttribute('href')||'':'https://');if(u!==null&&a)setLink(a,u.trim());else if(u&&u.trim())document.execCommand('createLink',false,u.trim());}}
  else if(b.id==='pz-col'){{const r=b.getBoundingClientRect();cols.style.left=r.left+'px';cols.style.top=(r.bottom+4)+'px';cols.style.display=cols.style.display==='flex'?'none':'flex';return;}}
  sync();
 }});
@@ -672,7 +672,7 @@ document.addEventListener('drop',e=>{{
  fs.forEach(readImg);
 }});
 let sel=null;
-function select(img){{if(sel)sel.classList.remove('pz-sel');sel=img;if(img)img.classList.add('pz-sel');place();}}
+function select(img){{if(sel)sel.classList.remove('pz-sel');sel=img;if(img)img.classList.add('pz-sel');place();showLink();}}
 ed.addEventListener('click',e=>{{select(e.target.tagName==='IMG'?e.target:null);}});
 function place(){{
  if(!sel||!document.body.contains(sel)){{box.style.display='none';handle.style.display='none';sel=null;return;}}
@@ -700,18 +700,23 @@ document.addEventListener('mouseup',()=>{{drag=null;}});
 ed.addEventListener('keydown',e=>{{if(sel&&(e.key==='Delete'||e.key==='Backspace')){{e.preventDefault();sel.remove();select(null);sync();}}}});
 // ---- a link under the cursor: its address shown under it, to change or to take off (its words
 // are edited as any text)
-const abox=document.getElementById('pz-a'),ahref=document.getElementById('pz-ah');
-function linkAt(){{const s=getSelection();let n=s.rangeCount?s.anchorNode:null;if(n&&n.nodeType===3)n=n.parentNode;const a=n&&n.closest?n.closest('a'):null;return a&&ed.contains(a)?a:null;}}
+// (the last of that name: an id in a quoted email comes before it and must not take its place)
+const abox=[...document.querySelectorAll('#pz-a')].pop(),ahref=abox.querySelector('#pz-ah');
+// (the link the whole selection is in, whichever way it was made; none when it crosses its edge)
+function linkAt(){{const s=getSelection();if(!s.rangeCount)return null;let n=s.getRangeAt(0).commonAncestorContainer;if(n.nodeType===3)n=n.parentNode;const a=n.closest?n.closest('a'):null;return a&&ed.contains(a)?a:null;}}
+// a new address for link `a` (empty: the link taken off, its words kept), by the editor's own
+// commands, so Ctrl+Z takes it back
+function setLink(a,u){{const r=document.createRange();r.selectNodeContents(a);const s=getSelection();s.removeAllRanges();s.addRange(r);
+ document.execCommand(u?'createLink':'unlink',false,u||null);s.collapseToEnd();sync();showLink();}}
 let link=null;
 function showLink(){{link=linkAt();if(!link||sel){{abox.style.display='none';return;}}
  ahref.textContent=link.getAttribute('href')||'';ahref.title=ahref.textContent;abox.style.display='flex';
  const r=link.getBoundingClientRect();abox.style.left=Math.max(4,Math.min(r.left,innerWidth-abox.offsetWidth-8)+scrollX)+'px';abox.style.top=(r.bottom+scrollY+4)+'px';}}
-document.addEventListener('selectionchange',showLink);window.addEventListener('scroll',showLink);
+document.addEventListener('selectionchange',showLink);window.addEventListener('scroll',showLink);window.addEventListener('resize',showLink);
 abox.addEventListener('mousedown',e=>e.preventDefault());
-abox.addEventListener('click',e=>{{const b=e.target.closest('button');if(!b||!link)return;
- if(b.dataset.a==='edit'){{const u=prompt('{t_link_prompt}',link.getAttribute('href')||'');if(u===null)return;if(u.trim())link.setAttribute('href',u.trim());else link.replaceWith(...link.childNodes);}}
- else link.replaceWith(...link.childNodes);
- sync();showLink();}});
+abox.addEventListener('click',e=>{{const b=e.target.closest('button');if(!b||!link||!ed.contains(link))return;
+ if(b.dataset.a==='edit'){{const u=prompt('{t_link_prompt}',link.getAttribute('href')||'');if(u!==null)setLink(link,u.trim());}}
+ else setLink(link,'');}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();
 </script></body></html>"##,
