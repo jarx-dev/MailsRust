@@ -18,19 +18,21 @@ fn pick_day(ui: &mut Ui, store: &crate::model::Store, picking: &mut Option<(bool
         *picking = (!open).then(|| (end, typed_day(typed).unwrap_or_else(|| chrono::Local::now().date_naive())));
     }
     let (_, shown) = picking.as_mut().filter(|(e, _)| *e == end)?;
-    // Escape closes the calendar only (the dialog would close too, and drop the form)
-    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    // Escape closes the calendar only (the dialog would close too, and drop the form); so does
+    // scrolling its button out of sight (the calendar would stay, pointing at nothing)
+    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) || !resp.interact_rect.is_positive() {
         *picking = None;
         return None;
     }
     let (mut still, mut picked) = (true, None);
     let sel = typed_day(typed).unwrap_or(chrono::NaiveDate::MIN);
-    let popup = egui::Popup::from_response(&resp);
-    // (kept right above the dialog, which a press on the form would otherwise raise over it)
-    ui.ctx().set_sublayer(ui.layer_id(), egui::LayerId::new(egui::Order::Foreground, egui::Popup::default_response_id(&resp)));
-    popup.open_bool(&mut still).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    let shown_popup = egui::Popup::from_response(&resp).open_bool(&mut still).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         picked = crate::calendar::day_picker(ui, if end { "auto-to" } else { "auto-from" }, store, shown, sel);
     });
+    // (kept right above the dialog, which a press on the form would otherwise raise over it)
+    if let Some(r) = shown_popup {
+        ui.ctx().set_sublayer(ui.layer_id(), r.response.layer_id);
+    }
     if !still {
         *picking = None;
     }
@@ -199,7 +201,7 @@ impl MailApp {
                             if typed_day(&a.to).map_or(a.to.trim().is_empty(), |t| t < d) {
                                 a.to = a.from.clone();
                             }
-                            a.picking = Some((true, d));
+                            a.picking = Some((true, typed_day(&a.to).unwrap_or(d)));
                         }
                         ui.label("–");
                         ui.add(egui::TextEdit::singleline(&mut a.to).desired_width(96.0));
