@@ -18,7 +18,7 @@ fn queue_dir() -> PathBuf {
 pub fn from_args(args: &[String]) -> Vec<String> {
     args.iter()
         .skip(1)
-        .filter(|a| a.to_lowercase().ends_with(".eml") && std::path::Path::new(a).is_file())
+        .filter(|a| a.to_lowercase().ends_with(".eml"))
         .filter_map(|a| std::path::absolute(a).ok())
         .map(|p| p.to_string_lossy().into_owned())
         .collect()

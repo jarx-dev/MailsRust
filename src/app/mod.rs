@@ -234,6 +234,8 @@ pub struct MailApp {
     files: (Sender<reading::FileRead>, Receiver<reading::FileRead>),
     /// how many of them are not opened yet
     files_pending: usize,
+    /// a file came: the main window is brought back once (minimized again after that, it stays)
+    files_show: bool,
     /// attachments shown in windows of their own
     previews: Vec<PreviewWin>,
     /// address suggestions for the recipients boxes, and the mailbox size they were made for
@@ -528,6 +530,7 @@ impl MailApp {
             readers: vec![],
             files: channel(),
             files_pending: 0,
+            files_show: false,
             previews: vec![],
             contacts: Default::default(),
             contacts_sig: (0, 0),

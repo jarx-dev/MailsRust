@@ -1054,13 +1054,20 @@ impl MailApp {
         }
         // (counted until opened: an update waits for them, see `install_update`)
         self.files_pending += files.len();
+        self.files_show = true;
         let (tx, ctx) = (self.files.0.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             for path in files {
                 let name = std::path::Path::new(&path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-                // (an email file is a few MB; a huge one is not read whole into the app's memory)
-                let small = std::fs::metadata(&path).is_ok_and(|m| m.len() <= 200 << 20);
-                let _ = tx.send(small.then(|| std::fs::read(&path).ok()).flatten().and_then(|raw| crate::net::parse(&raw, true, false)).ok_or(name));
+                // (an email file is a few MB; a huge one is not read whole into the app's memory;
+                // a crash in the parser comes back as "unreadable", or the count would never drop)
+                let read = || -> Option<Message> {
+                    use std::io::Read;
+                    let mut raw = vec![];
+                    std::fs::File::open(&path).ok()?.take((200 << 20) + 1).read_to_end(&mut raw).ok()?;
+                    (raw.len() <= 200 << 20).then(|| crate::net::parse(&raw, true, false)).flatten()
+                };
+                let _ = tx.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).ok().flatten().ok_or(name));
                 ctx.request_repaint();
             }
         });
@@ -1070,16 +1077,21 @@ impl MailApp {
     /// mailbox: its id is from the top of the range, where `msg` finds it among the open windows
     /// (for reply, forward and its attachments).
     pub(super) fn files_read(&mut self) {
+        if self.files_pending == 0 {
+            return;
+        }
         // A reading window is made only while the main window is drawn (minimized or in the tray
         // it isn't), and one made before the main window comes to the front would end up under
         // it: the main window comes back first, then the message opens over it. (The accounts
         // are known once the mailbox is read: the reply's account is chosen from them.)
         let minimized = self.ctx.input(|i| i.viewport().minimized.unwrap_or(false));
-        if self.files_pending > 0 && (self.hidden || minimized) && !self.focus_pending {
+        if self.files_show && (self.hidden || minimized) && !self.focus_pending {
+            self.files_show = false;
             let ctx = self.ctx.clone();
             self.show_window(&ctx);
         }
-        if self.loading.is_some() || self.hidden || minimized || self.focus_pending {
+        // (on the first frame the main window is not on screen yet)
+        if self.drawn == 0 || self.loading.is_some() || self.hidden || minimized || self.focus_pending {
             return;
         }
         while let Ok(read) = self.files.1.try_recv() {
