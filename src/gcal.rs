@@ -606,8 +606,8 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
     let here = tzid.and_then(|z| zone_to_local(&zones(ics), z, at));
     Some(Invitation {
         uid: get("UID").map(|p| p.value.trim().to_string()).filter(|u| !u.is_empty())?,
-        title: get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()),
-        location: get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default(),
+        title: get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()).chars().take(300).collect(),
+        location: get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default().chars().take(300).collect(),
         start: here.unwrap_or(at),
         minutes,
         all_day,

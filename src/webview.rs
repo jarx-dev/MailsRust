@@ -386,11 +386,16 @@ fn only_own_script(html: &mut String, nonce: &str, head: &str) {
     let mut at = 0;
     loop {
         at = lower.len() - lower[at..].trim_start_matches([' ', '\t', '\r', '\n']).len();
-        if !lower[at..].starts_with("<!--") {
+        // (an XML prolog "<?xml …?>" is read by the browser as a comment up to its first ">")
+        let end = if lower[at..].starts_with("<!--") {
+            "-->"
+        } else if lower[at..].starts_with("<?") {
+            ">"
+        } else {
             break;
-        }
-        match lower[at..].find("-->") {
-            Some(e) => at += e + 3,
+        };
+        match lower[at..].find(end) {
+            Some(e) => at += e + end.len(),
             None => break,
         }
     }
@@ -398,7 +403,7 @@ fn only_own_script(html: &mut String, nonce: &str, head: &str) {
         .starts_with("<!doctype")
         .then(|| lower[at..].find('>').map(|e| &html[at..at + e + 1]))
         .flatten()
-        .filter(|d| d.len() <= 200 && d.bytes().all(|b| (b' '..=b'~').contains(&b)));
+        .filter(|d| d.len() <= 200 && d.bytes().all(|b| (b' '..=b'~').contains(&b) || matches!(b, b'\t' | b'\r' | b'\n')));
     // (a bare piece of HTML is laid out as a modern page, as it was when the app wrapped it)
     let doctype = doctype.map(str::to_string).unwrap_or_else(|| if lower.contains("<html") { String::new() } else { "<!doctype html>".into() });
     html.insert_str(0, &format!("{doctype}{rule}{head}"));
@@ -697,6 +702,9 @@ mod tests {
         assert_eq!(rule_at("<!--x--!><script>x()</script><!--y--><!doctype html>"), "<!doctype html>".len());
         // a bare piece of HTML is laid out as a modern page
         assert_eq!(rule_at("<p>a"), "<!doctype html>".len());
+        // a doctype over two lines, after an XML prolog, is still the email's own
+        let xhtml = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\r\n \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">";
+        assert_eq!(rule_at(&format!("<?xml version=\"1.0\"?>\r\n{xhtml}<html>")), xhtml.len());
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);

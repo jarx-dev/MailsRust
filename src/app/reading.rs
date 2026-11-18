@@ -992,7 +992,9 @@ impl MailApp {
                 }
             }
             // (the same version already in the calendar stays as it is, days called off since included)
-            if changed || !self.store.events.iter().any(|e| e.id == crate::gcal::invite_id(&inv.uid, e.date)) {
+            // shortcut: a series without an end then shows 400 days from its first reading; upgrade
+            // if open-ended meetings from accounts without Google Calendar run out
+            if changed || inv.cancelled || !self.store.events.iter().any(|e| e.id == crate::gcal::invite_id(&inv.uid, e.date)) {
                 self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
                 // (a meeting Google has, answered or declined, is shown as Google has it)
                 if !inv.cancelled && self.invite_said.get(&key).map(String::as_str) != Some("declined") && !self.gcal_uids.contains(&inv.uid) {
@@ -1076,7 +1078,8 @@ impl MailApp {
             return false;
         };
         let reply_file = crate::model::cache_put(reply.as_bytes(), "ics");
-        if !std::path::Path::new(&reply_file).exists() {
+        // (cache_put does not say when writing failed, and keeps a file a full disk cut short)
+        if !std::fs::read(&reply_file).is_ok_and(|b| b == reply.as_bytes()) && std::fs::write(&reply_file, &reply).is_err() {
             self.set_status(t!("cal.invite.no_reply"));
             return false;
         }
