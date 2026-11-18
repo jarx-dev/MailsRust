@@ -7,8 +7,10 @@ type Answer = Result<(Rules, String), String>;
 pub(super) struct AutoUi {
     /// the webhook the form was read from, and where Save writes
     link: Link,
-    /// the address and token as typed; they become `link` on "Connect"
+    /// the address and token as typed; they become `link` once "Connect" has read from them
     draft: Link,
+    /// "Connect" running: the link it tries
+    connecting: Option<Link>,
     /// the settings being edited; None until n8n answered
     rules: Option<Rules>,
     /// the days as typed (DD-MM-RRRR)
@@ -25,7 +27,7 @@ impl AutoUi {
     /// `demo`: a test run or picture, which never reads the saved webhook.
     pub(super) fn new(ctx: &egui::Context, demo: bool) -> Self {
         let link = if demo { Link::default() } else { crate::autoresponder::load() };
-        let mut a = Self { draft: link.clone(), link, rules: None, from: String::new(), to: String::new(), sentence: String::new(), busy: None, said: None };
+        let mut a = Self { draft: link.clone(), link, connecting: None, rules: None, from: String::new(), to: String::new(), sentence: String::new(), busy: None, said: None };
         if demo {
             // a filled form without n8n
             a.show(Rules {
@@ -73,6 +75,7 @@ impl AutoUi {
         let mut r = self.rules.clone().unwrap_or_default();
         r.date_start = iso_day(&self.from).unwrap_or_default();
         r.date_end = iso_day(&self.to).unwrap_or_default();
+        r.target_address = r.target_address.trim().to_string();
         r
     }
 
@@ -88,10 +91,20 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         let demo = self.shot.is_some() || crate::unseen();
         let a = self.auto_ui.get_or_insert_with(|| AutoUi::new(&ctx, demo));
-        if let Some(answer) = a.busy.as_ref().and_then(|(_, rx)| rx.try_recv().ok()) {
+        let got = match a.busy.as_ref().map(|(_, rx)| rx.try_recv()) {
+            Some(Ok(answer)) => Some(answer),
+            // (the job's thread died without an answer)
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => Some(Err(t!("core.net.unexpected").into_owned())),
+            _ => None,
+        };
+        if let Some(answer) = got {
             a.busy = None;
+            let tried = a.connecting.take();
             match answer {
                 Ok((r, m)) => {
+                    if let Some(l) = tried {
+                        a.link = l;
+                    }
                     a.show(r);
                     a.said = Some(Ok(m));
                 }
@@ -111,15 +124,15 @@ impl MailApp {
                 ui.end_row();
             });
             if ui.add_enabled(!busy && a.draft.is_set(), egui::Button::new(t!("ui.settings.autoresponder.connect")).small()).clicked() {
-                match crate::autoresponder::save(&a.draft) {
-                    Ok(()) => {
-                        // the form read from the old webhook must not be saved to the new one
-                        a.link = a.draft.clone();
-                        a.rules = None;
-                        a.load(&ctx);
-                    }
-                    Err(e) => a.said = Some(Err(e)),
-                }
+                // the new link replaces the old one (and its form) only once it has answered and
+                // is saved: a mistyped token keeps the working connection
+                let draft = a.draft.clone();
+                a.connecting = Some(draft.clone());
+                a.run(&ctx, t!("ui.settings.autoresponder.loading").into_owned(), move || {
+                    let r = crate::autoresponder::fetch(&draft)?;
+                    crate::autoresponder::save(&draft)?;
+                    Ok((r, t!("ui.settings.autoresponder.loaded").into_owned()))
+                });
             }
         });
         let mut ask = false;
@@ -184,7 +197,9 @@ impl MailApp {
                 let current_json = serde_json::to_string_pretty(&current).unwrap_or_default();
                 let answer = crate::ai::autoresponder(&crate::ai::load(), &now, &current_json, &sentence).map_err(bad)?;
                 let v = serde_json::from_str(&answer).map_err(|e| bad(e.to_string()))?;
-                let r = Rules::over(&current, v).map_err(bad)?;
+                let mut r = Rules::over(&current, v).map_err(bad)?;
+                // (who saved last is n8n's to say)
+                r.updated_by = current.updated_by.clone();
                 match r.problem() {
                     Some(p) => Err(bad(p)),
                     None => Ok((r, t!("ui.settings.autoresponder.ai_done").into_owned())),

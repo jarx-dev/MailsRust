@@ -32,9 +32,11 @@ pub struct Rules {
 impl Rules {
     /// What is wrong with them, in the person's words (n8n checks these and the texts' length, and refuses).
     pub fn problem(&self) -> Option<String> {
+        use chrono::Datelike;
         let day = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
         match (day(&self.date_start), day(&self.date_end)) {
-            (Some(a), Some(b)) if a <= b => {}
+            // (chrono's %Y takes "26" as the year 26)
+            (Some(a), Some(b)) if a <= b && a.year() >= 2000 => {}
             _ => return Some(t!("ui.settings.autoresponder.bad_dates").into_owned()),
         }
         if self.hour_start > 24 || self.hour_end > 24 || self.hour_start == self.hour_end {
@@ -124,12 +126,16 @@ fn call(l: &Link, body: serde_json::Value) -> Result<Rules, String> {
     let resp = agent.post(l.url.trim()).set("X-Poczta-Token", l.token.trim()).send_json(body).map_err(|e| match e {
         ureq::Error::Status(401, _) => t!("ui.settings.autoresponder.token_rejected").into_owned(),
         ureq::Error::Status(400, r) => {
-            let said: String = r.into_json::<serde_json::Value>().ok().and_then(|v| v["error"].as_str().map(|s| s.chars().take(300).collect())).unwrap_or_else(|| "HTTP 400".into());
+            let said: String = r.into_json::<serde_json::Value>().ok().and_then(|v| v["error"].as_str().map(|s| s.replace(l.token.trim(), "…").chars().take(300).collect())).unwrap_or_else(|| "HTTP 400".into());
             t!("ui.settings.autoresponder.rejected", error = said).into_owned()
         }
         ureq::Error::Status(code, _) => t!("ui.settings.autoresponder.unavailable", error = format!("HTTP {code}")).into_owned(),
         ureq::Error::Transport(t) => t!("ui.settings.autoresponder.unavailable", error = t.to_string()).into_owned(),
     })?;
+    // (a redirect, not followed, comes back as an answer)
+    if resp.status() != 200 {
+        return Err(t!("ui.settings.autoresponder.unavailable", error = format!("HTTP {}", resp.status())).into_owned());
+    }
     let v: serde_json::Value = resp.into_json().map_err(|_| t!("ui.settings.autoresponder.bad_answer").into_owned())?;
     if v["ok"] != true {
         return Err(t!("ui.settings.autoresponder.bad_answer").into_owned());
@@ -159,6 +165,8 @@ mod tests {
         let ok = Rules { date_start: "2026-11-19".into(), date_end: "2026-11-19".into(), hour_start: 15, hour_end: 13, target_address: "a@b.pl".into(), ..Default::default() };
         assert_eq!(ok.problem(), None);
         assert!(Rules { date_end: "2026-11-18".into(), ..ok.clone() }.problem().is_some());
+        let short_year = iso_day("19-11-26").unwrap();
+        assert!(Rules { date_start: short_year.clone(), date_end: short_year, ..ok.clone() }.problem().is_some());
         assert!(Rules { hour_end: 15, ..ok.clone() }.problem().is_some());
         assert!(Rules { hour_start: 25, ..ok.clone() }.problem().is_some());
         assert!(Rules { target_address: "a b@c".into(), ..ok.clone() }.problem().is_some());
