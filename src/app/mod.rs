@@ -232,6 +232,8 @@ pub struct MailApp {
     readers: Vec<ReaderWin>,
     /// .eml files read in the background (see `open_files`): the message, or the file's name
     files: (Sender<reading::FileRead>, Receiver<reading::FileRead>),
+    /// how many of them are not opened yet
+    files_pending: usize,
     /// attachments shown in windows of their own
     previews: Vec<PreviewWin>,
     /// address suggestions for the recipients boxes, and the mailbox size they were made for
@@ -525,6 +527,7 @@ impl MailApp {
             composers: vec![],
             readers: vec![],
             files: channel(),
+            files_pending: 0,
             previews: vec![],
             contacts: Default::default(),
             contacts_sig: (0, 0),
@@ -1783,11 +1786,9 @@ impl eframe::App for MailApp {
         }
         // the tray icon (or the program started again): show the window again, or quit for good
         if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            // started again with an email file: only its own window comes up (the main window
-            // in front of it would take the keys meant for the message)
-            if !self.open_files() {
-                self.show_window(ctx);
-            }
+            self.show_window(ctx);
+            // (started again with an email file: it opens in a window of its own, see `files_read`)
+            self.open_files();
         }
         self.files_read();
         // (eframe shows the window after its first frame: started into the tray, hidden then,

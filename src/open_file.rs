@@ -34,8 +34,9 @@ pub fn hand_over(files: &[String]) {
     let _ = std::fs::create_dir_all(&dir);
     let name = format!("{}-{}", std::process::id(), crate::share::new_token());
     let tmp = dir.join(format!("{name}.tmp"));
-    if std::fs::write(&tmp, files.join("\n")).is_ok() {
-        let _ = std::fs::rename(&tmp, dir.join(format!("{name}.txt")));
+    let done = std::fs::write(&tmp, files.join("\n")).and_then(|_| std::fs::rename(&tmp, dir.join(format!("{name}.txt"))));
+    if let Err(e) = done {
+        crate::diag::log(format!("email files: could not hand the file over ({e})"));
     }
 }
 
@@ -46,8 +47,10 @@ pub fn take() -> Vec<String> {
     let mut files = vec![];
     for e in entries.flatten() {
         let p = e.path();
-        let fresh = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() < 120);
-        let note = p.extension().is_some_and(|x| x == "txt");
+        // (only the notes `hand_over` writes; a clock set back counts as fresh)
+        let Some(ext) = p.extension().and_then(|x| x.to_str()).filter(|x| *x == "txt" || *x == "tmp") else { continue };
+        let fresh = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_none_or(|age| age.as_secs() < 120);
+        let note = ext == "txt";
         if note && fresh {
             let text = std::fs::read_to_string(&p).unwrap_or_default();
             files.extend(text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from));
@@ -92,8 +95,10 @@ pub fn register() {
         && set(r"Software\Classes\Poczta.eml\DefaultIcon", "", &format!("\"{}\",0", exe.display()))
         && set(r"Software\Classes\Poczta.eml\Application", "ApplicationName", "Poczta")
         && set(open, "", &command);
-    unsafe {
-        windows::Win32::UI::Shell::SHChangeNotify(windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED, windows::Win32::UI::Shell::SHCNF_IDLIST, None, None);
+    if ok {
+        unsafe {
+            windows::Win32::UI::Shell::SHChangeNotify(windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED, windows::Win32::UI::Shell::SHCNF_IDLIST, None, None);
+        }
     }
     crate::diag::log(if ok { "email files: Poczta added to \"Open with\" for .eml" } else { "email files: could not add Poczta to \"Open with\" for .eml" });
 }
