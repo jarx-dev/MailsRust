@@ -256,7 +256,7 @@ specjalista ds. Informatyki".into();
             self.popup_click.0.clone(),
             self.ctx.clone(),
         );
-        self.popup = Some(NewMail { ids, chat: None });
+        self.popup = Some(NewMail { ids, chat: None, day: None });
         self.ctx.request_repaint();
     }
 

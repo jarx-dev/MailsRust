@@ -53,6 +53,8 @@ cal:
     script_no_people: "the script is missing the People API service — in the script editor: Services (+) → People API → Add, then Deploy → Manage deployments → new version"
     script_other_key: "the script has a different key — copy the script from the app again and redeploy it"
     script_error: "script: %{err}"
+  remind:
+    head: "Meeting at %{time}"
   invite:
     not_in_calendar: "this meeting is not in your Google calendar"
     not_invited: "this account is not among the meeting's guests"

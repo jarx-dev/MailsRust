@@ -83,6 +83,8 @@ struct Prefs {
     no_reply_needed: Vec<u64>,
     /// answers to invitations sent by email (meeting id, answer), newest last
     invite_answers: Vec<(String, String)>,
+    /// a note in the corner 10 minutes before each meeting of the calendar
+    meeting_reminders: bool,
     /// the calendar and the contacts shared with Google (through the Google sign-in)
     google_calendar: bool,
     google_contacts: bool,
@@ -120,6 +122,7 @@ impl Default for Prefs {
             gcal_key: String::new(),
             no_reply_needed: vec![],
             invite_answers: vec![],
+            meeting_reminders: true,
             google_calendar: true,
             google_contacts: true,
             google_chat: true,
@@ -149,11 +152,13 @@ enum SideMode {
     History,
 }
 
-/// New mail (or a chat message) just received, told about in a note in the corner of the screen.
+/// New mail (or a chat message, or a meeting soon) just received, told about in a note in the corner of the screen.
 struct NewMail {
     ids: Vec<u64>,
     /// the chat conversation the note is about
     chat: Option<String>,
+    /// the day of the meeting the note reminds of (a click shows it in the calendar)
+    day: Option<NaiveDate>,
 }
 
 /// A small outlined folder symbol for a group of tags.
@@ -450,6 +455,12 @@ pub struct MailApp {
     invite_said: HashMap<String, String>,
     invite_asked: HashSet<String>,
     invite_rx: Option<(Sender<InviteNews>, Receiver<InviteNews>)>,
+    /// meetings already reminded of in this run (title and start: the same meeting from an
+    /// invitation and from Google counts once), when to look again, and how many events there
+    /// were then (a new one is looked at at once)
+    reminded: HashSet<(String, NaiveDateTime)>,
+    remind_next: f64,
+    remind_events: usize,
     /// ending for good (not just closing the window)
     quitting: bool,
     /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
@@ -666,6 +677,9 @@ impl MailApp {
             invite_said: HashMap::new(),
             invite_asked: HashSet::new(),
             invite_rx: None,
+            reminded: HashSet::new(),
+            remind_next: 0.0,
+            remind_events: 0,
             quitting: false,
             hidden: false,
             start_hidden: false,
@@ -900,6 +914,12 @@ tel.: 600-100-200".into();
                     cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(("rcpt-open", id)), true));
                 }
             }
+        }
+        if std::env::var("POCZTA_START").as_deref() == Ok("remind") {
+            // test: a meeting in 5 minutes (the log says it was reminded of, once)
+            let at = Local::now().naive_local() + Duration::minutes(5);
+            let id = app.store.new_id();
+            app.store.events.push(Event { id, title: "Reminder test".into(), date: at.date(), start: at.time(), minutes: 30, location: String::new(), color: 2, google: false, all_day: false, gid: String::new() });
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("invite") {
             // test picture: the open message is an invitation to a meeting today
@@ -1733,6 +1753,7 @@ impl eframe::App for MailApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
         self.gcal_tick();
+        self.meeting_reminders();
         self.book_tick();
         self.chat_tick();
         if std::env::var("POCZTA_NOTIFY_TEST").is_ok() {
@@ -1764,7 +1785,11 @@ impl eframe::App for MailApp {
         if self.popup_click.1.try_iter().count() > 0 {
             if let Some(p) = self.popup.take() {
                 self.show_window(ctx);
-                if let Some(space) = p.chat {
+                if let Some(day) = p.day {
+                    self.module = Module::Calendar;
+                    self.cal_day = day;
+                    self.mini_shown = day;
+                } else if let Some(space) = p.chat {
                     self.module = Module::Chat;
                     self.chat_open(space);
                 } else {

@@ -281,7 +281,7 @@ impl MailApp {
             self.popup_click.0.clone(),
             self.ctx.clone(),
         );
-        self.popup = Some(NewMail { ids: vec![], chat: Some(n.space.clone()) });
+        self.popup = Some(NewMail { ids: vec![], chat: Some(n.space.clone()), day: None });
     }
 
     /// Text written in the chat and not confirmed by Google: an update must not restart over it

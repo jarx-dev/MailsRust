@@ -530,3 +530,42 @@ pub fn parse_time(s: &str) -> Option<NaiveTime> {
         .ok()
         .or_else(|| s.parse::<u32>().ok().and_then(|h| NaiveTime::from_hms_opt(h, 0, 0)))
 }
+
+/// The meetings to remind of at `now` (starting within `ahead`, not yet started; whole days
+/// are not), and when the next one will be due.
+pub fn reminders(events: &[Event], now: chrono::NaiveDateTime, ahead: Duration) -> (Vec<&Event>, Option<chrono::NaiveDateTime>) {
+    let mut due = Vec::new();
+    let mut next: Option<chrono::NaiveDateTime> = None;
+    for e in events.iter().filter(|e| !e.all_day) {
+        let at = e.date.and_time(e.start);
+        if at <= now {
+            continue;
+        }
+        if at - ahead <= now {
+            due.push(e);
+        } else {
+            next = Some(next.map_or(at - ahead, |n| n.min(at - ahead)));
+        }
+    }
+    due.sort_by_key(|e| e.start);
+    (due, next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meetings_are_reminded_of_ten_minutes_before() {
+        let day = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let ev = |h, m, all_day| Event { id: 1, title: format!("{h}:{m}"), date: day, start: NaiveTime::from_hms_opt(h, m, 0).unwrap(), minutes: 30, location: String::new(), color: 0, google: false, all_day, gid: String::new() };
+        let evs = [ev(10, 0, false), ev(9, 55, false), ev(9, 50, false), ev(11, 0, false), ev(10, 30, false), ev(0, 0, true)];
+        let now = day.and_hms_opt(9, 50, 0).unwrap();
+        let (due, next) = reminders(&evs, now, Duration::minutes(10));
+        // starting now is too late; at 10:00 just in time; the next one due at 10:20 (for 10:30)
+        assert_eq!(due.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["9:55", "10:0"]);
+        assert_eq!(next, Some(day.and_hms_opt(10, 20, 0).unwrap()));
+        let (due, next) = reminders(&evs, day.and_hms_opt(12, 0, 0).unwrap(), Duration::minutes(10));
+        assert!(due.is_empty() && next.is_none());
+    }
+}

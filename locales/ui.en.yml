@@ -28,6 +28,8 @@ ui:
       other: "%{n} events from Google"
     gcal:
       dialog: "Google Calendar and Contacts"
+      reminders: "Remind me of meetings 10 minutes before"
+      reminders_hint: "A sound and a note in the corner of the screen, for every calendar shown in the app"
       saved: "Saved to Google Calendar"
       save_failed: "Could not save to Google Calendar: %{e}"
       intro: "Calendar and contacts connect to Google with the same sign-in as the mail (Google account, OAuth). Events and contacts from Google are kept up to date here, and changes made in the app go to Google."

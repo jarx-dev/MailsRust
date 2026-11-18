@@ -242,6 +242,51 @@ impl MailApp {
         self.gcal_rx = Some(rx);
     }
 
+    /// A note in the corner 10 minutes before each meeting of the calendar, once a meeting. The
+    /// app is woken (`request_repaint_after`) when the next one is due, and looks again at the
+    /// latest every 15 minutes (as the calendar's own reading does) or when an event comes or
+    /// goes; in other frames nothing is done.
+    pub(super) fn meeting_reminders(&mut self) {
+        if !self.prefs.meeting_reminders || self.loading.is_some() {
+            return;
+        }
+        let now = self.clock();
+        if now < self.remind_next && self.store.events.len() == self.remind_events {
+            return;
+        }
+        self.remind_events = self.store.events.len();
+        let here = Local::now().naive_local();
+        let (due, next) = calendar::reminders(&self.store.events, here, Duration::minutes(10));
+        let due: Vec<Event> = due.into_iter().filter(|e| self.reminded.insert((e.title.clone(), e.date.and_time(e.start)))).cloned().collect();
+        let wait = next.map(|n| (n - here).num_milliseconds() as f64 / 1000.0).unwrap_or(900.0).clamp(1.0, 900.0);
+        self.remind_next = now + wait;
+        self.ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        let Some(e) = due.first() else { return };
+        let when = format!("{}–{}", e.start.format("%H:%M"), (e.start + Duration::minutes(e.minutes)).format("%H:%M"));
+        crate::diag::log(format!("meeting reminder: {} meeting(s), the first at {}", due.len(), e.start.format("%H:%M")));
+        if crate::unseen() {
+            return;
+        }
+        crate::notify::sound();
+        let title = if due.len() > 1 { format!("{} (+{})", e.title, due.len() - 1) } else { e.title.clone() };
+        let [r, g, b, _] = EVENT_COLORS[e.color % EVENT_COLORS.len()].to_array();
+        crate::popup::show(
+            crate::popup::Note {
+                head: t!("cal.remind.head", time = e.start.format("%H:%M").to_string()).into_owned(),
+                from: title,
+                subject: if e.location.is_empty() { when } else { format!("{when} · {}", e.location) },
+                dark: self.prefs.dark,
+                logo: None,
+                initials: crate::model::initials(&e.title),
+                color: (r as u32) << 16 | (g as u32) << 8 | b as u32,
+            },
+            20,
+            self.popup_click.0.clone(),
+            self.ctx.clone(),
+        );
+        self.popup = Some(NewMail { ids: vec![], chat: None, day: Some(e.date) });
+    }
+
     /// The calendar comes from Google through the sign-in (allowed and switched on).
     pub(super) fn google_calendar(&self) -> bool {
         let a = &self.store.account;
@@ -282,6 +327,12 @@ impl MailApp {
         let a = self.store.account.clone();
         let ready = crate::google::ready(&a);
         let (cal_ok, people_ok) = (crate::google::has_scope(&a, crate::google::SCOPE_CALENDAR), crate::google::has_scope(&a, crate::google::SCOPE_CONTACTS));
+        // (for every calendar, with or without Google)
+        if ui.checkbox(&mut self.prefs.meeting_reminders, t!("ui.settings.gcal.reminders")).on_hover_text(t!("ui.settings.gcal.reminders_hint")).changed() {
+            self.remind_next = 0.0;
+            self.save_now = true;
+        }
+        ui.add_space(4.0);
         ui.label(
             RichText::new(t!("ui.settings.gcal.intro"))
                 .small()
