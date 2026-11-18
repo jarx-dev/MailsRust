@@ -361,6 +361,24 @@ pub fn mini_month(ui: &mut Ui, salt: &str, store: &Store, shown: NaiveDate, sel:
     out
 }
 
+/// A month to pick a day from, with arrows to the months around it (`shown`). Returns a clicked day.
+pub fn day_picker(ui: &mut Ui, salt: &str, store: &Store, shown: &mut NaiveDate, sel: NaiveDate) -> Option<NaiveDate> {
+    ui.vertical(|ui| {
+        ui.set_width(220.0);
+        ui.horizontal(|ui| {
+            if ui.small_button(ic::PREV).clicked() {
+                *shown = shift(*shown, CalView::Month, -1);
+            }
+            ui.label(i18n::month_year(*shown));
+            if ui.small_button(ic::NEXT).clicked() {
+                *shown = shift(*shown, CalView::Month, 1);
+            }
+        });
+        mini_month(ui, salt, store, *shown, sel, chrono::Local::now().date_naive())
+    })
+    .inner
+}
+
 pub struct EventEditor {
     pub id: Option<u64>,
     pub title: String,
@@ -456,23 +474,10 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store, go
                 ui.end_row();
                 if ed.picking {
                     ui.label("");
-                    ui.vertical(|ui| {
-                        ui.set_width(220.0);
-                        ui.horizontal(|ui| {
-                            if ui.small_button(ic::PREV).clicked() {
-                                ed.shown = shift(ed.shown, CalView::Month, -1);
-                            }
-                            ui.label(i18n::month_year(ed.shown));
-                            if ui.small_button(ic::NEXT).clicked() {
-                                ed.shown = shift(ed.shown, CalView::Month, 1);
-                            }
-                        });
-                        let today = chrono::Local::now().date_naive();
-                        if let Some(d) = mini_month(ui, "picker", store, ed.shown, ed.date, today) {
-                            ed.date = d;
-                            ed.picking = false;
-                        }
-                    });
+                    if let Some(d) = day_picker(ui, "picker", store, &mut ed.shown, ed.date) {
+                        ed.date = d;
+                        ed.picking = false;
+                    }
                     ui.end_row();
                 }
                 ui.label("");

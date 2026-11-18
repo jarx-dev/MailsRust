@@ -84,6 +84,7 @@ ui:
       enabled: "Reply automatically"
       dates: "Days"
       dates_hint: "From–to, inclusive (DD-MM-YYYY)"
+      pick_day: "Pick in the calendar"
       hours: "Working hours"
       hours_hint: "The reply goes before and after them. A start later than the end (e.g. 15–13) means: reply only between 13 and 15."
       address: "To address"

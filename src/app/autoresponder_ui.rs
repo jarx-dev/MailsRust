@@ -3,6 +3,32 @@ use crate::autoresponder::{iso_day, shown_day, Link, Rules};
 
 type Answer = Result<(Rules, String), String>;
 
+/// A day as typed in the form (DD-MM-RRRR), if it is one.
+fn typed_day(s: &str) -> Option<chrono::NaiveDate> {
+    use chrono::Datelike;
+    chrono::NaiveDate::parse_from_str(s.trim(), "%d-%m-%Y").ok().filter(|d| d.year() >= 2000)
+}
+
+/// The button next to a day, and the calendar it opens under itself (over the form, which stays
+/// where it is). Returns the day clicked.
+fn pick_day(ui: &mut Ui, store: &crate::model::Store, picking: &mut Option<(bool, chrono::NaiveDate)>, end: bool, typed: &str) -> Option<chrono::NaiveDate> {
+    let open = matches!(picking, Some((e, _)) if *e == end);
+    let resp = ui.add(egui::Button::new(crate::theme::ic::CALENDAR).small().selected(open)).on_hover_text(t!("ui.settings.autoresponder.pick_day"));
+    if resp.clicked() {
+        *picking = (!open).then(|| (end, typed_day(typed).unwrap_or_else(|| chrono::Local::now().date_naive())));
+    }
+    let (_, shown) = picking.as_mut().filter(|(e, _)| *e == end)?;
+    let (mut still, mut picked) = (true, None);
+    let sel = typed_day(typed).unwrap_or(*shown);
+    egui::Popup::from_response(&resp).open_bool(&mut still).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        picked = crate::calendar::day_picker(ui, if end { "auto-to" } else { "auto-from" }, store, shown, sel);
+    });
+    if !still {
+        *picking = None;
+    }
+    picked
+}
+
 /// The autoresponder window (☰ → Autoresponder): its state lives while the window is open.
 pub(super) struct AutoUi {
     /// the webhook the form was read from, and where Save writes
@@ -16,6 +42,8 @@ pub(super) struct AutoUi {
     /// the days as typed (DD-MM-RRRR)
     from: String,
     to: String,
+    /// the calendar open under the days: for the end day (else the start), and the month it shows
+    picking: Option<(bool, chrono::NaiveDate)>,
     /// what the person asks the AI for
     sentence: String,
     /// work in the background: what it is, and its answer (the settings and what to say)
@@ -27,7 +55,7 @@ impl AutoUi {
     /// `demo`: a test run or picture, which never reads the saved webhook.
     pub(super) fn new(ctx: &egui::Context, demo: bool) -> Self {
         let link = if demo { Link::default() } else { crate::autoresponder::load() };
-        let mut a = Self { draft: link.clone(), link, connecting: None, rules: None, from: String::new(), to: String::new(), sentence: String::new(), busy: None, said: None };
+        let mut a = Self { draft: link.clone(), link, connecting: None, rules: None, from: String::new(), to: String::new(), picking: None, sentence: String::new(), busy: None, said: None };
         if demo {
             // a filled form without n8n
             a.show(Rules {
@@ -42,6 +70,9 @@ impl AutoUi {
                 ignored: "biuro@example.com\nfaktury@example.com".into(),
                 updated_by: "Poczta 2026-11-18T12:41:11Z".into(),
             });
+            if std::env::var("POCZTA_START").as_deref() == Ok("autoresponder-days") {
+                a.picking = typed_day(&a.from).map(|d| (false, d));
+            }
         } else if a.link.is_set() {
             a.load(ctx);
         }
@@ -90,6 +121,7 @@ impl MailApp {
     pub(super) fn autoresponder_ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let demo = self.shot.is_some() || crate::unseen();
+        let store = &self.store;
         let a = self.auto_ui.get_or_insert_with(|| AutoUi::new(&ctx, demo));
         let got = match a.busy.as_ref().map(|(_, rx)| rx.try_recv()) {
             Some(Ok(answer)) => Some(answer),
@@ -151,8 +183,20 @@ impl MailApp {
                     ui.label(t!("ui.settings.autoresponder.dates"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut a.from).desired_width(96.0));
+                        if let Some(d) = pick_day(ui, store, &mut a.picking, false, &a.from) {
+                            // the start picked: the end next, at least that day
+                            a.from = d.format("%d-%m-%Y").to_string();
+                            if typed_day(&a.to).is_none_or(|t| t < d) {
+                                a.to = a.from.clone();
+                            }
+                            a.picking = Some((true, d));
+                        }
                         ui.label("–");
                         ui.add(egui::TextEdit::singleline(&mut a.to).desired_width(96.0));
+                        if let Some(d) = pick_day(ui, store, &mut a.picking, true, &a.to) {
+                            a.to = d.format("%d-%m-%Y").to_string();
+                            a.picking = None;
+                        }
                         ui.label(RichText::new(t!("ui.settings.autoresponder.dates_hint")).small().color(MUTED()));
                     });
                     ui.end_row();
