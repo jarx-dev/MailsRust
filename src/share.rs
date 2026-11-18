@@ -63,7 +63,7 @@ impl Shared {
             attachments: m.attachments.iter().cloned().zip(m.attachment_files.iter().cloned().chain(std::iter::repeat(String::new()))).collect(),
             images: m.inline.clone(),
             partial: m.partial,
-            uid: if m.folder == Folder::Inbox { m.uid } else { None },
+            uid: if m.folder == Folder::Inbox && m.account == 0 { m.uid } else { None },
             from_name: m.from_name.clone(),
             from_addr: m.from_addr.clone(),
             when: m.date,
@@ -208,6 +208,8 @@ pub struct Env {
     raw: Arc<Mutex<HashMap<u64, Arc<Vec<u8>>>>>,
     /// the key agents use for the mailbox (MCP); None while that is switched off
     key: Arc<Mutex<Option<String>>>,
+    /// counts key changes: a request let in under an older key leaves no new link behind
+    pub(crate) key_gen: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The sharing server and the emails it serves.
@@ -227,7 +229,7 @@ impl Hub {
     pub fn new(ctx: Option<eframe::egui::Context>) -> Self {
         let (drafts_tx, drafts) = channel();
         let (asks_tx, asks) = channel();
-        let env = Env { shares: Default::default(), drafts: drafts_tx, asks: asks_tx, ctx, account: Default::default(), raw: Default::default(), key: Default::default() };
+        let env = Env { shares: Default::default(), drafts: drafts_tx, asks: asks_tx, ctx, account: Default::default(), raw: Default::default(), key: Default::default(), key_gen: Default::default() };
         Hub { env, drafts, asks, addr: None, name: Default::default() }
     }
 
@@ -244,6 +246,7 @@ impl Hub {
         let key = key.filter(|k| !k.is_empty());
         if let Ok(mut k) = self.env.key.lock() {
             if *k != key {
+                self.env.key_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if let Ok(mut s) = self.env.shares.lock() {
                     s.retain(|t, _| !t.starts_with(AGENT_LINK));
                 }
@@ -464,7 +467,8 @@ fn handle(mut conn: TcpStream, env: &Env) -> std::io::Result<()> {
     let text = "text/plain; charset=utf-8";
     let host = if host.is_empty() { conn.local_addr().map(|a| a.to_string()).unwrap_or_default() } else { host };
     if path.trim_end_matches('/') == "/mcp" {
-        let key = env.key.lock().ok().and_then(|k| k.clone());
+        // (the key and its generation read together, under the same lock as a change of key)
+        let (key, key_gen) = env.key.lock().ok().map(|k| (k.clone(), env.key_gen.load(std::sync::atomic::Ordering::SeqCst))).unwrap_or_default();
         let Some(key) = key else {
             return respond(&mut conn, "404 Not Found", text, "", "Agent access is switched off in Poczta (Settings → AI).\n".as_bytes());
         };
@@ -486,7 +490,7 @@ fn handle(mut conn: TcpStream, env: &Env) -> std::io::Result<()> {
         let Some(body) = read_body(&mut conn, &buf[head_end..], length)? else {
             return respond(&mut conn, "413 Payload Too Large", text, "", b"");
         };
-        return match crate::mcp::answer(env, &format!("http://{host}"), &body) {
+        return match crate::mcp::answer(env, &format!("http://{host}"), key_gen, &body) {
             Some(v) => respond(&mut conn, "200 OK", "application/json", "", v.to_string().as_bytes()),
             None => respond(&mut conn, "202 Accepted", text, "", b""),
         };

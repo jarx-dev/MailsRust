@@ -114,7 +114,8 @@ const READS_PER_MINUTE: usize = 30;
 const MAX_TEXT: usize = 40_000;
 
 /// The answer to one JSON-RPC message, or None for a notification (no answer expected).
-pub fn answer(env: &Env, base: &str, body: &[u8]) -> Option<Value> {
+/// `key_gen`: the generation of the key the request came in with.
+pub fn answer(env: &Env, base: &str, key_gen: u64, body: &[u8]) -> Option<Value> {
     let Ok(req) = serde_json::from_slice::<Value>(body) else {
         return Some(error(Value::Null, -32700, "Parse error"));
     };
@@ -140,7 +141,7 @@ pub fn answer(env: &Env, base: &str, body: &[u8]) -> Option<Value> {
             let args = &params["arguments"];
             let out = match params["name"].as_str().unwrap_or("") {
                 "search_emails" => search(env, args),
-                "get_email" => get_email(env, base, args),
+                "get_email" => get_email(env, base, key_gen, args),
                 "create_draft" => create_draft(env, args),
                 "show_in_poczta" => message_id(env, &args["id"]).and_then(|id| ask(env, |tx| Ask::Show(id, tx))?),
                 other => return Some(error(id, -32602, &format!("Unknown tool: {other}"))),
@@ -343,7 +344,7 @@ fn may_read() -> bool {
     true
 }
 
-fn get_email(env: &Env, base: &str, args: &Value) -> Result<String, String> {
+fn get_email(env: &Env, base: &str, key_gen: u64, args: &Value) -> Result<String, String> {
     let id = message_id(env, &args["id"])?;
     if !may_read() {
         return Err(format!("At most {READS_PER_MINUTE} messages a minute; wait a moment."));
@@ -357,14 +358,20 @@ fn get_email(env: &Env, base: &str, args: &Value) -> Result<String, String> {
         }
     }
     crate::diag::log(format!("agents: read message {id}"));
-    // a link of its own, for the attachments, the pictures and the whole .eml (it ends when the
-    // agents' key changes or their access is switched off)
-    let token = format!("{}{}", crate::share::AGENT_LINK, crate::share::new_token());
+    // a link of its own, for the attachments, the pictures and the whole .eml: one per message,
+    // ended when the agents' key changes or their access is switched off
+    let token = {
+        let Ok(mut m) = env.shares.lock() else { return Err("Poczta is closing.".into()) };
+        // (the key changed while this was read: no link may outlive it)
+        if env.key_gen.load(std::sync::atomic::Ordering::SeqCst) != key_gen {
+            return Err("Agent access was changed in Poczta; connect again.".into());
+        }
+        let known = m.iter().find(|(t, s)| t.starts_with(crate::share::AGENT_LINK) && s.id == id).map(|(t, _)| t.clone());
+        let token = known.unwrap_or_else(|| format!("{}{}", crate::share::AGENT_LINK, crate::share::new_token()));
+        m.insert(token.clone(), Shared::of(&msg));
+        token
+    };
     let link = format!("{base}/m/{token}");
-    if let Ok(mut m) = env.shares.lock() {
-        // shortcut: these links last until Poczta closes or the key changes; give them an expiry if agents read a lot
-        m.insert(token, Shared::of(&msg));
-    }
     let mut s = format!("Message {id} — folder: {}, account: {account}\n", folder_key(msg.folder));
     s += &format!("From: {}\n", line(&person(&msg.from_name, &msg.from_addr), 300));
     s += &format!("To: {}\n", line(&msg.to, 1000));
@@ -409,7 +416,8 @@ fn create_draft(env: &Env, args: &Value) -> Result<String, String> {
     if body.len() > 200_000 {
         return Err("`body` is too long (200 000 bytes at most).".into());
     }
-    let text = |k: &str| line(args[k].as_str().unwrap_or(""), 2000);
+    // fields of the draft: on one line, cleaned, never cut (a cut address list would lose people)
+    let text = |k: &str| line(args[k].as_str().unwrap_or(""), usize::MAX);
     let reply_to = match &args["reply_to"] {
         Value::Null => None,
         Value::String(s) if s.trim().is_empty() => None,
@@ -434,7 +442,9 @@ fn create_draft(env: &Env, args: &Value) -> Result<String, String> {
         c.request_repaint();
     }
     let said = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "Poczta did not answer in time; check Drafts before trying again.".to_string())?;
-    crate::diag::log("agents: draft saved");
+    if said.is_ok() {
+        crate::diag::log("agents: draft saved");
+    }
     // (the recipients and subject of a reply come from the message answered)
     said.map(|s| line(&s, 2000))
 }

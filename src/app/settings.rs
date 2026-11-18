@@ -52,13 +52,18 @@ impl MailApp {
     /// Agent access (MCP): when switched on, the server runs on the Tailscale address and lets in
     /// whoever has the key; switched off, agents are turned away (shared links keep working).
     pub(super) fn start_agents(&mut self) {
+        // (a picture has its own made-up key, see `MailApp::new`)
+        if self.shot.is_some() {
+            return;
+        }
         self.agents_tried = std::time::Instant::now();
-        let key = if self.prefs.mcp_on { crate::secret::unprotect(&self.prefs.mcp_key) } else { None };
+        // (a window that only reads the mailbox another window has open never lets agents in)
+        let key = if self.prefs.mcp_on && !self.read_only { crate::secret::unprotect(&self.prefs.mcp_key) } else { None };
         let on = key.is_some();
         self.hub.set_key(key);
-        if !on || self.shot.is_some() || self.read_only {
+        if !on {
             // (switched on, but no key could be made or read back: said in the settings)
-            self.agents_err = (self.prefs.mcp_on && !on).then(|| t!("ui.settings.ai.agents_no_key").into_owned());
+            self.agents_err = (self.prefs.mcp_on && !self.read_only).then(|| t!("ui.settings.ai.agents_no_key").into_owned());
             return;
         }
         let Some(ip) = crate::share::tailscale_ip() else {
@@ -123,7 +128,9 @@ impl MailApp {
                 self.prefs.mcp_key = crate::share::new_key().map(|k| crate::secret::protect(&k)).unwrap_or_default();
                 self.save_now = true;
                 self.start_agents();
-                self.flash(&t!("ui.settings.ai.agents_new_key_done"));
+                if self.hub.key().is_some() {
+                    self.flash(&t!("ui.settings.ai.agents_new_key_done"));
+                }
             }
         });
         if let Some(c) = copied {

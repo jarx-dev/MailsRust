@@ -253,9 +253,10 @@ specjalista ds. Informatyki".into();
                     let _ = tx.send(self.finder.snapshot());
                 }
                 Ask::Heads(ids, filter, tx) => {
+                    // (by the index only: an id gone from the mailbox is skipped, not looked for)
                     let heads = ids
                         .iter()
-                        .filter_map(|id| self.msg(*id))
+                        .filter_map(|id| self.index.get(id).and_then(|&i| self.store.messages.get(i)).filter(|m| m.id == *id))
                         .filter(|m| m.id < reading::FILE_IDS)
                         .filter(|m| filter.keeps(m, &self.account_ref(m.account).email))
                         .take(filter.limit)
@@ -951,6 +952,8 @@ specjalista ds. Informatyki".into();
                     if let Some(old) = self.store.messages.iter_mut().find(|x| x.folder == folder && x.account == acct && x.uid == Some(uid)) {
                         let oid = old.id;
                         old.body = m.body;
+                        // (the text now in memory is the one to save, not the empty one on disk)
+                        old.on_disk = false;
                         old.html_path = m.html_path;
                         old.inline = m.inline;
                         old.attachments = m.attachments;
