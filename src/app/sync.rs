@@ -256,7 +256,7 @@ specjalista ds. Informatyki".into();
             self.popup_click.0.clone(),
             self.ctx.clone(),
         );
-        self.popup = Some(NewMail { ids, chat: None });
+        self.popup = Some(NewMail { ids, chat: None, day: None });
         self.ctx.request_repaint();
     }
 
@@ -824,7 +824,12 @@ specjalista ds. Informatyki".into();
                             if tell && !m.read && m.date >= recent {
                                 fresh.push(m.id);
                             }
+                            // an invitation to a meeting: into the calendar at once
+                            let invite = Some(&m).filter(|m| m.folder == Folder::Inbox).and_then(|m| m.attachment_files.iter().find(|f| f.ends_with(".ics")).cloned());
                             self.store.messages.push(m);
+                            if let Some(file) = invite {
+                                self.invitation_to_calendar(&file);
+                            }
                             added += 1;
                         }
                     }

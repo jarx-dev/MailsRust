@@ -557,3 +557,60 @@ pub fn parse(html: &str) -> Vec<Block> {
     w.flush();
     w.blocks
 }
+
+/// A link whose text is one web address while it opens another site (the usual trick of a fake
+/// bank email): the site it really opens. The same check as the email page's own script
+/// (`webview.rs`), for emails drawn here.
+/// shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
+/// and the like), not the public suffix list; upgrade if it marks or misses real cases.
+pub fn link_elsewhere(text: &str, href: &str) -> Option<String> {
+    const SECOND: [&str; 13] = ["co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nom"];
+    let site = |h: &str| {
+        let h = h.to_ascii_lowercase();
+        let p: Vec<&str> = h.strip_prefix("www.").unwrap_or(&h).split('.').collect();
+        let n = if p.len() > 2 && p[p.len() - 1].len() == 2 && SECOND.contains(&p[p.len() - 2]) { 3 } else { 2 };
+        p[p.len().saturating_sub(n)..].join(".")
+    };
+    // where the link goes: http(s) only, the host without a user name or port
+    let lower = href.trim().to_ascii_lowercase();
+    let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?.split(':').next()?.to_string();
+    // what the text shows: an address (with http(s):// or www. before it, or a name ending in a
+    // top-level domain that is not a file's extension)
+    let t = text.trim().to_ascii_lowercase();
+    let (shown, marked) = match t.strip_prefix("https://").or_else(|| t.strip_prefix("http://")) {
+        Some(r) => (r, true),
+        None => (t.as_str(), t.starts_with("www.")),
+    };
+    let end = shown.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.')).unwrap_or(shown.len());
+    if !matches!(shown[end..].chars().next(), None | Some('/' | ':' | '?' | '#')) {
+        return None;
+    }
+    let name = &shown[..end];
+    let labels: Vec<&str> = name.split('.').collect();
+    let tld = *labels.last()?;
+    if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) || tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    const FILES: [&str; 23] = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "png", "jpg", "jpeg", "gif", "htm", "html", "txt", "csv", "ics", "eml", "exe", "php", "asp", "aspx", "js"];
+    if !marked && FILES.contains(&tld) {
+        return None;
+    }
+    (site(name) != site(&host)).then_some(host)
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::link_elsewhere as e;
+
+    #[test]
+    fn links_showing_one_site_and_opening_another_are_found() {
+        assert_eq!(e("www.mojbank.pl", "https://evil.example/login").as_deref(), Some("evil.example"));
+        assert_eq!(e(" https://c.d.com.pl/x ", "https://user@a.b.com.pl:8443/").as_deref(), Some("a.b.com.pl"));
+        // the same site, a file name, plain words, a mail address, other kinds of link
+        for (text, href) in [("mojbank.pl", "https://www.mojbank.pl/x"), ("WWW.Shop.co.uk/sale", "http://deals.shop.co.uk"), ("ing.pl", "https://login.ing.pl/"), ("www.wp.pl", "https://poczta.wp.pl"), ("raport.pdf", "https://drive.example/f"), ("Click here", "https://x.example"), ("a@b.pl", "https://x.example"), ("www.a.pl", "mailto:x@y.pl"), ("www.a.pl,", "https://b.pl")] {
+            assert_eq!(e(text, href), None, "{text} → {href}");
+        }
+        assert_eq!(e("www.report.pdf", "https://drive.example/f").as_deref(), Some("drive.example"));
+    }
+}

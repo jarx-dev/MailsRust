@@ -50,6 +50,7 @@ mail:
     loading: "Loading message…"
     copy_text: "📋  Copy message text"
     copy_link: "🔗  Copy link address"
+    link_goes_elsewhere: "This link shows one address but opens another: %{host}"
     no_subject: "(no subject)"
     close: "Close"
     minimize: "Minimize"

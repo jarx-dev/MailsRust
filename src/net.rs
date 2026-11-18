@@ -1482,15 +1482,17 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         if p.content_id().is_some() && p.attachment_name().is_none() {
             continue;
         }
+        // an invitation's calendar file often comes without a name (as another form of the text)
+        let calendar = p.content_type().is_some_and(|ct| matches!((ct.ctype().to_ascii_lowercase().as_str(), ct.subtype().unwrap_or("").to_ascii_lowercase().as_str()), ("text", "calendar") | ("application", "ics")));
         let name = p
             .attachment_name()
             .map(|n| n.to_string())
-            .unwrap_or_else(|| if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
-        let ext = std::path::Path::new(&name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .unwrap_or_else(|| "bin".into());
+            .unwrap_or_else(|| if calendar { "invite.ics".into() } else if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
+        let ext = if calendar {
+            "ics".into()
+        } else {
+            std::path::Path::new(&name).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_else(|| "bin".into())
+        };
         let bytes = if p.is_message() { std::borrow::Cow::Borrowed(p.raw_body()) } else { p.decoded() };
         attachment_files.push(crate::model::cache_put(&bytes, &ext));
         attachments.push(name);
@@ -1540,6 +1542,15 @@ pub fn build_email(acc: &Account, m: &Outgoing) -> Result<lettre::Message, Strin
     }
     if !any {
         return Err(t!("core.net.add_recipient").into_owned());
+    }
+    // an answer to an invitation (the app's own: plain text and its calendar file): the calendar
+    // part goes beside the text, marked as an answer, where calendar programs look (RFC 6047)
+    if let [f] = m.files.as_slice() {
+        let reply = Some(f).filter(|f| m.html.is_none() && f.ends_with(".ics")).and_then(|f| std::fs::read_to_string(f).ok()).filter(|t| t.contains("\r\nPRODID:-//Poczta//") && t.contains("\r\nMETHOD:REPLY\r\n"));
+        if let Some(ics) = reply {
+            let ct = ContentType::parse("text/calendar; method=REPLY; charset=utf-8").map_err(|e| e.to_string())?;
+            return b.multipart(MultiPart::alternative().singlepart(SinglePart::plain(m.body.clone())).singlepart(SinglePart::builder().header(ct).body(ics))).map_err(|e| e.to_string());
+        }
     }
     // the message itself (plain, or formatted with its pictures)
     let content: MultiPart = match &m.html {
@@ -1625,5 +1636,28 @@ mod tests {
         assert_eq!(t.as_deref(), Some("Cena & RDA – Farmaster — x&y"));
         assert_eq!(super::title_of("<title>Zaloguj się – Asana</title>"), None);
         assert_eq!(super::title_of("<p>no title</p>"), None);
+    }
+
+    #[test]
+    fn an_answer_to_an_invitation_carries_its_calendar_part() {
+        let now = chrono::Utc::now();
+        // (an English title: the calendar part goes as plain 7-bit text, readable here)
+        let invite = crate::gcal::SAMPLE_INVITE.replace("Przegląd wdrożenia", "Review");
+        let ics = crate::gcal::reply(&invite, "me@example.com", "accepted", now).unwrap();
+        let put = |name: &str, text: &str| {
+            let f = std::env::temp_dir().join(name);
+            std::fs::write(&f, text).unwrap();
+            f.to_string_lossy().into_owned()
+        };
+        let file = put("pz-test-reply.ics", &ics);
+        let acc = crate::model::Account { display_name: "Me".into(), email: "me@example.com".into(), ..Default::default() };
+        let out = super::Outgoing { id: 1, to: "anna@example.com".into(), cc: String::new(), subject: "Accepted: x".into(), body: "Me has accepted.".into(), html: None, inline: vec![], files: vec![file] };
+        let wire = String::from_utf8(super::build_email(&acc, &out).unwrap().formatted()).unwrap();
+        assert!(wire.contains("multipart/alternative") && wire.contains("Content-Type: text/calendar; method=REPLY; charset=utf-8"), "{wire}");
+        assert!(wire.contains("METHOD:REPLY") && wire.contains("PARTSTAT=ACCEPTED") && !wire.contains("filename"), "{wire}");
+        // any other calendar file is an ordinary attachment
+        let other = put("pz-test-invite.ics", &invite);
+        let wire = String::from_utf8(super::build_email(&acc, &super::Outgoing { files: vec![other], ..out }).unwrap().formatted()).unwrap();
+        assert!(!wire.contains("method=REPLY") && wire.contains("filename"), "{wire}");
     }
 }

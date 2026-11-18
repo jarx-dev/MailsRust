@@ -372,6 +372,11 @@ pub struct EventEditor {
     pub error: Option<String>,
     pub picking: bool,
     pub shown: NaiveDate,
+    /// a whole-day event, and how many days (more than one only for events in Google)
+    pub all_day: bool,
+    pub days: i64,
+    /// e-mail addresses to invite (Google sends the invitations), separated by commas
+    pub guests: String,
 }
 
 impl EventEditor {
@@ -390,21 +395,29 @@ impl EventEditor {
             error: None,
             picking: false,
             shown: date,
+            all_day: false,
+            days: 1,
+            guests: String::new(),
         }
     }
 
-    pub fn from_event(e: &Event) -> Self {
+    /// `first` and `days`: where a whole-day event starts and how long it is (it is kept as one
+    /// event a day).
+    pub fn from_event(e: &Event, first: NaiveDate, days: i64) -> Self {
         Self {
             id: Some(e.id),
             title: e.title.clone(),
-            date: e.date,
-            start: e.start.format("%H:%M").to_string(),
-            minutes: e.minutes,
+            date: if e.all_day { first } else { e.date },
+            start: if e.all_day { "09:00".into() } else { e.start.format("%H:%M").to_string() },
+            minutes: if e.all_day { 60 } else { e.minutes },
             location: e.location.clone(),
             color: e.color,
             error: None,
             picking: false,
             shown: e.date,
+            all_day: e.all_day,
+            days: days.max(1),
+            guests: String::new(),
         }
     }
 }
@@ -416,7 +429,9 @@ pub enum EditorResult {
     Delete,
 }
 
-pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) -> EditorResult {
+/// The editor of an event; `google`: it is written to Google Calendar (guests and whole days
+/// longer than one can be given).
+pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store, google: bool) -> EditorResult {
     let mut res = EditorResult::Keep;
     let mut open = true;
     let title = if ed.id.is_some() { t!("cal.calendar.edit_event") } else { t!("cal.calendar.new_event") };
@@ -460,22 +475,40 @@ pub fn event_editor(ctx: &egui::Context, ed: &mut EventEditor, store: &Store) ->
                     });
                     ui.end_row();
                 }
-                ui.label(t!("cal.calendar.start"));
-                ui.add(egui::TextEdit::singleline(&mut ed.start).hint_text("09:00").desired_width(70.0));
+                ui.label("");
+                ui.checkbox(&mut ed.all_day, t!("cal.calendar.all_day"));
                 ui.end_row();
-                ui.label(t!("cal.calendar.duration"));
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut ed.minutes).range(5..=1440).speed(5).suffix(" min"));
-                    for (lbl, m) in [("30 min".to_string(), 30), (t!("cal.calendar.hours_1").into_owned(), 60), (t!("cal.calendar.hours_2").into_owned(), 120)] {
-                        if ui.small_button(lbl).clicked() {
-                            ed.minutes = m;
-                        }
+                if ed.all_day {
+                    if google {
+                        ui.label(t!("cal.calendar.days"));
+                        ui.add(egui::DragValue::new(&mut ed.days).range(1..=31).speed(0.1));
+                        ui.end_row();
                     }
-                });
-                ui.end_row();
+                } else {
+                    ui.label(t!("cal.calendar.start"));
+                    ui.add(egui::TextEdit::singleline(&mut ed.start).hint_text("09:00").desired_width(70.0));
+                    ui.end_row();
+                    ui.label(t!("cal.calendar.duration"));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut ed.minutes).range(5..=1440).speed(5).suffix(" min"));
+                        for (lbl, m) in [("30 min".to_string(), 30), (t!("cal.calendar.hours_1").into_owned(), 60), (t!("cal.calendar.hours_2").into_owned(), 120)] {
+                            if ui.small_button(lbl).clicked() {
+                                ed.minutes = m;
+                            }
+                        }
+                    });
+                    ui.end_row();
+                }
                 ui.label(t!("cal.calendar.location"));
                 ui.add(egui::TextEdit::singleline(&mut ed.location).hint_text(t!("cal.calendar.optional")).desired_width(260.0));
                 ui.end_row();
+                if google {
+                    // (like "Do:" of a message: addresses separated by commas)
+                    ui.label(t!("cal.calendar.guests"));
+                    ui.add(egui::TextEdit::singleline(&mut ed.guests).hint_text(t!("cal.calendar.guests_hint")).desired_width(260.0))
+                        .on_hover_text(t!("cal.calendar.guests_note"));
+                    ui.end_row();
+                }
                 ui.label(t!("cal.calendar.color"));
                 ui.horizontal(|ui| {
                     for (i, c) in EVENT_COLORS.iter().enumerate() {
@@ -529,4 +562,43 @@ pub fn parse_time(s: &str) -> Option<NaiveTime> {
         .or_else(|_| NaiveTime::parse_from_str(s, "%H.%M"))
         .ok()
         .or_else(|| s.parse::<u32>().ok().and_then(|h| NaiveTime::from_hms_opt(h, 0, 0)))
+}
+
+/// The meetings to remind of at `now` (starting within `ahead`, not yet started; whole days
+/// are not), and when the next one will be due.
+pub fn reminders(events: &[Event], now: chrono::NaiveDateTime, ahead: Duration) -> (Vec<&Event>, Option<chrono::NaiveDateTime>) {
+    let mut due = Vec::new();
+    let mut next: Option<chrono::NaiveDateTime> = None;
+    for e in events.iter().filter(|e| !e.all_day) {
+        let at = e.date.and_time(e.start);
+        if at <= now {
+            continue;
+        }
+        if at - ahead <= now {
+            due.push(e);
+        } else {
+            next = Some(next.map_or(at - ahead, |n| n.min(at - ahead)));
+        }
+    }
+    due.sort_by_key(|e| e.date.and_time(e.start));
+    (due, next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meetings_are_reminded_of_ten_minutes_before() {
+        let day = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let ev = |h, m, all_day| Event { id: 1, title: format!("{h}:{m}"), date: day, start: NaiveTime::from_hms_opt(h, m, 0).unwrap(), minutes: 30, location: String::new(), color: 0, google: false, all_day, gid: String::new() };
+        let evs = [ev(10, 0, false), ev(9, 55, false), ev(9, 50, false), ev(11, 0, false), ev(10, 30, false), ev(0, 0, true)];
+        let now = day.and_hms_opt(9, 50, 0).unwrap();
+        let (due, next) = reminders(&evs, now, Duration::minutes(10));
+        // starting now is too late; at 10:00 just in time; the next one due at 10:20 (for 10:30)
+        assert_eq!(due.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["9:55", "10:0"]);
+        assert_eq!(next, Some(day.and_hms_opt(10, 20, 0).unwrap()));
+        let (due, next) = reminders(&evs, day.and_hms_opt(12, 0, 0).unwrap(), Duration::minutes(10));
+        assert!(due.is_empty() && next.is_none());
+    }
 }

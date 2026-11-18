@@ -81,6 +81,13 @@ struct Prefs {
     gcal_key: String,
     /// messages marked "Nie wymaga odpowiedzi" (left out of the list without replies)
     no_reply_needed: Vec<u64>,
+    /// answers to invitations sent by email (meeting id, answer), newest last
+    invite_answers: Vec<(String, String)>,
+    /// the newest word about each meeting put into the calendar from an email (meeting id,
+    /// change count, written at, organiser), newest last
+    invite_versions: Vec<(String, i64, String, String)>,
+    /// a note in the corner 10 minutes before each meeting of the calendar
+    meeting_reminders: bool,
     /// the calendar and the contacts shared with Google (through the Google sign-in)
     google_calendar: bool,
     google_contacts: bool,
@@ -117,6 +124,9 @@ impl Default for Prefs {
             gcal_saved: String::new(),
             gcal_key: String::new(),
             no_reply_needed: vec![],
+            invite_answers: vec![],
+            invite_versions: vec![],
+            meeting_reminders: true,
             google_calendar: true,
             google_contacts: true,
             google_chat: true,
@@ -146,11 +156,13 @@ enum SideMode {
     History,
 }
 
-/// New mail (or a chat message) just received, told about in a note in the corner of the screen.
+/// New mail (or a chat message, or a meeting soon) just received, told about in a note in the corner of the screen.
 struct NewMail {
     ids: Vec<u64>,
     /// the chat conversation the note is about
     chat: Option<String>,
+    /// the day of the meeting the note reminds of (a click shows it in the calendar)
+    day: Option<NaiveDate>,
 }
 
 /// A small outlined folder symbol for a group of tags.
@@ -196,6 +208,13 @@ fn safe_name(name: &str) -> String {
 fn open_with_windows(path: &std::path::Path) {
     let _ = std::process::Command::new("explorer.exe").arg(path).spawn();
 }
+
+/// The calendar read anew: its events, and the calendar-file ids of the meetings Google has.
+type CalRead = Result<(Vec<Event>, HashSet<String>), String>;
+/// What Google says about an invitation: the meeting's id, what the answer is kept under (see
+/// `Invitation::key`), whether an answer was being given, and the answer there (None: no such
+/// meeting or guest) or why it could not be had or given.
+type InviteNews = (String, String, bool, Result<Option<String>, String>);
 
 pub struct MailApp {
     store: Store,
@@ -422,7 +441,9 @@ pub struct MailApp {
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it
     gcal_text: String,
     gcal_loaded: bool,
-    gcal_rx: Option<Receiver<Result<Vec<Event>, String>>>,
+    /// the calendar read anew, and the calendar-file ids of the meetings Google has (none from an iCal address)
+    gcal_rx: Option<Receiver<CalRead>>,
+    gcal_uids: HashSet<String>,
     gcal_last: f64,
     gcal_said: Option<Result<String, String>>,
     /// "Sprawdź połączenie": the calendar and the contacts, each working or what is missing
@@ -430,6 +451,21 @@ pub struct MailApp {
     google_check_rx: Option<Receiver<(Result<String, String>, Result<String, String>)>>,
     /// events written to Google: (event here, made here and to be replaced by Google's copy, answer)
     gcal_push: Option<(Sender<(Option<u64>, Result<(), String>)>, Receiver<(Option<u64>, Result<(), String>)>)>,
+    /// invitations read from emails' calendar files (by file; None: not an invitation), the
+    /// answers as Google has them or as given here (by the meeting's id: `accepted`,
+    /// `tentative`, `declined`, `needsAction`), the meetings already asked Google about in this
+    /// run, and what Google says back (the meeting, whether an answer was being given, and the
+    /// answer or why it could not be had or given)
+    invites: HashMap<String, Option<crate::gcal::Invitation>>,
+    invite_said: HashMap<String, String>,
+    invite_asked: HashSet<String>,
+    invite_rx: Option<(Sender<InviteNews>, Receiver<InviteNews>)>,
+    /// meetings already reminded of in this run (title and start: the same meeting from an
+    /// invitation and from Google counts once), when to look again, and how many events there
+    /// were then (a new one is looked at at once)
+    reminded: HashSet<(String, NaiveDateTime)>,
+    remind_next: f64,
+    remind_events: usize,
     /// ending for good (not just closing the window)
     quitting: bool,
     /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
@@ -636,11 +672,19 @@ impl MailApp {
             gcal_text: String::new(),
             gcal_loaded: false,
             gcal_rx: None,
+            gcal_uids: HashSet::new(),
             gcal_last: -1e9,
             gcal_said: None,
             google_check: None,
             google_check_rx: None,
             gcal_push: None,
+            invites: HashMap::new(),
+            invite_said: HashMap::new(),
+            invite_asked: HashSet::new(),
+            invite_rx: None,
+            reminded: HashSet::new(),
+            remind_next: 0.0,
+            remind_events: 0,
             quitting: false,
             hidden: false,
             start_hidden: false,
@@ -876,6 +920,32 @@ tel.: 600-100-200".into();
                 }
             }
         }
+        if std::env::var("POCZTA_START").as_deref() == Ok("event-editor") {
+            // test picture: a new whole-day event of two days, with guests (POCZTA_EDITOR_TIMED: with an hour)
+            let timed = std::env::var("POCZTA_EDITOR_TIMED").is_ok();
+            app.editor = Some(EventEditor { title: "Warsztaty wdrożeniowe".into(), all_day: !timed, days: 2, guests: "anna@example.com, piotr@example.com".into(), ..EventEditor::new(Local::now().date_naive(), None) });
+        }
+        if std::env::var("POCZTA_START").as_deref() == Ok("remind") {
+            // test: a meeting in 5 minutes (the log says it was reminded of, once)
+            let at = Local::now().naive_local() + Duration::minutes(5);
+            let id = app.store.new_id();
+            app.store.events.push(Event { id, title: "Reminder test".into(), date: at.date(), start: at.time(), minutes: 30, location: String::new(), color: 2, google: false, all_day: false, gid: String::new() });
+        }
+        if std::env::var("POCZTA_START").as_deref() == Ok("invite") {
+            // test picture: the open message is an invitation to a meeting today
+            let file = crate::model::cache_put(crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string()).as_bytes(), "ics");
+            if let Some(m) = app.store.messages.iter_mut().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date) {
+                m.attachments.push("invite.ics".into());
+                m.attachment_files.push(file);
+            }
+            // answered "maybe" already, and something else in the calendar during the meeting
+            if let Some(inv) = crate::gcal::invitation(crate::gcal::SAMPLE_INVITE) {
+                app.invite_said.insert(inv.key(), "tentative".into());
+            }
+            let start = chrono::Utc::now().date_naive().and_hms_opt(9, 15, 0).unwrap().and_utc().with_timezone(&Local).naive_local();
+            let id = app.store.new_id();
+            app.store.events.push(Event { id, title: "Stand-up".into(), date: start.date(), start: start.time(), minutes: 15, location: String::new(), color: 1, google: false, all_day: false, gid: String::new() });
+        }
         if let Ok(path) = std::env::var("POCZTA_HTML") {
             // test picture: the open message shows this formatted text
             if let Some(m) = app.store.messages.iter_mut().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date) {
@@ -1030,6 +1100,14 @@ tel.: 600-100-200".into();
                             "<p>Dodaj proszę punkt o <b>terminach pierwszego przeglądu</b>:</p><ul><li>wstępny harmonogram</li><li>kto przygotowuje dane</li></ul><p style=\"color:#1a6\">Dzięki!</p>".as_bytes(),
                             "html",
                         );
+                        if std::env::var("POCZTA_INVITE_CARD").is_ok() {
+                            // test picture: the unfolded card is an invitation, with a link that
+                            // shows one site and opens another
+                            let ics = crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string());
+                            m.attachments.push("invite.ics".into());
+                            m.attachment_files.push(crate::model::cache_put(ics.as_bytes(), "ics"));
+                            m.html_path = crate::model::cache_put("<p>Logowanie do panelu: <a href=\"https://evil.example/login\">www.mojbank.pl</a> · <a href=\"https://www.mojbank.pl/x\">mojbank.pl</a></p>".as_bytes(), "html");
+                        }
                     }
                     if *mine {
                         m.folder = Folder::Sent;
@@ -1644,9 +1722,10 @@ impl eframe::App for MailApp {
             use std::sync::atomic::{AtomicBool, Ordering};
             static PRESSED: AtomicBool = AtomicBool::new(false);
             if !PRESSED.swap(true, Ordering::Relaxed) {
-                // test: Delete pressed inside the email
+                // test: Delete pressed inside the email (first: how many of its links are marked
+                // as opening another site than they show; the test page has 2 such of 4)
                 crate::diag::log(format!("keytest: selected before {:?}", self.selected));
-                self.mail_view.run_js("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))");
+                self.mail_view.run_js("location.href='poczta-key://marked-'+document.querySelectorAll('.pz-warn').length;setTimeout(function(){document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))},400)");
             }
         }
         if let Ok(file) = std::env::var("POCZTA_PREVIEW_TEST") {
@@ -1671,19 +1750,22 @@ impl eframe::App for MailApp {
             static SET: AtomicBool = AtomicBool::new(false);
             if !SET.swap(true, Ordering::Relaxed) {
                 // test: the shown message as a formatted email, with the menu opened over it later
-                let page = "<html><body style='font-family:Segoe UI;margin:24px'><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
+                // (its script and its `onerror=` must not run: each would say so in the log as a key)
+                let page = "<html><body style='font-family:Segoe UI;margin:24px'><script>location.href='poczta-key://email-script'</script><img src='x:' style='display:none' onerror=\"location.href='poczta-key://email-attribute'\"><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p><a href='https://evil.example/login'>www.mojbank.pl</a> · <a href='https://www.mojbank.pl/x'>mojbank.pl</a> · <a href='https://drive.example/f'>raport.pdf</a> · <a href='https://a.b.com.pl/'>https://c.d.com.pl/x</a></p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
                 let file = crate::model::cache_put(page.as_bytes(), "html");
                 let first = self.visible_ids().first().copied();
                 if let Some(m) = first.and_then(|id| self.msg_mut(id)) {
                     m.html_path = file;
                 }
                 self.selected = first;
+                self.mail_view.reload(); // (the message may be shown already, with its own text)
                 self.touched = true;
                 self.read_only = true; // the swapped text is never saved into the test's mailbox
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
         self.gcal_tick();
+        self.meeting_reminders();
         self.book_tick();
         self.chat_tick();
         if std::env::var("POCZTA_NOTIFY_TEST").is_ok() {
@@ -1715,7 +1797,11 @@ impl eframe::App for MailApp {
         if self.popup_click.1.try_iter().count() > 0 {
             if let Some(p) = self.popup.take() {
                 self.show_window(ctx);
-                if let Some(space) = p.chat {
+                if let Some(day) = p.day {
+                    self.module = Module::Calendar;
+                    self.cal_day = day;
+                    self.mini_shown = day;
+                } else if let Some(space) = p.chat {
                     self.module = Module::Chat;
                     self.chat_open(space);
                 } else {

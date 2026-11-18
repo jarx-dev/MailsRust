@@ -36,7 +36,7 @@ fn agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
-fn random_token(bytes: usize) -> String {
+pub(crate) fn random_token(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     if getrandom::fill(&mut buf).is_err() {
         // Extremely unlikely; fall back to time-based bytes so sign-in still works.

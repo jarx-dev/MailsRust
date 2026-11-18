@@ -126,14 +126,17 @@ fn stable_id(cal: &str, ev: &str, day: NaiveDate) -> u64 {
     (1 << 60) | (h.finish() >> 4)
 }
 
-/// The events of the calendars shown in Google Calendar, four months back to a year ahead.
-/// Events of the main calendar (not repeating, not whole-day) can be changed from the app.
-pub fn calendar_events(acc: &Account) -> Result<Vec<Event>, String> {
+/// The events of the calendars shown in Google Calendar, four months back to a year ahead, and
+/// the calendar-file ids of every meeting there (declined ones too: an invitation's own copy of
+/// such a meeting gives way to Google's). Events of the main calendar (not repeating) can be
+/// changed from the app.
+pub fn calendar_events(acc: &Account) -> Result<(Vec<Event>, std::collections::HashSet<String>), String> {
     let token = token(acc)?;
     let list = get(&token, &format!("{CAL}/users/me/calendarList?minAccessRole=reader"), "kalendarz")?;
     let today = Local::now().date_naive();
     let (from, to) = (rfc3339((today - Duration::days(120)).and_time(NaiveTime::MIN)), rfc3339((today + Duration::days(400)).and_time(NaiveTime::MIN)));
     let mut out = Vec::new();
+    let mut uids = std::collections::HashSet::new();
     let cals: Vec<Value> = list["items"].as_array().cloned().unwrap_or_default().into_iter().filter(|c| c["selected"].as_bool().unwrap_or(c["primary"].as_bool().unwrap_or(false))).collect();
     for (i, c) in cals.iter().enumerate() {
         let cal_id = c["id"].as_str().unwrap_or_default();
@@ -149,6 +152,9 @@ pub fn calendar_events(acc: &Account) -> Result<Vec<Event>, String> {
                 if e["status"].as_str() == Some("cancelled") {
                     continue;
                 }
+                if let Some(u) = e["iCalUID"].as_str() {
+                    uids.insert(u.to_string());
+                }
                 // declined invitations are not shown
                 let declined = e["attendees"].as_array().is_some_and(|a| a.iter().any(|x| x["self"].as_bool() == Some(true) && x["responseStatus"].as_str() == Some("declined")));
                 if declined {
@@ -158,8 +164,9 @@ pub fn calendar_events(acc: &Account) -> Result<Vec<Event>, String> {
                 let gid = e["id"].as_str().unwrap_or_default().to_string();
                 let title = e["summary"].as_str().filter(|t| !t.trim().is_empty()).map(String::from).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
                 let location = e["location"].as_str().unwrap_or_default().to_string();
-                let editable = primary && e["recurringEventId"].is_null() && !all_day;
-                let days = if all_day { (en.date() - s.date()).num_days().clamp(1, 31) } else { 1 };
+                let editable = primary && e["recurringEventId"].is_null();
+                // (one day over the editor's 31: a longer event shows as one the editor leaves alone)
+                let days = if all_day { (en.date() - s.date()).num_days().clamp(1, 32) } else { 1 };
                 for k in 0..days {
                     let day = s.date() + Duration::days(k);
                     let minutes = if all_day { 24 * 60 } else { (en - s).num_minutes().min(24 * 60 - (s.time() - NaiveTime::MIN).num_minutes()).max(15) };
@@ -183,22 +190,64 @@ pub fn calendar_events(acc: &Account) -> Result<Vec<Event>, String> {
             }
         }
     }
-    Ok(out)
+    Ok((out, uids))
+}
+
+/// The meeting of an invitation in the main Google calendar, found by its calendar file's id
+/// (of a repeating meeting: the meeting itself, not one of its changed days).
+fn invited(token: &str, uid: &str) -> Result<Option<Value>, String> {
+    let found = get(token, &format!("{CAL}/calendars/primary/events?iCalUID={}", enc(uid)), "kalendarz")?;
+    let items = found["items"].as_array().cloned().unwrap_or_default();
+    Ok(items.iter().find(|e| e["recurringEventId"].is_null()).or(items.first()).cloned())
+}
+
+/// The answer already given to an invitation (`needsAction`, `accepted`, `tentative`,
+/// `declined`), as Google has it; None when the meeting is not there or this account is no guest.
+pub fn invitation_answer(acc: &Account, uid: &str) -> Result<Option<String>, String> {
+    let bearer = token(acc)?;
+    let ev = invited(&bearer, uid)?;
+    Ok(ev.and_then(|e| e["attendees"].as_array()?.iter().find(|p| p["self"].as_bool() == Some(true))?["responseStatus"].as_str().map(String::from)))
+}
+
+/// What is sent to Google about an event (`new`: made now, not changed): a whole-day one by
+/// its dates (the end is the day after), one with an hour by its times.
+fn event_body(e: &Event, days: i64, new: bool) -> Value {
+    // (a change clears the other kind of time, or Google would get both)
+    let at = |k: &str, v: String| match (new, k) {
+        (true, "date") => json!({ "date": v }),
+        (true, _) => json!({ "dateTime": v }),
+        (false, "date") => json!({ "date": v, "dateTime": null }),
+        _ => json!({ "dateTime": v, "date": null }),
+    };
+    let (start, end) = if e.all_day {
+        let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+        (at("date", day(e.date)), at("date", day(e.date + Duration::days(days.max(1)))))
+    } else {
+        let s = e.date.and_time(e.start);
+        (at("dateTime", rfc3339(s)), at("dateTime", rfc3339(s + Duration::minutes(e.minutes.max(5)))))
+    };
+    json!({ "summary": e.title, "location": e.location, "start": start, "end": end })
 }
 
 /// An event made or changed in the app, written to the main Google calendar: its id there.
-pub fn save_event(acc: &Account, gid: &str, title: &str, location: &str, start: NaiveDateTime, minutes: i64) -> Result<String, String> {
+/// A whole-day event lasts `days` days. `guests` (e-mail addresses) are added to the people
+/// already invited; Google sends them the invitation, and the others word of the change.
+pub fn save_event(acc: &Account, gid: &str, e: &Event, days: i64, guests: &[String]) -> Result<String, String> {
     let token = token(acc)?;
-    let body = json!({
-        "summary": title,
-        "location": location,
-        "start": {"dateTime": rfc3339(start)},
-        "end": {"dateTime": rfc3339(start + Duration::minutes(minutes.max(5)))},
-    });
+    let mut body = event_body(e, days, gid.is_empty());
+    if !guests.is_empty() {
+        let mut people = if gid.is_empty() { Vec::new() } else { get(&token, &format!("{CAL}/calendars/primary/events/{}", enc(gid)), "kalendarz")?["attendees"].as_array().cloned().unwrap_or_default() };
+        for g in guests {
+            if !people.iter().any(|p| p["email"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(g))) {
+                people.push(json!({ "email": g }));
+            }
+        }
+        body["attendees"] = json!(people);
+    }
     let v = if gid.is_empty() {
-        send(&token, "POST", &format!("{CAL}/calendars/primary/events"), Some(body), "kalendarz")?
+        send(&token, "POST", &format!("{CAL}/calendars/primary/events?sendUpdates=all"), Some(body), "kalendarz")?
     } else {
-        send(&token, "PATCH", &format!("{CAL}/calendars/primary/events/{}", enc(gid)), Some(body), "kalendarz")?
+        send(&token, "PATCH", &format!("{CAL}/calendars/primary/events/{}?sendUpdates=all", enc(gid)), Some(body), "kalendarz")?
     };
     v["id"].as_str().map(String::from).ok_or_else(|| t!("cal.google.event_unconfirmed").into_owned())
 }
@@ -206,6 +255,19 @@ pub fn save_event(acc: &Account, gid: &str, title: &str, location: &str, start: 
 pub fn delete_event(acc: &Account, gid: &str) -> Result<(), String> {
     let token = token(acc)?;
     send(&token, "DELETE", &format!("{CAL}/calendars/primary/events/{}", enc(gid)), None, "kalendarz").map(|_| ())
+}
+
+/// The answer to an invitation (`accepted`, `tentative` or `declined`), written to the meeting
+/// in the main Google calendar; Google tells the organiser. The meeting is found by the id of
+/// its calendar file (Google puts invitations sent to this address into the calendar itself).
+pub fn answer_invitation(acc: &Account, uid: &str, answer: &str) -> Result<(), String> {
+    let token = token(acc)?;
+    let ev = invited(&token, uid)?.ok_or_else(|| t!("cal.invite.not_in_calendar").into_owned())?;
+    let mut people = ev["attendees"].as_array().cloned().unwrap_or_default();
+    let me = people.iter_mut().find(|p| p["self"].as_bool() == Some(true)).ok_or_else(|| t!("cal.invite.not_invited").into_owned())?;
+    me["responseStatus"] = json!(answer);
+    let id = ev["id"].as_str().unwrap_or_default();
+    send(&token, "PATCH", &format!("{CAL}/calendars/primary/events/{}?sendUpdates=all", enc(id)), Some(json!({ "attendees": people })), "kalendarz").map(|_| ())
 }
 
 // ------------------------------------------------------------ contacts
@@ -732,6 +794,21 @@ fn apply_existing(token: &str, filter: &Value) -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn events_are_sent_whole_day_or_with_hours() {
+        use chrono::{NaiveDate, NaiveTime};
+        let d = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+        let e = crate::model::Event { id: 1, title: "W".into(), date: d, start: NaiveTime::MIN, minutes: 1440, location: String::new(), color: 0, google: true, all_day: true, gid: "g".into() };
+        // two days over the month's end; a change clears the hour Google may have had
+        let b = super::event_body(&e, 2, false);
+        assert_eq!((b["start"]["date"].as_str(), b["end"]["date"].as_str()), (Some("2026-11-30"), Some("2026-12-02")));
+        assert!(b["start"].as_object().unwrap().contains_key("dateTime") && b["start"]["dateTime"].is_null());
+        let timed = crate::model::Event { all_day: false, start: NaiveTime::from_hms_opt(9, 30, 0).unwrap(), minutes: 45, ..e };
+        let b = super::event_body(&timed, 1, true);
+        assert!(b["start"]["dateTime"].as_str().unwrap().starts_with("2026-11-30T09:30:00") && b["end"]["dateTime"].as_str().unwrap().starts_with("2026-11-30T10:15:00"));
+        assert!(!b["start"].as_object().unwrap().contains_key("date"));
+    }
+
     #[test]
     fn gmail_rules_read_in_words() {
         let f = serde_json::json!({

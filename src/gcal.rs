@@ -111,8 +111,15 @@ fn parse_when(p: &Prop) -> Option<When> {
 
 fn parse_value(v: &str, date_only: bool) -> Option<When> {
     let v = v.trim();
+    // (only plain digits: a signed or longer year chrono would take may overflow later sums)
+    if !v.get(..8).is_some_and(|d| d.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
     if date_only || v.len() == 8 {
-        return NaiveDate::parse_from_str(&v[..8.min(v.len())], "%Y%m%d").ok().map(When::Day);
+        return NaiveDate::parse_from_str(&v[..8], "%Y%m%d").ok().map(When::Day);
+    }
+    if !v.get(8..15).is_some_and(|t| t.starts_with('T') && t[1..].bytes().all(|b| b.is_ascii_digit())) {
+        return None;
     }
     let t = NaiveDateTime::parse_from_str(v.trim_end_matches('Z'), "%Y%m%dT%H%M%S").ok()?;
     if v.ends_with('Z') {
@@ -136,17 +143,18 @@ fn parse_duration(s: &str) -> Option<i64> {
             _ => {
                 let n: i64 = num.parse().unwrap_or(0);
                 num.clear();
-                total += n * match c {
+                total = total.saturating_add(n.saturating_mul(match c {
                     'W' => 7 * 24 * 60,
                     'D' => 24 * 60,
                     'H' => 60,
                     'M' => 1,
                     _ => 0,
-                };
+                }));
             }
         }
     }
-    Some(total)
+    // (at most a year: a file from an email must not make the times overflow)
+    Some(total.min(366 * 24 * 60))
 }
 
 /// A repeat rule (RRULE), the parts Google uses.
@@ -158,6 +166,8 @@ struct Rule {
     until: Option<NaiveDate>,
     by_day: Vec<(i32, Weekday)>,
     by_month_day: Vec<i32>,
+    /// (read for time zones' changes of clock, e.g. the last Sunday of March)
+    by_month: Vec<u32>,
 }
 
 fn weekday(s: &str) -> Option<Weekday> {
@@ -179,7 +189,8 @@ fn parse_rule(s: &str) -> Rule {
         let Some((k, v)) = part.split_once('=') else { continue };
         match k.to_ascii_uppercase().as_str() {
             "FREQ" => r.freq = v.to_ascii_uppercase(),
-            "INTERVAL" => r.interval = v.parse().unwrap_or(1).max(1),
+            // (bounded: a file from an email must not make the dates overflow)
+            "INTERVAL" => r.interval = v.parse().unwrap_or(1).clamp(1, 1000),
             "COUNT" => r.count = v.parse().ok(),
             "UNTIL" => r.until = parse_value(v, false).or_else(|| parse_value(v, true)).map(When::date),
             "BYDAY" => {
@@ -187,16 +198,135 @@ fn parse_rule(s: &str) -> Rule {
                     .split(',')
                     .filter_map(|d| {
                         let d = d.trim();
-                        let (n, wd) = d.split_at(d.len().saturating_sub(2));
-                        Some((n.parse().unwrap_or(0), weekday(wd)?))
+                        let (n, wd) = d.split_at(d.len().checked_sub(2).filter(|&i| d.is_char_boundary(i))?);
+                        Some((n.parse::<i32>().unwrap_or(0).clamp(-5, 5), weekday(wd)?))
                     })
                     .collect()
             }
             "BYMONTHDAY" => r.by_month_day = v.split(',').filter_map(|d| d.trim().parse().ok()).collect(),
+            "BYMONTH" => r.by_month = v.split(',').filter_map(|d| d.trim().parse().ok()).collect(),
             _ => {}
         }
     }
+    // (each day once and no more than a month has: repeated ones would only cost time)
+    let mut days = Vec::new();
+    r.by_day.retain(|d| !days.contains(d) && days.len() < 35 && {
+        days.push(*d);
+        true
+    });
+    r.by_month_day.dedup();
+    r.by_month_day.truncate(31);
     r
+}
+
+/// One change of a time zone's clock (`STANDARD` / `DAYLIGHT` of a `VTIMEZONE`): from when (on
+/// the clock before it), how it repeats, and the offsets from universal time before and after, in seconds.
+#[derive(Debug)]
+struct Shift {
+    start: NaiveDateTime,
+    rule: Option<Rule>,
+    dates: Vec<NaiveDateTime>,
+    from: i64,
+    to: i64,
+}
+
+impl Shift {
+    /// The last time it happened at or before `t` (both on the zone's clock).
+    fn last(&self, t: NaiveDateTime) -> Option<NaiveDateTime> {
+        let mut at: Vec<NaiveDateTime> = self.dates.iter().copied().chain([self.start]).filter(|d| *d <= t).collect();
+        if let Some(r) = &self.rule {
+            let month = r.by_month.first().copied().unwrap_or(self.start.month());
+            // a day of the month (negative: from its end)
+            let month_day = |year: i32, md: i32| {
+                if md > 0 {
+                    NaiveDate::from_ymd_opt(year, month, md as u32)
+                } else {
+                    let (y, m) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+                    NaiveDate::from_ymd_opt(y, m, 1).map(|d| d + Duration::days(md.max(-31) as i64))
+                }
+            };
+            // (a rule that ended counts in its last year)
+            for year in [t.year() - 1, t.year()].into_iter().chain(r.until.map(|u| u.year())) {
+                let day = match (r.by_day.first(), r.by_month_day.as_slice()) {
+                    // "the Sunday among the 8th–14th", as older calendar programs write the 2nd Sunday
+                    (Some(&(0, wd)), mds) if !mds.is_empty() => mds.iter().filter_map(|&md| month_day(year, md)).find(|d| d.weekday() == wd),
+                    (Some(&(n, wd)), _) => nth_weekday(year, month, wd, if n == 0 { 1 } else { n }),
+                    (None, [md, ..]) => month_day(year, *md),
+                    _ => NaiveDate::from_ymd_opt(year, month, self.start.day()),
+                };
+                if let Some(d) = day.map(|d| d.and_time(self.start.time())) {
+                    // (UNTIL is in universal time, read on this computer's clock: a day of slack)
+                    if d >= self.start && d <= t && r.until.is_none_or(|u| d.date() <= u + Duration::days(1)) {
+                        at.push(d);
+                    }
+                }
+            }
+        }
+        at.into_iter().max()
+    }
+}
+
+/// "+0100", "-0500", "+053000" → seconds east of universal time.
+fn offset(v: &str) -> Option<i64> {
+    let v = v.trim();
+    let sign = match v.as_bytes().first()? {
+        b'-' => -1,
+        b'+' => 1,
+        _ => return None,
+    };
+    let n = |r: std::ops::Range<usize>| v.get(r).and_then(|s| s.parse::<i64>().ok());
+    Some(sign * (n(1..3)? * 3600 + n(3..5)? * 60 + n(5..7).unwrap_or(0)))
+}
+
+/// The time zones a calendar file describes itself (its `VTIMEZONE` blocks), by name.
+type Zones = HashMap<String, Vec<Shift>>;
+
+fn zones(ics: &str) -> Zones {
+    let mut out: Zones = HashMap::new();
+    let (mut name, mut cur): (Option<String>, Option<Vec<Prop>>) = (None, None);
+    for line in unfold(ics).lines().map(str::trim_end) {
+        let upper = line.to_ascii_uppercase();
+        match upper.as_str() {
+            "BEGIN:VTIMEZONE" => name = Some(String::new()),
+            "END:VTIMEZONE" => name = None,
+            "BEGIN:STANDARD" | "BEGIN:DAYLIGHT" if name.is_some() => cur = Some(Vec::new()),
+            "END:STANDARD" | "END:DAYLIGHT" => {
+                let Some(b) = cur.take() else { continue };
+                let get = |n: &str| b.iter().find(|p| p.name == n);
+                let start = get("DTSTART").and_then(|p| NaiveDateTime::parse_from_str(p.value.trim(), "%Y%m%dT%H%M%S").ok());
+                let (Some(start), Some(from), Some(to)) = (start, get("TZOFFSETFROM").and_then(|p| offset(&p.value)), get("TZOFFSETTO").and_then(|p| offset(&p.value))) else { continue };
+                let dates = b.iter().filter(|p| p.name == "RDATE").flat_map(|p| p.value.split(',')).filter_map(|v| NaiveDateTime::parse_from_str(v.trim(), "%Y%m%dT%H%M%S").ok()).collect();
+                let shift = Shift { start, rule: get("RRULE").map(|p| parse_rule(&p.value)), dates, from, to };
+                if let Some(n) = name.as_ref().filter(|n| !n.is_empty()) {
+                    out.entry(n.clone()).or_default().push(shift);
+                }
+            }
+            _ => {
+                if let (Some(n), None, Some(p)) = (name.as_mut(), &cur, parse_line(line)) {
+                    if p.name == "TZID" {
+                        *n = p.value.trim().to_string();
+                    }
+                } else if let (Some(b), Some(p)) = (cur.as_mut(), parse_line(line)) {
+                    b.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A time on the clock of zone `tzid` (as the file describes it) on this computer's clock;
+/// None when the file does not describe that zone.
+fn zone_to_local(zones: &Zones, tzid: &str, t: NaiveDateTime) -> Option<NaiveDateTime> {
+    let shifts = zones.get(tzid)?;
+    let off = shifts
+        .iter()
+        .filter_map(|s| s.last(t).map(|at| (at, s.to)))
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, to)| to)
+        // before the first change the file knows of: the clock as it was before it
+        .or_else(|| shifts.iter().min_by_key(|s| s.start).map(|s| s.from))?;
+    Some(Utc.from_utc_datetime(&(t - Duration::seconds(off))).with_timezone(&Local).naive_local())
 }
 
 /// The `n`-th `wd` of a month (negative: from the end).
@@ -276,11 +406,33 @@ fn stable_id(uid: &str, day: NaiveDate, n: usize) -> u64 {
     ID_BASE | (h.finish() >> 4)
 }
 
-/// The events of one calendar file between `from` and `to`, in colour `color`.
-pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
-    // lines that continue on the next line (starting with a space) joined back
-    let text = ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
-    // every event's lines
+/// The id of a meeting put into the calendar from an invitation (one per day it is on): told
+/// apart from every other event by its top bits, and found again by the meeting's own id.
+pub fn invite_id(uid: &str, day: NaiveDate) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (uid, day).hash(&mut h);
+    (1 << 59) | (h.finish() >> 5)
+}
+
+pub fn is_invite(id: u64) -> bool {
+    id >> 59 == 1
+}
+
+/// The days of an invitation's meeting (repeats too), as read-only events for the calendar,
+/// four months back to a year ahead of `today`.
+pub fn invite_events(ics: &str, today: NaiveDate) -> Vec<Event> {
+    let Some(inv) = invitation(ics) else { return Vec::new() };
+    let mut evs = parse(ics, 2, today - Duration::days(120), today + Duration::days(400));
+    for e in &mut evs {
+        e.id = invite_id(&inv.uid, e.date);
+    }
+    evs
+}
+
+/// The events of a calendar file, each as its lines (lines continued on the next one joined back).
+fn blocks(ics: &str) -> Vec<Vec<Prop>> {
+    let text = unfold(ics);
     let mut blocks: Vec<Vec<Prop>> = Vec::new();
     let mut cur: Option<Vec<Prop>> = None;
     for line in text.lines() {
@@ -297,6 +449,202 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             }
         }
     }
+    blocks
+}
+
+/// A calendar file with its long lines joined back (a line continued starts with a space or tab).
+fn unfold(ics: &str) -> String {
+    ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "")
+}
+
+/// The e-mail address of a calendar person (`mailto:a@b`); "" when it is not one
+/// address (an answer is sent to it: never to a list).
+fn mailto(value: &str) -> String {
+    let v = value.trim();
+    let v = match v.get(..7) {
+        Some(p) if p.eq_ignore_ascii_case("mailto:") => &v[7..],
+        _ => v,
+    };
+    let v = v.trim();
+    // (as written: a mail server may tell the letters of the part before @ apart)
+    if v.parse::<lettre::Address>().is_ok() && !v.contains([',', ';']) { v.to_string() } else { String::new() }
+}
+
+/// The answer to an invitation for its organiser (iTIP `REPLY`, RFC 5546): the meeting named as
+/// the invitation names it (its time zones too), and one guest, `me`, with `answer` (`accepted`,
+/// `tentative` or `declined`). None when the file has no meeting or no organiser to answer.
+pub fn reply(ics: &str, me: &str, answer: &str, now: chrono::DateTime<Utc>) -> Option<String> {
+    let partstat = match answer {
+        "accepted" => "ACCEPTED",
+        "tentative" => "TENTATIVE",
+        _ => "DECLINED",
+    };
+    let text = unfold(ics);
+    let (mut zones, mut kept, mut zone, mut event, mut done) = (String::new(), String::new(), false, false, false);
+    // (blocks inside the meeting, e.g. its alarm, are left out; each property once)
+    let (mut inner, mut seen) = (0usize, HashSet::new());
+    for line in text.lines().map(str::trim_end) {
+        let upper = line.to_ascii_uppercase();
+        if upper == "BEGIN:VTIMEZONE" {
+            zone = true;
+        }
+        if zone {
+            zones.push_str(line);
+            zones.push_str("\r\n");
+            zone = upper != "END:VTIMEZONE";
+        } else if upper == "BEGIN:VEVENT" && !done {
+            event = true;
+        } else if upper == "END:VEVENT" && event && inner == 0 {
+            (event, done) = (false, true);
+        } else if event && upper.starts_with("BEGIN:") {
+            inner += 1;
+        } else if event && upper.starts_with("END:") {
+            inner = inner.saturating_sub(1);
+        } else if event && inner == 0 {
+            let name = upper.split([';', ':']).next().unwrap_or("").to_string();
+            if ["UID", "RECURRENCE-ID", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY", "ORGANIZER"].contains(&name.as_str()) && seen.insert(name) {
+                kept.push_str(line);
+                kept.push_str("\r\n");
+            }
+        }
+    }
+    let organizer = kept.lines().find(|l| l.to_ascii_uppercase().starts_with("ORGANIZER")).and_then(parse_line).map(|p| mailto(&p.value))?;
+    if organizer.is_empty() || !seen.contains("UID") {
+        return None;
+    }
+    let me = me.trim();
+    let lines = format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Poczta//Poczta//EN\r\nMETHOD:REPLY\r\n{zones}BEGIN:VEVENT\r\n{kept}DTSTAMP:{}\r\nATTENDEE;PARTSTAT={partstat}:mailto:{me}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        now.format("%Y%m%dT%H%M%SZ")
+    );
+    // lines longer than 75 bytes go on in the next line, after a space (RFC 5545)
+    let mut out = String::with_capacity(lines.len() + 64);
+    for line in lines.split_terminator("\r\n") {
+        let mut n = 0;
+        for c in line.chars() {
+            if n + c.len_utf8() > 75 {
+                out.push_str("\r\n ");
+                n = 1;
+            }
+            out.push(c);
+            n += c.len_utf8();
+        }
+        out.push_str("\r\n");
+    }
+    Some(out)
+}
+
+/// A meeting sent by email (the calendar file inside an invitation).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Invitation {
+    /// its id, the same in every calendar it is in
+    pub uid: String,
+    pub title: String,
+    pub location: String,
+    pub start: NaiveDateTime,
+    pub minutes: i64,
+    pub all_day: bool,
+    /// the time zone the time is written in, when it could not be put on this computer's clock
+    pub zone: String,
+    /// the organiser called it off (the email says so; nothing to answer)
+    pub cancelled: bool,
+    /// an invitation asking for an answer (not somebody's answer or a plain calendar file)
+    pub asks: bool,
+    /// who to answer (an e-mail address; "" when it does not say)
+    pub organizer: String,
+    /// how new this word about the meeting is: the organiser's change count and when it was
+    /// written (an older email must not undo a newer one)
+    pub version: (i64, String),
+    /// about one day of a repeating meeting only (its RECURRENCE-ID as written; "" for the meeting itself)
+    pub recurrence: String,
+    /// older than what the calendar already knows of the meeting (shown, not answered)
+    pub stale: bool,
+}
+
+impl Invitation {
+    /// About one day of a repeating meeting only (not the series).
+    pub fn instance(&self) -> bool {
+        !self.recurrence.is_empty()
+    }
+
+    /// The day of the series this one day was first set for (it may have been moved since).
+    /// shortcut: RECURRENCE-ID with a TZID is taken as written, not moved to this computer's
+    /// clock; upgrade if a day called off far from here misses its copy.
+    pub fn day(&self) -> NaiveDate {
+        match parse_value(&self.recurrence, false) {
+            Some(When::Day(d)) => d,
+            Some(When::At(t)) => t.date(),
+            None => self.start.date(),
+        }
+    }
+
+    /// What an answer is kept under: the meeting (or its one day) as of this change of it (a
+    /// meeting moved by its organiser asks for the answer anew).
+    pub fn key(&self) -> String {
+        format!("{}\u{1f}{}\u{1f}{}", self.uid, self.recurrence, self.version.0)
+    }
+}
+
+/// The meeting of an invitation's calendar file (its first event), if it is one.
+pub fn invitation(ics: &str) -> Option<Invitation> {
+    let method = ics.lines().find_map(|l| l.trim().to_ascii_uppercase().strip_prefix("METHOD:").map(|m| m.trim().to_string())).unwrap_or_default();
+    let b = blocks(ics).into_iter().next()?;
+    let get = |n: &str| b.iter().find(|p| p.name == n);
+    let start_p = get("DTSTART")?;
+    let start = parse_when(start_p)?;
+    let (all_day, at) = match start {
+        When::Day(d) => (true, d.and_time(NaiveTime::MIN)),
+        When::At(t) => (false, t),
+    };
+    let minutes = match (start, get("DTEND").and_then(parse_when)) {
+        (When::At(s), Some(When::At(e))) => (e - s).num_minutes().max(0),
+        (When::Day(s), Some(When::Day(e))) => (e - s).num_days().max(1) * 1440,
+        _ => get("DURATION").and_then(|p| parse_duration(&p.value)).unwrap_or(if all_day { 1440 } else { 60 }),
+    };
+    // a time in a named zone, on this computer's clock when the file describes the zone
+    let tzid = start_p.params.get("TZID").filter(|_| !all_day);
+    let here = tzid.and_then(|z| zone_to_local(&zones(ics), z, at));
+    Some(Invitation {
+        uid: get("UID").map(|p| p.value.trim().to_string()).filter(|u| !u.is_empty())?,
+        title: get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()).chars().take(300).collect(),
+        location: get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default().chars().take(300).collect(),
+        start: here.unwrap_or(at),
+        minutes,
+        all_day,
+        // (a time ending in Z is turned into this computer's too; one it could not turn is as
+        // written, its zone named beside it)
+        zone: if here.is_some() { String::new() } else { tzid.cloned().unwrap_or_default() },
+        cancelled: method == "CANCEL" || get("STATUS").is_some_and(|p| p.value.eq_ignore_ascii_case("CANCELLED")),
+        asks: method == "REQUEST",
+        organizer: get("ORGANIZER").map(|p| mailto(&p.value)).unwrap_or_default(),
+        version: (get("SEQUENCE").and_then(|p| p.value.trim().parse().ok()).unwrap_or(0), get("DTSTAMP").map(|p| p.value.trim().to_string()).unwrap_or_default()),
+        recurrence: get("RECURRENCE-ID").map(|p| p.value.trim().to_string()).unwrap_or_default(),
+        stale: false,
+    })
+}
+
+/// The events of the calendar at the same time as an invitation's meeting (not whole days, not
+/// the meeting itself: its copy from the invitation, or Google's with the same title and start).
+pub fn clashes<'a>(events: &'a [Event], inv: &Invitation) -> Vec<&'a Event> {
+    if inv.all_day {
+        return Vec::new();
+    }
+    let end = inv.start + Duration::minutes(inv.minutes.max(1));
+    events
+        .iter()
+        .filter(|e| {
+            let s = e.date.and_time(e.start);
+            !e.all_day && s < end && s + Duration::minutes(e.minutes.max(1)) > inv.start && !(s == inv.start && e.title == inv.title)
+        })
+        .filter(|e| e.id != invite_id(&inv.uid, e.date))
+        .collect()
+}
+
+/// The events of one calendar file between `from` and `to`, in colour `color`.
+pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
+    // every event's lines, and the time zones the file describes
+    let blocks = blocks(ics);
+    let zones = zones(ics);
     // changed single days of repeating events: (uid, day) → handled by their own block
     let mut moved: HashSet<(String, NaiveDate)> = HashSet::new();
     for b in &blocks {
@@ -312,9 +660,11 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             continue;
         }
         let Some(start) = get("DTSTART").and_then(parse_when) else { continue };
+        let tz = get("DTSTART").and_then(|p| p.params.get("TZID"));
         let uid = get("UID").map(|p| p.value.clone()).unwrap_or_default();
-        let title = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned());
-        let location = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default();
+        // (cut short: every repeat keeps its own copy, a huge one would be kept hundreds of times)
+        let title: String = get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()).chars().take(300).collect();
+        let location: String = get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default().chars().take(300).collect();
         let end = get("DTEND").and_then(parse_when);
         let dur = get("DURATION").and_then(|p| parse_duration(&p.value));
         // length: minutes for timed events, days for whole-day ones
@@ -346,6 +696,12 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             if excluded.contains(&d) || (!is_override && moved.contains(&(uid.clone(), d))) {
                 continue;
             }
+            // on this computer's clock, each repeat on its own (the zone's summer time may start
+            // on another day than here); a zone the file does not describe: as written
+            let (d, time) = match tz.filter(|_| !all_day).and_then(|z| zone_to_local(&zones, z, d.and_time(time))) {
+                Some(at) => (at.date(), at.time()),
+                None => (d, time),
+            };
             for k in 0..days {
                 let day = d + Duration::days(k);
                 if day < from || day > to {
@@ -735,3 +1091,156 @@ SUMMARY:Odwołane\r
 END:VEVENT\r
 END:VCALENDAR\r
 ";
+
+/// The calendar file of an invitation to a meeting, as mail programs send it.
+pub const SAMPLE_INVITE: &str = "BEGIN:VCALENDAR\r
+METHOD:REQUEST\r
+BEGIN:VEVENT\r
+UID:invite-1@example.com\r
+DTSTART:20261120T090000Z\r
+DTEND:20261120T103000Z\r
+SUMMARY:Przegląd wdrożenia\\, etap 2\r
+LOCATION:Sala B\r
+ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invitation_read_from_its_calendar_file() {
+        let i = invitation(SAMPLE_INVITE).unwrap();
+        assert_eq!((i.uid.as_str(), i.title.as_str(), i.location.as_str()), ("invite-1@example.com", "Przegląd wdrożenia, etap 2", "Sala B"));
+        assert!(i.asks && !i.cancelled && !i.all_day && i.zone.is_empty());
+        assert_eq!(i.minutes, 90);
+        // a time in universal time is shown on this computer's clock
+        assert_eq!(i.start, Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap().with_timezone(&Local).naive_local());
+        // called off; a named time zone is kept to be shown; a whole day
+        let off = invitation(&SAMPLE_INVITE.replace("METHOD:REQUEST", "METHOD:CANCEL").replace("DTSTART:20261120T090000Z", "DTSTART;TZID=Europe/London:20261120T090000").replace("DTEND:20261120T103000Z", "DURATION:PT45M")).unwrap();
+        assert!(off.cancelled && !off.asks);
+        assert_eq!((off.zone.as_str(), off.minutes, off.start.format("%H:%M").to_string().as_str()), ("Europe/London", 45, "09:00"));
+        let day = invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;VALUE=DATE:20261120").replace("DTEND:20261120T103000Z", "DTEND;VALUE=DATE:20261122")).unwrap();
+        assert!(day.all_day && day.minutes == 2 * 1440);
+        // somebody's answer, a plain calendar file and a file without a meeting are not invitations to answer
+        assert!(!invitation(&SAMPLE_INVITE.replace("METHOD:REQUEST", "METHOD:REPLY")).unwrap().asks);
+        assert!(!invitation(SAMPLE).unwrap().asks);
+        assert!(invitation("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR").is_none());
+        // in the calendar: every day of a repeating meeting, each found again by the meeting's id
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let weekly = invite_events(&SAMPLE_INVITE.replace("LOCATION:Sala B", "RRULE:FREQ=WEEKLY;COUNT=3"), today);
+        assert_eq!(weekly.len(), 3);
+        assert!(weekly.iter().all(|e| is_invite(e.id) && e.id == invite_id("invite-1@example.com", e.date) && e.google && e.gid.is_empty()));
+        assert!(!is_invite(stable_id("invite-1@example.com", today, 0)) && !is_invite(7));
+        assert!(invite_events(&SAMPLE_INVITE.replace("UID:", "STATUS:CANCELLED\r\nUID:"), today).is_empty());
+    }
+
+    #[test]
+    fn what_an_invitation_clashes_with() {
+        let inv = invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;TZID=X:20261120T090000").replace("DTEND:20261120T103000Z", "DURATION:PT90M")).unwrap();
+        let day = inv.start.date();
+        let ev = |title: &str, h: u32, m: u32, minutes: i64| Event {
+            id: 7,
+            title: title.into(),
+            date: day,
+            start: NaiveTime::from_hms_opt(h, m, 0).unwrap(),
+            minutes,
+            location: String::new(),
+            color: 0,
+            google: false,
+            all_day: false,
+            gid: String::new(),
+        };
+        let mut own = ev(&inv.title, 9, 0, 90);
+        own.id = invite_id(&inv.uid, day);
+        let mut whole = ev("Urlop", 0, 0, 1440);
+        whole.all_day = true;
+        let evs = [ev("Stand-up", 10, 15, 15), ev("Lunch", 10, 30, 30), ev("Early", 8, 0, 60), own, ev(&inv.title, 9, 0, 90), whole];
+        let titles: Vec<&str> = clashes(&evs, &inv).iter().map(|e| e.title.as_str()).collect();
+        // touching at the end or the start is no clash; the meeting itself and whole days are not counted
+        assert_eq!(titles, ["Stand-up"]);
+        assert!(clashes(&evs, &Invitation { all_day: true, ..inv }).is_empty());
+    }
+
+    #[test]
+    fn times_in_a_named_zone_are_put_on_this_computers_clock() {
+        let here = |y, mo, d, h, mi| Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap().with_timezone(&Local).naive_local();
+        let ny = "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\nDTSTART:19700308T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\nDTSTART:19701101T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n";
+        let invite = |start: &str| SAMPLE_INVITE.replace("METHOD:REQUEST\r\n", &format!("METHOD:REQUEST\r\n{ny}")).replace("DTSTART:20261120T090000Z", &format!("DTSTART;TZID=America/New_York:{start}")).replace("DTEND:20261120T103000Z", "DURATION:PT1H");
+        // winter (-5) and summer (-4) in New York; the zone is no longer named beside the time
+        let w = invitation(&invite("20261120T090000")).unwrap();
+        assert_eq!((w.start, w.zone.as_str(), w.minutes), (here(2026, 11, 20, 14, 0), "", 60));
+        assert_eq!(invitation(&invite("20260710T090000")).unwrap().start, here(2026, 7, 10, 13, 0));
+        // a zone the file does not describe: as written, named
+        let other = invitation(&invite("20261120T090000").replace("TZID=America/New_York", "TZID=Mars/Base")).unwrap();
+        assert_eq!((other.start.format("%H:%M").to_string().as_str(), other.zone.as_str()), ("09:00", "Mars/Base"));
+        // a weekly meeting at 9:00 in Warsaw across the end of summer time (25 Oct 2026): each repeat on its own
+        let waw = "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:w\r\nDTSTART;TZID=Europe/Warsaw:20261020T090000\r\nDTEND;TZID=Europe/Warsaw:20261020T093000\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:Weekly\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let d = |m, day| NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+        let got: Vec<NaiveDateTime> = parse(waw, 0, d(10, 1), d(12, 1)).iter().map(|e| e.date.and_time(e.start)).collect();
+        assert_eq!(got, [here(2026, 10, 20, 7, 0), here(2026, 10, 27, 8, 0), here(2026, 11, 3, 8, 0)]);
+        // before the first change the file knows of: the clock before it
+        let z = zones(waw);
+        assert_eq!(zone_to_local(&z, "Europe/Warsaw", NaiveDate::from_ymd_opt(1960, 1, 1).unwrap().and_hms_opt(12, 0, 0).unwrap()), Some(Utc.with_ymd_and_hms(1960, 1, 1, 11, 0, 0).unwrap().with_timezone(&Local).naive_local()));
+        assert_eq!((offset("+053000"), offset("-0500"), offset("0100")), (Some(19800), Some(-18000), None));
+    }
+
+    #[test]
+    fn a_hostile_or_old_style_calendar_file_is_read_safely() {
+        // bytes cut inside a letter, huge repeats: no panic, nothing wrong shown
+        let bad = SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;VALUE=DATE:2026112ż").replace("LOCATION:Sala B", "RRULE:FREQ=WEEKLY;INTERVAL=99999999999;BYDAY=żż,-2147483648SU");
+        assert!(invitation(&bad).is_none());
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let _ = parse(&bad.replace("DTSTART;VALUE=DATE:2026112ż", "DTSTART:20261120T090000Z"), 0, today, today + Duration::days(400));
+        // the newest word wins; one day of a series is told apart
+        let i = invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:3\r\nDTSTAMP:20261118T070000Z\r\nRECURRENCE-ID:20261127T090000Z\r\nUID:")).unwrap();
+        assert_eq!((i.version.0, i.version.1.as_str(), i.instance(), i.recurrence.as_str()), (3, "20261118T070000Z", true, "20261127T090000Z"));
+        // its day is the one the series set, wherever it was moved to
+        assert_eq!(i.day(), NaiveDate::from_ymd_opt(2026, 11, 27).unwrap());
+        // a year chrono would take but no sum could reach past it (the bar adds the length)
+        assert!(invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART:+2621421231T235900")).is_none());
+        assert!(parse_value("2026 1 1T090000", false).is_none() && parse_value("20261120 T0900000", false).is_none());
+        assert!(!invitation(SAMPLE_INVITE).unwrap().instance());
+        // an answer is kept per meeting, its one day and its change count
+        assert_ne!(i.key(), invitation(SAMPLE_INVITE).unwrap().key());
+        assert_ne!(invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:1\r\nUID:")).unwrap().key(), invitation(SAMPLE_INVITE).unwrap().key());
+        // a length of a thousand years is cut to one
+        assert_eq!(parse_duration("P99999999999999W"), Some(366 * 24 * 60));
+        // summer time ending on "the Sunday among the 25th–31st" (as older programs write the last Sunday)
+        let z = zones("BEGIN:VTIMEZONE\r\nTZID:W\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=25,26,27,28,29,30,31;BYDAY=SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=-7,-6,-5,-4,-3,-2,-1;BYDAY=SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n");
+        let at = |m, d, h| NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(h, 0, 0).unwrap();
+        let utc = |m, d, h| Utc.with_ymd_and_hms(2026, m, d, h, 0, 0).unwrap().with_timezone(&Local).naive_local();
+        assert_eq!(zone_to_local(&z, "W", at(10, 24, 9)), Some(utc(10, 24, 7)));
+        assert_eq!(zone_to_local(&z, "W", at(10, 26, 9)), Some(utc(10, 26, 8)));
+    }
+
+    #[test]
+    fn the_answer_to_an_invitation_for_its_organiser() {
+        assert_eq!(invitation(SAMPLE_INVITE).unwrap().organizer, "anna@example.com");
+        let now = Utc.with_ymd_and_hms(2026, 11, 18, 7, 0, 0).unwrap();
+        let zoned = SAMPLE_INVITE
+            .replace("METHOD:REQUEST\r\n", "METHOD:REQUEST\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\nBEGIN:STANDARD\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n")
+            .replace("DTSTART:20261120T090000Z", "DTSTART;TZID=Europe/Warsaw:20261120T100000\r\nSEQUENCE:2")
+            .replace("SUMMARY:Przegląd wdrożenia\\, etap 2", &format!("SUMMARY:{}\r\n {}", "Bardzo długi tytuł spotkania o przeglądzie wdrożenia", "i jego drugim etapie"));
+        let r = reply(&zoned, "Me@Example.com", "tentative", now).unwrap();
+        for part in ["METHOD:REPLY\r\n", "UID:invite-1@example.com\r\n", "SEQUENCE:2\r\n", "DTSTART;TZID=Europe/Warsaw:20261120T100000\r\n", "DTSTAMP:20261118T070000Z\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:Me@Example.com\r\n", "ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r\n", "BEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\n"] {
+            assert!(r.contains(part), "{part} in {r}");
+        }
+        // only the guest answering; the location is not repeated; long lines are folded
+        assert!(!r.contains("me@example.com") && !r.contains("LOCATION") && r.lines().all(|l| l.len() <= 75));
+        assert_eq!(invitation(&r).unwrap().title, "Bardzo długi tytuł spotkania o przeglądzie wdrożeniai jego drugim etapie");
+        assert!(reply(&zoned, "me@example.com", "declined", now).unwrap().contains("PARTSTAT=DECLINED"));
+        // nobody to answer
+        assert!(reply(&SAMPLE_INVITE.replace("ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r\n", ""), "me@example.com", "accepted", now).is_none());
+        // an organiser that is a list is nobody (the answer goes to one address only)
+        let list = SAMPLE_INVITE.replace("mailto:anna@example.com", "mailto:anna@example.com,eve@evil.example");
+        assert!(invitation(&list).unwrap().organizer.is_empty() && reply(&list, "me@example.com", "accepted", now).is_none());
+        // the meeting's alarm (inside it) adds nothing; a property given twice is answered once
+        let alarm = SAMPLE_INVITE.replace("END:VEVENT", "BEGIN:VALARM\r\nSUMMARY:Ding\r\nDURATION:-PT10M\r\nEND:VALARM\r\nSUMMARY:Again\r\nEND:VEVENT");
+        let r = reply(&alarm, "me@example.com", "accepted", now).unwrap();
+        assert!(!r.contains("Ding") && !r.contains("Again") && !r.contains("DURATION") && r.contains("END:VEVENT\r\nEND:VCALENDAR"), "{r}");
+    }
+}

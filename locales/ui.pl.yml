@@ -29,6 +29,8 @@ ui:
       many: "%{n} wydarzeń z Google"
     gcal:
       dialog: "Kalendarz i kontakty Google"
+      reminders: "Przypominaj o spotkaniach 10 minut wcześniej"
+      reminders_hint: "Dźwięk i okienko w rogu ekranu, dla każdego kalendarza widocznego w programie"
       saved: "Zapisano w Kalendarzu Google"
       save_failed: "Nie udało się zapisać w Kalendarzu Google: %{e}"
       intro: "Kalendarz i kontakty łączą się z Google tym samym logowaniem co poczta (konto Google, OAuth). Wydarzenia i kontakty z Google są tu na bieżąco, a zmiany zrobione w programie trafiają do Google."

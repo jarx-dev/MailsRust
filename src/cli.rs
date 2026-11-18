@@ -746,7 +746,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         // internet): the slowest ones listed with their sizes only
         let n: usize = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(200);
         let mut pages: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(model::cache_dir())
-            .map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "html") && !p.ends_with("view.html")).filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p))).collect())
+            .map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "html") && !p.ends_with("view.html") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("reader-"))).filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p))).collect())
             .unwrap_or_default();
         pages.sort_by(|a, b| b.0.cmp(&a.0));
         pages.truncate(n);
@@ -782,7 +782,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         let pages_dir = PathBuf::from(&dir).join("pages");
         let _ = std::fs::create_dir_all(&pages_dir);
         let mut pages: Vec<PathBuf> = std::fs::read_dir(model::cache_dir())
-            .map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "html") && !p.ends_with("view.html")).collect())
+            .map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "html") && !p.ends_with("view.html") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("reader-"))).collect())
             .unwrap_or_default();
         pages.sort();
         pages.truncate(40);
