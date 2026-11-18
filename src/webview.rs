@@ -109,14 +109,58 @@ fn bounds(r: egui::Rect) -> wry::Rect {
     }
 }
 
-fn open_outside(url: &str) {
-    // a test run never opens a browser on the screen of whoever uses the machine
-    if crate::unseen() {
+/// Opens a web page or an email address in its own program (`clicked`: a phone number too).
+/// Nothing else goes out: Windows would start a file, or a program by its protocol, some of
+/// which run what they are given.
+fn open_outside(url: &str, clicked: bool) {
+    // (a test run never opens a browser on the screen of whoever uses the machine)
+    if crate::unseen() || !web(url, clicked) {
         return;
     }
     let _ = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
+}
+
+/// A web page or an email address; a phone number only when clicked (an email's own refresh
+/// does not start a call).
+fn web(url: &str, clicked: bool) -> bool {
+    let is = |p: &str| url.get(..p.len()).is_some_and(|s| s.eq_ignore_ascii_case(p));
+    is("http://") || is("https://") || is("mailto:") || (clicked && is("tel:"))
+}
+
+/// Whether `url` is the page at `path` (a view's own page), however the browser writes the
+/// address (letters outside ASCII and spaces as %XX, another case of letters). A view goes to no
+/// other file: an email sending it to one (a saved attachment, by a link or a refresh) would
+/// leave the page that refuses its scripts.
+fn is_page(url: &str, path: &std::path::Path) -> bool {
+    let Some(rest) = url.get(..5).filter(|s| s.eq_ignore_ascii_case("file:")).map(|_| &url[5..]) else { return false };
+    let b = rest.split(['#', '?']).next().unwrap_or("").as_bytes();
+    let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
+    while i < b.len() {
+        let hex = b.get(i + 1..i + 3).filter(|h| h.iter().all(u8::is_ascii_hexdigit)).and_then(|h| u8::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok());
+        match (b[i], hex) {
+            (b'%', Some(v)) => {
+                out.push(v);
+                i += 3;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    // (file:///C:/… and file://server/share/… against C:\… and \\server\share\…)
+    let key = |s: &str| s.replace('\\', "/").trim_start_matches('/').to_lowercase();
+    key(&String::from_utf8_lossy(&out)) == key(&path.to_string_lossy())
+}
+
+/// The main view's page (a test copy writes into its own folder, never into the real app's page).
+fn page_path() -> std::path::PathBuf {
+    match std::env::var("POCZTA_DATA_DIR") {
+        Ok(d) => std::path::PathBuf::from(d).join("view.html"),
+        Err(_) => crate::model::cache_dir().join("view.html"),
+    }
 }
 
 fn file_url(path: &std::path::Path) -> String {
@@ -146,27 +190,20 @@ pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::We
     let dir = data_dir(false);
     let mut context = wry::WebContext::new(dir);
     let start = file_url(std::path::Path::new(&path));
-    let first = start.clone();
     let view = wry::WebViewBuilder::new_with_web_context(&mut context)
         .with_url(start)
         .with_bounds(bounds(rect))
         .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) }).with_theme(theme())
+        // its own page only; web and mail addresses open outside
         .with_navigation_handler(move |url| {
-            if url == first {
+            if is_page(&url, std::path::Path::new(&path)) || url == "about:blank" {
                 return true;
             }
-            if url.starts_with("poczta-key://") {
-                return false;
-            }
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
-                open_outside(&url);
-                false
-            } else {
-                true
-            }
+            open_outside(&url, false);
+            false
         })
         .with_new_window_req_handler(|url, _| {
-            open_outside(&url);
+            open_outside(&url, true);
             wry::NewWindowResponse::Deny
         })
         .build_as_child(&crate::compose_view::Parent(hwnd))
@@ -196,14 +233,14 @@ pub fn file_view(hwnd: isize, path: &str, rect: egui::Rect) -> Result<(wry::WebV
         .with_bounds(bounds(rect))
         .with_navigation_handler(|url| {
             if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
-                open_outside(&url);
+                open_outside(&url, false);
                 false
             } else {
                 true
             }
         })
         .with_new_window_req_handler(|url, _| {
-            open_outside(&url);
+            open_outside(&url, true);
             wry::NewWindowResponse::Deny
         })
         .build_as_child(&crate::compose_view::Parent(hwnd))
@@ -328,8 +365,8 @@ fn prepare(m: &Message) -> Option<String> {
         w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);});});\
         document.addEventListener('keydown',function(e){var t=e.target;\
         if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;\
-        if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();location.href='poczta-key://delete';}},true);\
-        document.addEventListener('pointerdown',function(){try{location.href='poczta-key://clicked'}catch(e){}},true);</script>";
+        if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();try{chrome.webview.postMessage('delete')}catch(e){}}},true);\
+        document.addEventListener('pointerdown',function(){try{chrome.webview.postMessage('clicked')}catch(e){}},true);</script>";
     // dark theme: the email's colours turned around (light page → dark, dark text → light),
     // pictures turned back so they look as they should
     let bars = "::-webkit-scrollbar-track{background:#1e1f22}::-webkit-scrollbar-thumb{background:#4a4e55!important;border-color:#1e1f22!important}";
@@ -464,6 +501,8 @@ impl MailView {
     fn build_in(&mut self, frame: &eframe::Frame, dir: Option<std::path::PathBuf>) -> Result<(wry::WebView, wry::WebContext), String> {
         let mut context = wry::WebContext::new(dir);
         let (keys, wake) = (self.keys.0.clone(), self.wake.clone());
+        let page = page_path();
+        let page2 = page.clone();
         let (loaded, wake2, asked) = (self.loaded.clone(), self.wake.clone(), self.asked.clone());
         let built = wry::WebViewBuilder::new_with_web_context(&mut context)
             .with_on_page_load_handler(move |e, _| {
@@ -482,28 +521,54 @@ impl MailView {
             // the keyboard stays with the message list until the email itself is clicked
             .with_focused(false)
             .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) }).with_theme(theme())
+            // its own page only; web and mail addresses open outside, the rest goes nowhere (an
+            // email's link or refresh to another file or to another program's protocol)
             .with_navigation_handler(move |url| {
-                // a key pressed inside the email (see the page's little script)
-                if let Some(k) = url.strip_prefix("poczta-key://") {
-                    let _ = keys.send(k.trim_end_matches('/').to_string());
-                    if let Some(c) = &wake {
-                        c.request_repaint();
-                    }
-                    return false;
+                if is_page(&url, &page) || url == "about:blank" {
+                    return true;
                 }
-                if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
-                    open_outside(&url);
-                    false
+                if web(&url, false) {
+                    open_outside(&url, false);
                 } else {
-                    true
+                    crate::diag::log(format!("email view: refused to go to a {}: address", url.split(':').next().unwrap_or("")));
                 }
+                false
             })
             .with_new_window_req_handler(|url, _| {
-                open_outside(&url);
+                open_outside(&url, true);
                 wry::NewWindowResponse::Deny
             })
             .build_as_child(frame)
             .map_err(|e| e.to_string())?;
+        // A key pressed inside the email (see the page's little script) comes as a message only
+        // a script on the page can send, and the email's own scripts are refused (an address
+        // the email could write itself, `poczta-key://delete` in a link or a refresh, deleted
+        // mail). Read here, not through wry, which drops messages from file:// pages.
+        #[cfg(windows)]
+        unsafe {
+            use windows::core::PWSTR;
+            use wry::WebViewExtWindows;
+            let handler = webview2_com::WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut from = PWSTR::null();
+                args.Source(&mut from)?;
+                // (taken at once: a message that is not text ends below with an error)
+                if !is_page(&webview2_com::take_pwstr(from), &page2) {
+                    return Ok(());
+                }
+                let mut text = PWSTR::null();
+                args.TryGetWebMessageAsString(&mut text)?;
+                let _ = keys.send(webview2_com::take_pwstr(text));
+                if let Some(c) = &wake {
+                    c.request_repaint();
+                }
+                Ok(())
+            }));
+            let mut token = 0i64;
+            if let Err(e) = built.webview().add_WebMessageReceived(&handler, &mut token) {
+                crate::diag::log(format!("email view: keys from the page not available ({e})"));
+            }
+        }
         Ok((built, context))
     }
 
@@ -540,10 +605,7 @@ impl MailView {
                 Some(html) => {
                     let kb = html.len() / 1024;
                     // (a test copy writes into its own folder, never into the real app's page)
-                    let path = match std::env::var("POCZTA_DATA_DIR") {
-                        Ok(d) => std::path::PathBuf::from(d).join("view.html"),
-                        Err(_) => crate::model::cache_dir().join("view.html"),
-                    };
+                    let path = page_path();
                     match std::fs::write(&path, html) {
                         Ok(()) => {
                             if let Ok(mut a) = self.asked.lock() {
@@ -708,6 +770,22 @@ mod tests {
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);
+    }
+
+    #[test]
+    fn an_email_cannot_send_the_view_to_other_files_nor_start_them() {
+        let page = std::path::Path::new(r"C:\Users\Józef K\AppData\Local\Poczta\cache\view.html");
+        // its own page, however the browser writes the address
+        assert!(is_page("file:///C:/Users/J%C3%B3zef%20K/AppData/Local/Poczta/cache/view.html#top", page));
+        assert!(is_page("file:///c:/users/józef k/appdata/local/poczta/cache/VIEW.html", page));
+        assert!(is_page("file://srv/share/d/view.html", std::path::Path::new(r"\\srv\share\d\view.html")));
+        // the same name elsewhere (an attachment saved under it), another file, another computer
+        assert!(!is_page("file:///C:/Users/J%C3%B3zef%20K/AppData/Local/Poczta/attachments/view.html", page));
+        assert!(!is_page("file:///C:/Users/J%C3%B3zef%20K/AppData/Local/Poczta/cache/0123456789abcdef.html", page));
+        assert!(!is_page("file://evil/share/Users/Józef K/AppData/Local/Poczta/cache/view.html", page) && !is_page("about:blank", page));
+        // only web and mail addresses go out by themselves, a phone number only when clicked
+        assert!(web("https://a.example/", false) && web("MAILTO:a@b.pl", false) && web("tel:+48123", true) && !web("tel:+48123", false));
+        assert!(!web("file:///C:/Windows/System32/calc.exe", true) && !web("ms-msdt:/id x", true) && !web("search-ms:query=x", true));
     }
 
     #[test]
