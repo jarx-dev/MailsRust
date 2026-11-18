@@ -276,11 +276,33 @@ fn stable_id(uid: &str, day: NaiveDate, n: usize) -> u64 {
     ID_BASE | (h.finish() >> 4)
 }
 
-/// The events of one calendar file between `from` and `to`, in colour `color`.
-pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
-    // lines that continue on the next line (starting with a space) joined back
+/// The id of a meeting put into the calendar from an invitation (one per day it is on): told
+/// apart from every other event by its top bits, and found again by the meeting's own id.
+pub fn invite_id(uid: &str, day: NaiveDate) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (uid, day).hash(&mut h);
+    (1 << 59) | (h.finish() >> 5)
+}
+
+pub fn is_invite(id: u64) -> bool {
+    id >> 59 == 1
+}
+
+/// The days of an invitation's meeting (repeats too), as read-only events for the calendar,
+/// four months back to a year ahead of `today`.
+pub fn invite_events(ics: &str, today: NaiveDate) -> Vec<Event> {
+    let Some(inv) = invitation(ics) else { return Vec::new() };
+    let mut evs = parse(ics, 2, today - Duration::days(120), today + Duration::days(400));
+    for e in &mut evs {
+        e.id = invite_id(&inv.uid, e.date);
+    }
+    evs
+}
+
+/// The events of a calendar file, each as its lines (lines continued on the next one joined back).
+fn blocks(ics: &str) -> Vec<Vec<Prop>> {
     let text = ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
-    // every event's lines
     let mut blocks: Vec<Vec<Prop>> = Vec::new();
     let mut cur: Option<Vec<Prop>> = None;
     for line in text.lines() {
@@ -297,6 +319,61 @@ pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Eve
             }
         }
     }
+    blocks
+}
+
+/// A meeting sent by email (the calendar file inside an invitation).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Invitation {
+    /// its id, the same in every calendar it is in
+    pub uid: String,
+    pub title: String,
+    pub location: String,
+    pub start: NaiveDateTime,
+    pub minutes: i64,
+    pub all_day: bool,
+    /// the time zone the time is written in, when it is not this computer's own for sure
+    pub zone: String,
+    /// the organiser called it off (the email says so; nothing to answer)
+    pub cancelled: bool,
+    /// an invitation asking for an answer (not somebody's answer or a plain calendar file)
+    pub asks: bool,
+}
+
+/// The meeting of an invitation's calendar file (its first event), if it is one.
+pub fn invitation(ics: &str) -> Option<Invitation> {
+    let method = ics.lines().find_map(|l| l.trim().to_ascii_uppercase().strip_prefix("METHOD:").map(|m| m.trim().to_string())).unwrap_or_default();
+    let b = blocks(ics).into_iter().next()?;
+    let get = |n: &str| b.iter().find(|p| p.name == n);
+    let start_p = get("DTSTART")?;
+    let start = parse_when(start_p)?;
+    let (all_day, at) = match start {
+        When::Day(d) => (true, d.and_time(NaiveTime::MIN)),
+        When::At(t) => (false, t),
+    };
+    let minutes = match (start, get("DTEND").and_then(parse_when)) {
+        (When::At(s), Some(When::At(e))) => (e - s).num_minutes().max(0),
+        (When::Day(s), Some(When::Day(e))) => (e - s).num_days().max(1) * 1440,
+        _ => get("DURATION").and_then(|p| parse_duration(&p.value)).unwrap_or(if all_day { 1440 } else { 60 }),
+    };
+    Some(Invitation {
+        uid: get("UID").map(|p| p.value.trim().to_string()).filter(|u| !u.is_empty())?,
+        title: get("SUMMARY").map(|p| unescape(&p.value)).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| t!("cal.gcal.untitled").into_owned()),
+        location: get("LOCATION").map(|p| unescape(&p.value)).unwrap_or_default(),
+        start: at,
+        minutes,
+        all_day,
+        // (a time ending in Z is turned into this computer's; one with a named zone is as written)
+        zone: start_p.params.get("TZID").cloned().unwrap_or_default(),
+        cancelled: method == "CANCEL" || get("STATUS").is_some_and(|p| p.value.eq_ignore_ascii_case("CANCELLED")),
+        asks: method == "REQUEST",
+    })
+}
+
+/// The events of one calendar file between `from` and `to`, in colour `color`.
+pub fn parse(ics: &str, color: usize, from: NaiveDate, to: NaiveDate) -> Vec<Event> {
+    // every event's lines
+    let blocks = blocks(ics);
     // changed single days of repeating events: (uid, day) → handled by their own block
     let mut moved: HashSet<(String, NaiveDate)> = HashSet::new();
     for b in &blocks {
@@ -735,3 +812,50 @@ SUMMARY:Odwołane\r
 END:VEVENT\r
 END:VCALENDAR\r
 ";
+
+/// The calendar file of an invitation to a meeting, as mail programs send it.
+pub const SAMPLE_INVITE: &str = "BEGIN:VCALENDAR\r
+METHOD:REQUEST\r
+BEGIN:VEVENT\r
+UID:invite-1@example.com\r
+DTSTART:20261120T090000Z\r
+DTEND:20261120T103000Z\r
+SUMMARY:Przegląd wdrożenia\\, etap 2\r
+LOCATION:Sala B\r
+ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invitation_read_from_its_calendar_file() {
+        let i = invitation(SAMPLE_INVITE).unwrap();
+        assert_eq!((i.uid.as_str(), i.title.as_str(), i.location.as_str()), ("invite-1@example.com", "Przegląd wdrożenia, etap 2", "Sala B"));
+        assert!(i.asks && !i.cancelled && !i.all_day && i.zone.is_empty());
+        assert_eq!(i.minutes, 90);
+        // a time in universal time is shown on this computer's clock
+        assert_eq!(i.start, Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap().with_timezone(&Local).naive_local());
+        // called off; a named time zone is kept to be shown; a whole day
+        let off = invitation(&SAMPLE_INVITE.replace("METHOD:REQUEST", "METHOD:CANCEL").replace("DTSTART:20261120T090000Z", "DTSTART;TZID=Europe/London:20261120T090000").replace("DTEND:20261120T103000Z", "DURATION:PT45M")).unwrap();
+        assert!(off.cancelled && !off.asks);
+        assert_eq!((off.zone.as_str(), off.minutes, off.start.format("%H:%M").to_string().as_str()), ("Europe/London", 45, "09:00"));
+        let day = invitation(&SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;VALUE=DATE:20261120").replace("DTEND:20261120T103000Z", "DTEND;VALUE=DATE:20261122")).unwrap();
+        assert!(day.all_day && day.minutes == 2 * 1440);
+        // somebody's answer, a plain calendar file and a file without a meeting are not invitations to answer
+        assert!(!invitation(&SAMPLE_INVITE.replace("METHOD:REQUEST", "METHOD:REPLY")).unwrap().asks);
+        assert!(!invitation(SAMPLE).unwrap().asks);
+        assert!(invitation("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR").is_none());
+        // in the calendar: every day of a repeating meeting, each found again by the meeting's id
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let weekly = invite_events(&SAMPLE_INVITE.replace("LOCATION:Sala B", "RRULE:FREQ=WEEKLY;COUNT=3"), today);
+        assert_eq!(weekly.len(), 3);
+        assert!(weekly.iter().all(|e| is_invite(e.id) && e.id == invite_id("invite-1@example.com", e.date) && e.google && e.gid.is_empty()));
+        assert!(!is_invite(stable_id("invite-1@example.com", today, 0)) && !is_invite(7));
+        assert!(invite_events(&SAMPLE_INVITE.replace("UID:", "STATUS:CANCELLED\r\nUID:"), today).is_empty());
+    }
+}

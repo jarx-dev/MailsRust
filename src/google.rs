@@ -208,6 +208,22 @@ pub fn delete_event(acc: &Account, gid: &str) -> Result<(), String> {
     send(&token, "DELETE", &format!("{CAL}/calendars/primary/events/{}", enc(gid)), None, "kalendarz").map(|_| ())
 }
 
+/// The answer to an invitation (`accepted`, `tentative` or `declined`), written to the meeting
+/// in the main Google calendar; Google tells the organiser. The meeting is found by the id of
+/// its calendar file (Google puts invitations sent to this address into the calendar itself).
+pub fn answer_invitation(acc: &Account, uid: &str, answer: &str) -> Result<(), String> {
+    let token = token(acc)?;
+    let found = get(&token, &format!("{CAL}/calendars/primary/events?iCalUID={}", enc(uid)), "kalendarz")?;
+    let items = found["items"].as_array().cloned().unwrap_or_default();
+    // (of a repeating meeting: the meeting itself, not one of its changed days)
+    let ev = items.iter().find(|e| e["recurringEventId"].is_null()).or(items.first()).ok_or_else(|| t!("cal.invite.not_in_calendar").into_owned())?;
+    let mut people = ev["attendees"].as_array().cloned().unwrap_or_default();
+    let me = people.iter_mut().find(|p| p["self"].as_bool() == Some(true)).ok_or_else(|| t!("cal.invite.not_invited").into_owned())?;
+    me["responseStatus"] = json!(answer);
+    let id = ev["id"].as_str().unwrap_or_default();
+    send(&token, "PATCH", &format!("{CAL}/calendars/primary/events/{}?sendUpdates=all", enc(id)), Some(json!({ "attendees": people })), "kalendarz").map(|_| ())
+}
+
 // ------------------------------------------------------------ contacts
 
 /// The contact groups made by the person, and everyone in "Kontakty" with their groups.

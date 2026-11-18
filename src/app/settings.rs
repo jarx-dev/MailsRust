@@ -162,7 +162,8 @@ impl MailApp {
         }
     }
 
-    /// Google Calendar read from its secret iCal address, every 15 minutes and on "Odśwież".
+    /// Google Calendar read from its secret iCal address, every 15 minutes (every 2 while the
+    /// calendar is open) and on "Odśwież".
     pub(super) fn gcal_tick(&mut self) {
         if !self.gcal_loaded {
             self.gcal_loaded = true;
@@ -176,7 +177,8 @@ impl MailApp {
             match res {
                 Ok(evs) => {
                     let n = evs.len();
-                    self.store.events.retain(|e| !e.google);
+                    // (meetings put in from invitations stay, unless Google now has them itself)
+                    self.store.events.retain(|e| !e.google || (crate::gcal::is_invite(e.id) && !evs.iter().any(|g| super::reading::same_meeting(g, e))));
                     self.store.events.extend(evs);
                     self.gcal_said = Some(Ok(format!("{}, {}", i18n::plural("ui.settings.google_events", n), Local::now().format("%H:%M"))));
                     crate::diag::log(format!("Google calendar: {n} events"));
@@ -202,6 +204,8 @@ impl MailApp {
                 }
                 Err(e) => {
                     crate::diag::log(format!("Google calendar save: {e}"));
+                    // (an answer to an invitation that did not go through is not shown as given)
+                    self.invite_said.clear();
                     self.set_status(t!("ui.settings.gcal.save_failed", e = e));
                 }
             }
@@ -217,8 +221,11 @@ impl MailApp {
             return;
         }
         let now = self.clock();
-        if now - self.gcal_last < 15.0 * 60.0 {
-            self.ctx.request_repaint_after(std::time::Duration::from_secs_f64((15.0 * 60.0 - (now - self.gcal_last)).clamp(5.0, 900.0)));
+        // every 15 minutes; every 2 while the calendar is the thing being looked at (a meeting
+        // moved by someone else shows soon), which costs one request per calendar shown
+        let every = if self.module == Module::Calendar && !self.in_background(&self.ctx) { 2.0 * 60.0 } else { 15.0 * 60.0 };
+        if now - self.gcal_last < every {
+            self.ctx.request_repaint_after(std::time::Duration::from_secs_f64((every - (now - self.gcal_last)).clamp(5.0, 900.0)));
             return;
         }
         self.gcal_last = now;

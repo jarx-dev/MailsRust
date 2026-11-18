@@ -34,6 +34,11 @@ pub(super) struct PreviewWin {
     pub(super) last: Option<Rect>,
 }
 
+/// The same meeting on the same day (an invitation's copy and Google's own are told so).
+pub(super) fn same_meeting(a: &crate::model::Event, b: &crate::model::Event) -> bool {
+    a.date == b.date && a.start == b.start && a.all_day == b.all_day && a.title == b.title
+}
+
 /// Attachments the app can show itself (the Edge engine shows PDFs, pictures and texts).
 pub(super) fn previewable(name: &str) -> bool {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -827,6 +832,7 @@ impl MailApp {
                     ui.data_mut(|d| d.insert_temp(files_key, !files_open));
                 }
             }
+            self.invitation_bar(ui, &m);
             ui.add_space(12.0);
             // A big message stored with its header only: the rest is on its way (or it couldn't be had).
             if m.partial && m.body.is_empty() && m.html_path.is_empty() {
@@ -918,6 +924,92 @@ impl MailApp {
                 self.later_cards(ui, m.id);
                 ui.add_space(10.0);
             });
+        });
+    }
+
+    /// An invitation's meeting goes into the calendar by itself, answered or not (and out of it
+    /// when the organiser calls it off or it was declined here). Google's own copy of the same
+    /// meeting takes its place when there is one. `file`: the email's calendar file, read once.
+    pub(super) fn invitation_to_calendar(&mut self, file: &str) -> Option<crate::gcal::Invitation> {
+        if let Some(known) = self.invites.get(file) {
+            return known.clone();
+        }
+        let ics = std::fs::read_to_string(file).unwrap_or_default();
+        let inv = crate::gcal::invitation(&ics).filter(|i| i.asks || i.cancelled);
+        self.invites.insert(file.to_string(), inv.clone());
+        let inv = inv?;
+        let before = self.store.events.len();
+        self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
+        let mut changed = self.store.events.len() != before;
+        if !inv.cancelled && self.invite_said.get(&inv.uid) != Some(&"declined") {
+            for e in crate::gcal::invite_events(&ics, Local::now().date_naive()) {
+                if !self.store.events.iter().any(|x| x.google && same_meeting(x, &e)) {
+                    self.store.events.push(e);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.save_now = true;
+            self.touched = true;
+        }
+        Some(inv)
+    }
+
+    /// An email inviting to a meeting (it carries a calendar file): what and when, above the
+    /// text, and the answer, written to the meeting in Google Calendar (Google tells the organiser).
+    fn invitation_bar(&mut self, ui: &mut Ui, m: &Message) {
+        let Some(file) = m.attachment_files.iter().find(|f| f.ends_with(".ics")) else { return };
+        let Some(inv) = self.invitation_to_calendar(file) else { return };
+        let test = self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("invite");
+        let can_answer = inv.asks && !inv.cancelled && ((m.account == 0 && self.google_calendar()) || test);
+        let end = inv.start + chrono::Duration::minutes(inv.minutes);
+        let when = if inv.all_day {
+            format!("{}, {}", i18n::date(inv.start.date()), t!("cal.invite.all_day"))
+        } else {
+            format!("{} {}–{}", i18n::date(inv.start.date()), inv.start.format("%H:%M"), end.format("%H:%M"))
+        };
+        ui.add_space(10.0);
+        Frame::new().fill(HOVER()).stroke(Stroke::new(1.0, BORDER())).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(RichText::new(ic::CALENDAR).size(16.0).color(ACCENT()));
+                ui.label(RichText::new(&inv.title).size(14.5).strong().color(TEXT()));
+                if inv.cancelled {
+                    ui.label(RichText::new(t!("cal.invite.cancelled")).size(13.5).color(FLAG));
+                }
+                ui.label(RichText::new(when).size(13.5).color(TEXT()));
+                if !inv.zone.is_empty() && !inv.all_day {
+                    ui.label(RichText::new(t!("cal.invite.zone", zone = inv.zone)).size(12.5).color(MUTED()));
+                }
+                if !inv.location.is_empty() {
+                    ui.label(RichText::new(&inv.location).size(13.5).color(MUTED()));
+                }
+            });
+            if can_answer {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let said = self.invite_said.get(&inv.uid).copied();
+                    for (answer, label) in [("accepted", t!("cal.invite.accept")), ("tentative", t!("cal.invite.maybe")), ("declined", t!("cal.invite.decline"))] {
+                        if ui.add(egui::Button::new(RichText::new(label).size(13.5)).selected(said == Some(answer))).clicked() && said != Some(answer) && !test {
+                            self.invite_said.insert(inv.uid.clone(), answer);
+                            if answer == "declined" {
+                                // (Google's own copy goes at the next reading: declined meetings are not read)
+                                self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
+                                self.save_now = true;
+                                self.touched = true;
+                            }
+                            let (acc, uid, ctx) = (self.store.account.clone(), inv.uid.clone(), self.ctx.clone());
+                            // (the answer comes back like any change written to the calendar)
+                            let tx = self.gcal_push.get_or_insert_with(std::sync::mpsc::channel).0.clone();
+                            std::thread::spawn(move || {
+                                let _ = tx.send((None, crate::google::answer_invitation(&acc, &uid, answer)));
+                                ctx.request_repaint();
+                            });
+                        }
+                    }
+                });
+            }
         });
     }
 

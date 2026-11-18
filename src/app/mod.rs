@@ -430,6 +430,10 @@ pub struct MailApp {
     google_check_rx: Option<Receiver<(Result<String, String>, Result<String, String>)>>,
     /// events written to Google: (event here, made here and to be replaced by Google's copy, answer)
     gcal_push: Option<(Sender<(Option<u64>, Result<(), String>)>, Receiver<(Option<u64>, Result<(), String>)>)>,
+    /// invitations read from emails' calendar files (by file; None: not an invitation), and
+    /// the answers given in this run (by the meeting's id)
+    invites: HashMap<String, Option<crate::gcal::Invitation>>,
+    invite_said: HashMap<String, &'static str>,
     /// ending for good (not just closing the window)
     quitting: bool,
     /// closed into the tray: the window hidden, off the taskbar (Windows says "not minimized")
@@ -641,6 +645,8 @@ impl MailApp {
             google_check: None,
             google_check_rx: None,
             gcal_push: None,
+            invites: HashMap::new(),
+            invite_said: HashMap::new(),
             quitting: false,
             hidden: false,
             start_hidden: false,
@@ -874,6 +880,14 @@ tel.: 600-100-200".into();
                     let id = m.id;
                     cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(("rcpt-open", id)), true));
                 }
+            }
+        }
+        if std::env::var("POCZTA_START").as_deref() == Ok("invite") {
+            // test picture: the open message is an invitation to a meeting today
+            let file = crate::model::cache_put(crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string()).as_bytes(), "ics");
+            if let Some(m) = app.store.messages.iter_mut().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date) {
+                m.attachments.push("invite.ics".into());
+                m.attachment_files.push(file);
             }
         }
         if let Ok(path) = std::env::var("POCZTA_HTML") {
@@ -1644,9 +1658,10 @@ impl eframe::App for MailApp {
             use std::sync::atomic::{AtomicBool, Ordering};
             static PRESSED: AtomicBool = AtomicBool::new(false);
             if !PRESSED.swap(true, Ordering::Relaxed) {
-                // test: Delete pressed inside the email
+                // test: Delete pressed inside the email (first: how many of its links are marked
+                // as opening another site than they show; the test page has 2 such of 4)
                 crate::diag::log(format!("keytest: selected before {:?}", self.selected));
-                self.mail_view.run_js("document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))");
+                self.mail_view.run_js("location.href='poczta-key://marked-'+document.querySelectorAll('.pz-warn').length;setTimeout(function(){document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))},400)");
             }
         }
         if let Ok(file) = std::env::var("POCZTA_PREVIEW_TEST") {
@@ -1671,13 +1686,15 @@ impl eframe::App for MailApp {
             static SET: AtomicBool = AtomicBool::new(false);
             if !SET.swap(true, Ordering::Relaxed) {
                 // test: the shown message as a formatted email, with the menu opened over it later
-                let page = "<html><body style='font-family:Segoe UI;margin:24px'><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
+                // (its script and its `onerror=` must not run: each would say so in the log as a key)
+                let page = "<html><body style='font-family:Segoe UI;margin:24px'><script>location.href='poczta-key://email-script'</script><img src='x:' style='display:none' onerror=\"location.href='poczta-key://email-attribute'\"><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p><a href='https://evil.example/login'>www.mojbank.pl</a> · <a href='https://www.mojbank.pl/x'>mojbank.pl</a> · <a href='https://drive.example/f'>raport.pdf</a> · <a href='https://a.b.com.pl/'>https://c.d.com.pl/x</a></p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
                 let file = crate::model::cache_put(page.as_bytes(), "html");
                 let first = self.visible_ids().first().copied();
                 if let Some(m) = first.and_then(|id| self.msg_mut(id)) {
                     m.html_path = file;
                 }
                 self.selected = first;
+                self.mail_view.reload(); // (the message may be shown already, with its own text)
                 self.touched = true;
                 self.read_only = true; // the swapped text is never saved into the test's mailbox
             }

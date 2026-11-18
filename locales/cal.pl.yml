@@ -57,6 +57,15 @@ cal:
     script_no_people: "w skrypcie brakuje usługi People API — w edytorze skryptu: Usługi (+) → People API → Dodaj, potem Wdróż → Zarządzaj wdrożeniami → nowa wersja"
     script_other_key: "skrypt ma inny klucz — skopiuj skrypt z programu jeszcze raz i wdróż go ponownie"
     script_error: "skrypt: %{err}"
+  invite:
+    not_in_calendar: "tego spotkania nie ma w Twoim Kalendarzu Google"
+    not_invited: "tego konta nie ma wśród gości spotkania"
+    cancelled: "Spotkanie odwołane"
+    all_day: "cały dzień"
+    zone: "godzina jak w zaproszeniu (%{zone})"
+    accept: "Przyjmij"
+    maybe: "Wstępnie"
+    decline: "Odrzuć"
   google:
     api_disabled: "w Twoim projekcie Google Cloud nie jest włączone %{api} — włącz je (przycisk w tym oknie), odczekaj minutę i spróbuj ponownie"
     no_consent: "brak zgody na dostęp — kliknij „Zaloguj ponownie przez Google” i zaznacz dostęp do kalendarza i kontaktów"

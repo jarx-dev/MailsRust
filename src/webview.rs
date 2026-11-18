@@ -5,6 +5,7 @@
 
 use crate::model::Message;
 use eframe::egui;
+use wry::WebViewBuilderExtWindows;
 
 /// A picture (PNG) of what a browser view shows; `done` gets it (on this thread, later).
 pub fn capture_png(view: &wry::WebView, done: impl FnOnce(Vec<u8>) + 'static) -> bool {
@@ -145,7 +146,7 @@ pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::We
     let view = wry::WebViewBuilder::new_with_web_context(&mut context)
         .with_url(start)
         .with_bounds(bounds(rect))
-        .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) })
+        .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) }).with_theme(theme())
         .with_navigation_handler(move |url| {
             if url == first {
                 return true;
@@ -234,7 +235,7 @@ fn no_waiting_for_internet(html: &str) -> String {
             // the same stylesheet, applied once it is in (not before the email shows)
             let orig = &html[at..tag_end];
             let body = orig.trim_end_matches('>').trim_end_matches('/');
-            out.push_str(&format!("{body} media=\"print\" onload=\"this.media='all'\">"));
+            out.push_str(&format!("{body} media=\"print\" data-pz-late>"));
             i = tag_end;
             continue;
         }
@@ -281,7 +282,7 @@ fn no_waiting_for_internet(html: &str) -> String {
         i = tag_end;
     }
     if !late.is_empty() {
-        let links: String = late.iter().map(|u| format!("<link rel=\"stylesheet\" href=\"{u}\" media=\"print\" onload=\"this.media='all'\">")).collect();
+        let links: String = late.iter().map(|u| format!("<link rel=\"stylesheet\" href=\"{u}\" media=\"print\" data-pz-late>")).collect();
         let lo = out.to_ascii_lowercase();
         match lo.find("</head>") {
             Some(h) => out.insert_str(h, &links),
@@ -300,20 +301,47 @@ fn prepare(m: &Message) -> Option<String> {
             html = html.replace(&format!("{prefix}{cid}"), &url);
         }
     }
+    // The page's own script also marks a link whose text is one web address while it opens
+    // another site (the usual trick of a fake bank email): the real site is written after it.
+    // shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl),
+    // not the public suffix list; upgrade if it marks or misses real cases.
     let head = "<meta charset=\"utf-8\"><base target=\"_blank\"><meta name=\"color-scheme\" content=\"light\">\
         <style>html{background:#fff;color-scheme:light}\
         ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:transparent}\
         ::-webkit-scrollbar-thumb{background:#cfd3d8;border-radius:5px;border:2px solid #fff}::-webkit-scrollbar-thumb:hover{background:#aeb4bb}\
         ::-webkit-scrollbar-button{display:none;height:0;width:0}body{margin:12px 16px;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:#222;word-wrap:break-word}\
-        img{max-width:100%;height:auto}</style>\
-        <script>document.addEventListener('keydown',function(e){var t=e.target;\
+        img{max-width:100%;height:auto}.pz-warn{color:#b45309;font:600 12px 'Segoe UI',Arial,sans-serif;white-space:nowrap}</style>\
+        <script nonce=\"PZ-NONCE\">document.addEventListener('load',function(e){var t=e.target;\
+        if(t&&t.tagName==='LINK'&&t.hasAttribute('data-pz-late'))t.media='all';},true);\
+        document.addEventListener('DOMContentLoaded',function(){\
+        var site=function(h){var p=h.toLowerCase().replace(/^www\\./,'').split('.');\
+        var n=p.length>2&&p[p.length-1].length===2&&p[p.length-2].length<=3?3:2;return p.slice(-n).join('.')};\
+        document.querySelectorAll('a[href]').forEach(function(a){if(!/^https?:$/.test(a.protocol))return;\
+        var m=/^(https?:\\/\\/|www\\.)?((?:[a-z0-9-]+\\.)+([a-z]{2,}))(?:[\\/:?#]|$)/i.exec(a.textContent.trim());\
+        if(!m||(!m[1]&&/^(pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|gif|html?|txt|csv|ics|eml|exe|php|aspx?|js)$/i.test(m[3])))return;\
+        if(site(m[2])===site(a.hostname))return;\
+        var w=document.createElement('span');w.className='pz-warn';w.textContent=' \\u26a0 '+a.hostname;\
+        w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);});});\
+        document.addEventListener('keydown',function(e){var t=e.target;\
         if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;\
         if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();location.href='poczta-key://delete';}},true);\
         document.addEventListener('pointerdown',function(){try{location.href='poczta-key://clicked'}catch(e){}},true);</script>";
     // dark theme: the email's colours turned around (light page → dark, dark text → light),
     // pictures turned back so they look as they should
-    let dark_css = format!("<style>{}</style>", "html{background:#e1e0dd!important;filter:invert(1) hue-rotate(180deg)}img,video,picture,canvas,svg image,[style*=background-image],[background]{filter:invert(1) hue-rotate(180deg)}::-webkit-scrollbar-track{background:#1e1f22}::-webkit-scrollbar-thumb{background:#4a4e55!important;border-color:#1e1f22!important}");
-    let head = if crate::theme::is_dark() { format!("{head}{dark_css}") } else { head.to_string() };
+    let bars = "::-webkit-scrollbar-track{background:#1e1f22}::-webkit-scrollbar-thumb{background:#4a4e55!important;border-color:#1e1f22!important}";
+    let dark_css = format!("<style>html{{background:#e1e0dd!important;filter:invert(1) hue-rotate(180deg)}}img,video,picture,canvas,svg image,[style*=background-image],[background]{{filter:invert(1) hue-rotate(180deg)}}{bars}</style>");
+    let nonce = crate::oauth::random_token(16);
+    let head = if !crate::theme::is_dark() {
+        head.to_string()
+    } else if has_own_dark(&html) {
+        // an email with a dark look of its own keeps its sender's colours: the browser is told
+        // the page is dark (see `theme`), and nothing is turned around
+        head.replace("content=\"light\"", "content=\"dark\"").replace("html{background:#fff;color-scheme:light}", "html{background:#1e1f22;color-scheme:dark}").replace("color:#222;", "color:#e1e0dd;") + &format!("<style>{bars}.pz-warn{{color:#f59e0b}}</style>")
+    } else {
+        format!("{head}{dark_css}")
+    }
+    .replace("PZ-NONCE", &nonce)
+    .replace("PZ-ELSEWHERE", &t!("mail.reading.link_goes_elsewhere", host = "%{host}").replace('\\', "\\\\").replace('\'', "\\'"));
     let head = head.as_str();
     let lower = html.to_lowercase();
     if let Some(i) = lower.find("<head>") {
@@ -324,7 +352,39 @@ fn prepare(m: &Message) -> Option<String> {
     } else {
         html = format!("<!doctype html><html><head>{head}</head><body>{html}</body></html>");
     }
+    only_own_script(&mut html, &nonce);
     Some(html)
+}
+
+/// Whether the email brings a dark look of its own (styles for `prefers-color-scheme: dark`).
+fn has_own_dark(html: &str) -> bool {
+    let lower = html.to_ascii_lowercase();
+    lower.match_indices("prefers-color-scheme").any(|(i, _)| lower[i + 20..].trim_start_matches([':', ' ']).starts_with("dark"))
+}
+
+/// What the browser tells emails about light and dark: the app's theme, not Windows' own.
+fn theme() -> wry::Theme {
+    if crate::theme::is_dark() {
+        wry::Theme::Dark
+    } else {
+        wry::Theme::Light
+    }
+}
+
+/// Nothing in an email runs: its scripts, `onclick=`-like attributes and `javascript:` links are
+/// refused by the browser, and so are frames and plug-ins. Only the app's own script may run
+/// (it carries `nonce`, a number made anew for every page, which an email cannot know).
+fn only_own_script(html: &mut String, nonce: &str) {
+    let rule = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'\">");
+    // The rule holds for what comes after it, so it goes first: right after the doctype when
+    // only comments stand before that (ahead of the doctype it would change how the page is laid out).
+    let lower = html.to_ascii_lowercase();
+    let at = lower
+        .find("<!doctype")
+        .filter(|&d| !lower[..d].replace("<!--", "").contains('<'))
+        .and_then(|d| lower[d..].find('>').map(|e| d + e + 1))
+        .unwrap_or(0);
+    html.insert_str(at, &rule);
 }
 
 impl MailView {
@@ -399,7 +459,7 @@ impl MailView {
             .with_visible(true)
             // the keyboard stays with the message list until the email itself is clicked
             .with_focused(false)
-            .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) })
+            .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) }).with_theme(theme())
             .with_navigation_handler(move |url| {
                 // a key pressed inside the email (see the page's little script)
                 if let Some(k) = url.strip_prefix("poczta-key://") {
@@ -580,6 +640,41 @@ impl MailView {
         self.shown = None;
         if let Some(v) = &self.view {
             let _ = v.set_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) });
+            use wry::WebViewExtWindows;
+            let _ = v.set_theme(theme());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_scripts_are_refused_before_anything_of_the_email() {
+        let rule_at = |page: &str| {
+            let mut h = page.to_string();
+            only_own_script(&mut h, "n1");
+            h.find("Content-Security-Policy").unwrap()
+        };
+        // after the doctype, before the email's own first tag
+        let mut h = "<!-- note -->\r\n<!DOCTYPE html><html><script>x()</script>".to_string();
+        only_own_script(&mut h, "n1");
+        assert!(h.starts_with("<!-- note -->\r\n<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\""));
+        assert!(h.contains("script-src 'nonce-n1'") && h.ends_with("<html><script>x()</script>"));
+        // something of the email before the doctype, or no doctype: the rule is the very first thing
+        assert_eq!(rule_at("<script>x()</script><!doctype html><p>a"), "<meta http-equiv=\"".len());
+        assert_eq!(rule_at("<p onclick=\"x()\">a"), "<meta http-equiv=\"".len());
+        // stylesheets loaded late no longer need a script attribute of their own
+        let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
+        assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);
+    }
+
+    #[test]
+    fn an_email_with_its_own_dark_look_is_told_apart() {
+        assert!(has_own_dark("<style>@media (prefers-color-scheme: dark){body{background:#000}}</style>"));
+        assert!(has_own_dark("<STYLE>@media (Prefers-Color-Scheme:DARK){a{color:#fff}}</STYLE>"));
+        assert!(!has_own_dark("<style>@media (prefers-color-scheme: light){body{background:#fff}}</style>"));
+        assert!(!has_own_dark("<p>a dark day; prefers-color-scheme"));
     }
 }

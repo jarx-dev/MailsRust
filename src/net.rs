@@ -1482,15 +1482,17 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         if p.content_id().is_some() && p.attachment_name().is_none() {
             continue;
         }
+        // an invitation's calendar file often comes without a name (as another form of the text)
+        let calendar = p.content_type().is_some_and(|ct| matches!((ct.ctype().to_ascii_lowercase().as_str(), ct.subtype().unwrap_or("").to_ascii_lowercase().as_str()), ("text", "calendar") | ("application", "ics")));
         let name = p
             .attachment_name()
             .map(|n| n.to_string())
-            .unwrap_or_else(|| if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
-        let ext = std::path::Path::new(&name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .unwrap_or_else(|| "bin".into());
+            .unwrap_or_else(|| if calendar { "invite.ics".into() } else if p.is_message() { t!("core.net.message_file").into_owned() } else { t!("misc.chat.attachment").into_owned() });
+        let ext = if calendar {
+            "ics".into()
+        } else {
+            std::path::Path::new(&name).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_else(|| "bin".into())
+        };
         let bytes = if p.is_message() { std::borrow::Cow::Borrowed(p.raw_body()) } else { p.decoded() };
         attachment_files.push(crate::model::cache_put(&bytes, &ext));
         attachments.push(name);

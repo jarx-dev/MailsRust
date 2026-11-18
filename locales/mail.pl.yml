@@ -50,6 +50,7 @@ mail:
     loading: "Wczytywanie wiadomości…"
     copy_text: "📋  Kopiuj tekst wiadomości"
     copy_link: "🔗  Kopiuj adres linku"
+    link_goes_elsewhere: "Ten link pokazuje jeden adres, a otwiera inny: %{host}"
     no_subject: "(bez tematu)"
     close: "Zamknij"
     minimize: "Minimalizuj"

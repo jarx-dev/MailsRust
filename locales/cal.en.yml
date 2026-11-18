@@ -53,6 +53,15 @@ cal:
     script_no_people: "the script is missing the People API service — in the script editor: Services (+) → People API → Add, then Deploy → Manage deployments → new version"
     script_other_key: "the script has a different key — copy the script from the app again and redeploy it"
     script_error: "script: %{err}"
+  invite:
+    not_in_calendar: "this meeting is not in your Google calendar"
+    not_invited: "this account is not among the meeting's guests"
+    cancelled: "Meeting cancelled"
+    all_day: "all day"
+    zone: "time as written in the invitation (%{zone})"
+    accept: "Accept"
+    maybe: "Maybe"
+    decline: "Decline"
   google:
     api_disabled: "%{api} is not turned on in your Google Cloud project — turn it on (the button in this window), wait a minute and try again"
     no_consent: "access was not granted — click “Sign in with Google again” and allow access to the calendar and contacts"
