@@ -1725,7 +1725,7 @@ impl eframe::App for MailApp {
                 // test: Delete pressed inside the email (first: how many of its links are marked
                 // as opening another site than they show; the test page has 2 such of 4)
                 crate::diag::log(format!("keytest: selected before {:?}", self.selected));
-                self.mail_view.run_js("location.href='poczta-key://marked-'+document.querySelectorAll('.pz-warn').length;setTimeout(function(){document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))},400)");
+                self.mail_view.run_js("window.ipc.postMessage('marked-'+document.querySelectorAll('.pz-warn').length);setTimeout(function(){document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))},400)");
             }
         }
         if let Ok(file) = std::env::var("POCZTA_PREVIEW_TEST") {
@@ -1750,8 +1750,9 @@ impl eframe::App for MailApp {
             static SET: AtomicBool = AtomicBool::new(false);
             if !SET.swap(true, Ordering::Relaxed) {
                 // test: the shown message as a formatted email, with the menu opened over it later
-                // (its script and its `onerror=` must not run: each would say so in the log as a key)
-                let page = "<html><body style='font-family:Segoe UI;margin:24px'><script>location.href='poczta-key://email-script'</script><img src='x:' style='display:none' onerror=\"location.href='poczta-key://email-attribute'\"><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p><a href='https://evil.example/login'>www.mojbank.pl</a> · <a href='https://www.mojbank.pl/x'>mojbank.pl</a> · <a href='https://drive.example/f'>raport.pdf</a> · <a href='https://a.b.com.pl/'>https://c.d.com.pl/x</a></p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
+                // (its script and its `onerror=` must not run: each would say so in the log as a key;
+                // nor may its refresh to the app's own key address delete the message)
+                let page = "<html><head><meta http-equiv='refresh' content='0;url=poczta-key://delete'></head><body style='font-family:Segoe UI;margin:24px'><script>window.ipc.postMessage('email-script')</script><img src='x:' style='display:none' onerror=\"window.ipc.postMessage('email-attribute')\"><h2>Asystent Farmaceuty</h2><p style='color:#1e6fd9'>Ta treść powinna być widoczna obok otwartego menu.</p><p><a href='https://evil.example/login'>www.mojbank.pl</a> · <a href='https://www.mojbank.pl/x'>mojbank.pl</a> · <a href='https://drive.example/f'>raport.pdf</a> · <a href='https://a.b.com.pl/'>https://c.d.com.pl/x</a></p><p>".to_string() + &"Linia tekstu. ".repeat(80) + "</p></body></html>";
                 let file = crate::model::cache_put(page.as_bytes(), "html");
                 let first = self.visible_ids().first().copied();
                 if let Some(m) = first.and_then(|id| self.msg_mut(id)) {

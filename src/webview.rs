@@ -110,13 +110,31 @@ fn bounds(r: egui::Rect) -> wry::Rect {
 }
 
 fn open_outside(url: &str) {
-    // a test run never opens a browser on the screen of whoever uses the machine
-    if crate::unseen() {
+    // a test run never opens a browser on the screen of whoever uses the machine; and only web
+    // and mail addresses go out (Windows would start a file or a program named by any other)
+    if crate::unseen() || !web(url) {
         return;
     }
     let _ = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
+}
+
+/// A web page, an email address or a phone number: what a click in an email may open outside
+/// (not `file:` nor the protocols of other programs, some of which run what they are given).
+fn web(url: &str) -> bool {
+    ["http://", "https://", "mailto:", "tel:"].iter().any(|p| url.get(..p.len()).is_some_and(|s| s.eq_ignore_ascii_case(p)))
+}
+
+/// Whether the view may go to `url`: no file but the app's own pages. An email sending the view
+/// elsewhere on the disk (a saved attachment, by a link or a refresh) would leave the page that
+/// refuses its scripts.
+fn may_show(url: &str) -> bool {
+    let Some(path) = url.get(..5).filter(|s| s.eq_ignore_ascii_case("file:")).map(|_| &url[5..]) else { return true };
+    // (a local file, never one on another computer: file://server/… or file:////server/…)
+    let Some(path) = path.strip_prefix("///").filter(|p| !p.starts_with(['/', '\\'])) else { return false };
+    let name = path.split(['#', '?']).next().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or("");
+    name == "view.html" || (name.starts_with("reader-") && name.ends_with(".html"))
 }
 
 fn file_url(path: &std::path::Path) -> String {
@@ -158,11 +176,11 @@ pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::We
             if url.starts_with("poczta-key://") {
                 return false;
             }
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+            if web(&url) {
                 open_outside(&url);
                 false
             } else {
-                true
+                may_show(&url)
             }
         })
         .with_new_window_req_handler(|url, _| {
@@ -328,8 +346,8 @@ fn prepare(m: &Message) -> Option<String> {
         w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);});});\
         document.addEventListener('keydown',function(e){var t=e.target;\
         if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;\
-        if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();location.href='poczta-key://delete';}},true);\
-        document.addEventListener('pointerdown',function(){try{location.href='poczta-key://clicked'}catch(e){}},true);</script>";
+        if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();try{window.ipc.postMessage('delete')}catch(e){}}},true);\
+        document.addEventListener('pointerdown',function(){try{window.ipc.postMessage('clicked')}catch(e){}},true);</script>";
     // dark theme: the email's colours turned around (light page → dark, dark text → light),
     // pictures turned back so they look as they should
     let bars = "::-webkit-scrollbar-track{background:#1e1f22}::-webkit-scrollbar-thumb{background:#4a4e55!important;border-color:#1e1f22!important}";
@@ -482,20 +500,24 @@ impl MailView {
             // the keyboard stays with the message list until the email itself is clicked
             .with_focused(false)
             .with_background_color(if crate::theme::is_dark() { (0x1E, 0x1F, 0x22, 255) } else { (255, 255, 255, 255) }).with_theme(theme())
+            // a key pressed inside the email (see the page's little script): a message only a
+            // script can send, and the email's own scripts are refused (an address the email
+            // could write itself, `poczta-key://delete` in a link or a refresh, deleted mail)
+            .with_ipc_handler(move |req| {
+                let _ = keys.send(req.body().clone());
+                if let Some(c) = &wake {
+                    c.request_repaint();
+                }
+            })
             .with_navigation_handler(move |url| {
-                // a key pressed inside the email (see the page's little script)
-                if let Some(k) = url.strip_prefix("poczta-key://") {
-                    let _ = keys.send(k.trim_end_matches('/').to_string());
-                    if let Some(c) = &wake {
-                        c.request_repaint();
-                    }
+                if url.starts_with("poczta-key://") {
                     return false;
                 }
-                if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+                if web(&url) {
                     open_outside(&url);
                     false
                 } else {
-                    true
+                    may_show(&url)
                 }
             })
             .with_new_window_req_handler(|url, _| {
@@ -708,6 +730,19 @@ mod tests {
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);
+    }
+
+    #[test]
+    fn an_email_cannot_send_the_view_to_other_files_nor_start_them() {
+        assert!(may_show("file:///C:/Users/a/AppData/Local/Poczta/cache/view.html"));
+        assert!(may_show("file:///C:/t/reader-42.html#top") && may_show("about:blank"));
+        // a saved attachment, a file on another computer, a page named so but elsewhere on the net
+        assert!(!may_show("file:///C:/Users/a/AppData/Local/Poczta/cache/0123456789abcdef.html"));
+        assert!(!may_show("FILE:///C:/x/evil.hta") && !may_show("file://server/share/view.html") && !may_show("file:////server/share/view.html"));
+        assert!(!may_show("file:///C:/x/view.html.exe"));
+        // only web, mail and phone addresses go out
+        assert!(web("https://a.example/") && web("MAILTO:a@b.pl") && web("tel:+48123"));
+        assert!(!web("file:///C:/Windows/System32/calc.exe") && !web("ms-msdt:/id x") && !web("search-ms:query=x"));
     }
 
     #[test]
