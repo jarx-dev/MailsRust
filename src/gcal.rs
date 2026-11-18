@@ -112,7 +112,7 @@ fn parse_when(p: &Prop) -> Option<When> {
 fn parse_value(v: &str, date_only: bool) -> Option<When> {
     let v = v.trim();
     if date_only || v.len() == 8 {
-        return NaiveDate::parse_from_str(&v[..8.min(v.len())], "%Y%m%d").ok().map(When::Day);
+        return NaiveDate::parse_from_str(v.get(..8).unwrap_or(v), "%Y%m%d").ok().map(When::Day);
     }
     let t = NaiveDateTime::parse_from_str(v.trim_end_matches('Z'), "%Y%m%dT%H%M%S").ok()?;
     if v.ends_with('Z') {
@@ -181,7 +181,8 @@ fn parse_rule(s: &str) -> Rule {
         let Some((k, v)) = part.split_once('=') else { continue };
         match k.to_ascii_uppercase().as_str() {
             "FREQ" => r.freq = v.to_ascii_uppercase(),
-            "INTERVAL" => r.interval = v.parse().unwrap_or(1).max(1),
+            // (bounded: a file from an email must not make the dates overflow)
+            "INTERVAL" => r.interval = v.parse().unwrap_or(1).clamp(1, 1000),
             "COUNT" => r.count = v.parse().ok(),
             "UNTIL" => r.until = parse_value(v, false).or_else(|| parse_value(v, true)).map(When::date),
             "BYDAY" => {
@@ -189,8 +190,8 @@ fn parse_rule(s: &str) -> Rule {
                     .split(',')
                     .filter_map(|d| {
                         let d = d.trim();
-                        let (n, wd) = d.split_at(d.len().saturating_sub(2));
-                        Some((n.parse().unwrap_or(0), weekday(wd)?))
+                        let (n, wd) = d.split_at(d.len().checked_sub(2).filter(|&i| d.is_char_boundary(i))?);
+                        Some((n.parse::<i32>().unwrap_or(0).clamp(-5, 5), weekday(wd)?))
                     })
                     .collect()
             }
@@ -219,10 +220,22 @@ impl Shift {
         let mut at: Vec<NaiveDateTime> = self.dates.iter().copied().chain([self.start]).filter(|d| *d <= t).collect();
         if let Some(r) = &self.rule {
             let month = r.by_month.first().copied().unwrap_or(self.start.month());
-            for year in [t.year() - 1, t.year()] {
-                let day = match (r.by_day.first(), r.by_month_day.first()) {
+            // a day of the month (negative: from its end)
+            let month_day = |year: i32, md: i32| {
+                if md > 0 {
+                    NaiveDate::from_ymd_opt(year, month, md as u32)
+                } else {
+                    let (y, m) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+                    NaiveDate::from_ymd_opt(y, m, 1).map(|d| d + Duration::days(md.max(-31) as i64))
+                }
+            };
+            // (a rule that ended counts in its last year)
+            for year in [t.year() - 1, t.year()].into_iter().chain(r.until.map(|u| u.year())) {
+                let day = match (r.by_day.first(), r.by_month_day.as_slice()) {
+                    // "the Sunday among the 8th–14th", as older calendar programs write the 2nd Sunday
+                    (Some(&(0, wd)), mds) if !mds.is_empty() => mds.iter().filter_map(|&md| month_day(year, md)).find(|d| d.weekday() == wd),
                     (Some(&(n, wd)), _) => nth_weekday(year, month, wd, if n == 0 { 1 } else { n }),
-                    (None, Some(&md)) => NaiveDate::from_ymd_opt(year, month, md.max(1) as u32),
+                    (None, [md, ..]) => month_day(year, *md),
                     _ => NaiveDate::from_ymd_opt(year, month, self.start.day()),
                 };
                 if let Some(d) = day.map(|d| d.and_time(self.start.time())) {
@@ -427,14 +440,16 @@ fn unfold(ics: &str) -> String {
     ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "")
 }
 
-/// The e-mail address of a calendar person (`mailto:a@b`), lower-case; "" when there is none.
+/// The e-mail address of a calendar person (`mailto:a@b`), lower-case; "" when it is not one
+/// address (an answer is sent to it: never to a list).
 fn mailto(value: &str) -> String {
     let v = value.trim();
     let v = match v.get(..7) {
         Some(p) if p.eq_ignore_ascii_case("mailto:") => &v[7..],
         _ => v,
     };
-    if v.contains('@') { v.trim().to_lowercase() } else { String::new() }
+    let v = v.trim();
+    if v.parse::<lettre::Address>().is_ok() && !v.contains([',', ';']) { v.to_lowercase() } else { String::new() }
 }
 
 /// The answer to an invitation for its organiser (iTIP `REPLY`, RFC 5546): the meeting named as
@@ -448,6 +463,8 @@ pub fn reply(ics: &str, me: &str, answer: &str, now: chrono::DateTime<Utc>) -> O
     };
     let text = unfold(ics);
     let (mut zones, mut kept, mut zone, mut event, mut done) = (String::new(), String::new(), false, false, false);
+    // (blocks inside the meeting, e.g. its alarm, are left out; each property once)
+    let (mut inner, mut seen) = (0usize, HashSet::new());
     for line in text.lines().map(str::trim_end) {
         let upper = line.to_ascii_uppercase();
         if upper == "BEGIN:VTIMEZONE" {
@@ -459,18 +476,22 @@ pub fn reply(ics: &str, me: &str, answer: &str, now: chrono::DateTime<Utc>) -> O
             zone = upper != "END:VTIMEZONE";
         } else if upper == "BEGIN:VEVENT" && !done {
             event = true;
-        } else if upper == "END:VEVENT" && event {
+        } else if upper == "END:VEVENT" && event && inner == 0 {
             (event, done) = (false, true);
-        } else if event {
-            let name = upper.split([';', ':']).next().unwrap_or("");
-            if ["UID", "RECURRENCE-ID", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY", "ORGANIZER"].contains(&name) {
+        } else if event && upper.starts_with("BEGIN:") {
+            inner += 1;
+        } else if event && upper.starts_with("END:") {
+            inner = inner.saturating_sub(1);
+        } else if event && inner == 0 {
+            let name = upper.split([';', ':']).next().unwrap_or("").to_string();
+            if ["UID", "RECURRENCE-ID", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY", "ORGANIZER"].contains(&name.as_str()) && seen.insert(name) {
                 kept.push_str(line);
                 kept.push_str("\r\n");
             }
         }
     }
     let organizer = kept.lines().find(|l| l.to_ascii_uppercase().starts_with("ORGANIZER")).and_then(parse_line).map(|p| mailto(&p.value))?;
-    if organizer.is_empty() || !kept.to_ascii_uppercase().contains("UID:") {
+    if organizer.is_empty() || !seen.contains("UID") {
         return None;
     }
     let me = me.trim();
@@ -513,6 +534,11 @@ pub struct Invitation {
     pub asks: bool,
     /// who to answer (an e-mail address, lower-case; "" when it does not say)
     pub organizer: String,
+    /// how new this word about the meeting is: the organiser's change count and when it was
+    /// written (an older email must not undo a newer one)
+    pub version: (i64, String),
+    /// about one day of a repeating meeting only (not the series)
+    pub instance: bool,
 }
 
 /// The meeting of an invitation's calendar file (its first event), if it is one.
@@ -547,6 +573,8 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
         cancelled: method == "CANCEL" || get("STATUS").is_some_and(|p| p.value.eq_ignore_ascii_case("CANCELLED")),
         asks: method == "REQUEST",
         organizer: get("ORGANIZER").map(|p| mailto(&p.value)).unwrap_or_default(),
+        version: (get("SEQUENCE").and_then(|p| p.value.trim().parse().ok()).unwrap_or(0), get("DTSTAMP").map(|p| p.value.trim().to_string()).unwrap_or_default()),
+        instance: get("RECURRENCE-ID").is_some(),
     })
 }
 
@@ -559,11 +587,11 @@ pub fn clashes<'a>(events: &'a [Event], inv: &Invitation) -> Vec<&'a Event> {
     let end = inv.start + Duration::minutes(inv.minutes.max(1));
     events
         .iter()
-        .filter(|e| !e.all_day && e.id != invite_id(&inv.uid, e.date))
         .filter(|e| {
             let s = e.date.and_time(e.start);
-            s < end && s + Duration::minutes(e.minutes.max(1)) > inv.start && !(s == inv.start && e.title == inv.title)
+            !e.all_day && s < end && s + Duration::minutes(e.minutes.max(1)) > inv.start && !(s == inv.start && e.title == inv.title)
         })
+        .filter(|e| e.id != invite_id(&inv.uid, e.date))
         .collect()
 }
 
@@ -1115,6 +1143,25 @@ mod tests {
     }
 
     #[test]
+    fn a_hostile_or_old_style_calendar_file_is_read_safely() {
+        // bytes cut inside a letter, huge repeats: no panic, nothing wrong shown
+        let bad = SAMPLE_INVITE.replace("DTSTART:20261120T090000Z", "DTSTART;VALUE=DATE:2026112ż").replace("LOCATION:Sala B", "RRULE:FREQ=WEEKLY;INTERVAL=99999999999;BYDAY=żż,-2147483648SU");
+        assert!(invitation(&bad).is_none());
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        let _ = parse(&bad.replace("DTSTART;VALUE=DATE:2026112ż", "DTSTART:20261120T090000Z"), 0, today, today + Duration::days(400));
+        // the newest word wins; one day of a series is told apart
+        let i = invitation(&SAMPLE_INVITE.replace("UID:", "SEQUENCE:3\r\nDTSTAMP:20261118T070000Z\r\nRECURRENCE-ID:20261127T090000Z\r\nUID:")).unwrap();
+        assert_eq!((i.version.0, i.version.1.as_str(), i.instance), (3, "20261118T070000Z", true));
+        assert!(!invitation(SAMPLE_INVITE).unwrap().instance);
+        // summer time ending on "the Sunday among the 25th–31st" (as older programs write the last Sunday)
+        let z = zones("BEGIN:VTIMEZONE\r\nTZID:W\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=25,26,27,28,29,30,31;BYDAY=SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=-7,-6,-5,-4,-3,-2,-1;BYDAY=SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n");
+        let at = |m, d, h| NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(h, 0, 0).unwrap();
+        let utc = |m, d, h| Utc.with_ymd_and_hms(2026, m, d, h, 0, 0).unwrap().with_timezone(&Local).naive_local();
+        assert_eq!(zone_to_local(&z, "W", at(10, 24, 9)), Some(utc(10, 24, 7)));
+        assert_eq!(zone_to_local(&z, "W", at(10, 26, 9)), Some(utc(10, 26, 8)));
+    }
+
+    #[test]
     fn the_answer_to_an_invitation_for_its_organiser() {
         assert_eq!(invitation(SAMPLE_INVITE).unwrap().organizer, "anna@example.com");
         let now = Utc.with_ymd_and_hms(2026, 11, 18, 7, 0, 0).unwrap();
@@ -1132,5 +1179,12 @@ mod tests {
         assert!(reply(&zoned, "me@example.com", "declined", now).unwrap().contains("PARTSTAT=DECLINED"));
         // nobody to answer
         assert!(reply(&SAMPLE_INVITE.replace("ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r\n", ""), "me@example.com", "accepted", now).is_none());
+        // an organiser that is a list is nobody (the answer goes to one address only)
+        let list = SAMPLE_INVITE.replace("mailto:anna@example.com", "mailto:anna@example.com,eve@evil.example");
+        assert!(invitation(&list).unwrap().organizer.is_empty() && reply(&list, "me@example.com", "accepted", now).is_none());
+        // the meeting's alarm (inside it) adds nothing; a property given twice is answered once
+        let alarm = SAMPLE_INVITE.replace("END:VEVENT", "BEGIN:VALARM\r\nSUMMARY:Ding\r\nDURATION:-PT10M\r\nEND:VALARM\r\nSUMMARY:Again\r\nEND:VEVENT");
+        let r = reply(&alarm, "me@example.com", "accepted", now).unwrap();
+        assert!(!r.contains("Ding") && !r.contains("Again") && !r.contains("DURATION") && r.contains("END:VEVENT\r\nEND:VCALENDAR"), "{r}");
     }
 }

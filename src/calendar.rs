@@ -580,7 +580,7 @@ pub fn reminders(events: &[Event], now: chrono::NaiveDateTime, ahead: Duration) 
             next = Some(next.map_or(at - ahead, |n| n.min(at - ahead)));
         }
     }
-    due.sort_by_key(|e| e.start);
+    due.sort_by_key(|e| e.date.and_time(e.start));
     (due, next)
 }
 

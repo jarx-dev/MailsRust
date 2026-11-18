@@ -83,6 +83,9 @@ struct Prefs {
     no_reply_needed: Vec<u64>,
     /// answers to invitations sent by email (meeting id, answer), newest last
     invite_answers: Vec<(String, String)>,
+    /// the newest word about each meeting put into the calendar from an email (meeting id,
+    /// change count, written at, organiser), newest last
+    invite_versions: Vec<(String, i64, String, String)>,
     /// a note in the corner 10 minutes before each meeting of the calendar
     meeting_reminders: bool,
     /// the calendar and the contacts shared with Google (through the Google sign-in)
@@ -122,6 +125,7 @@ impl Default for Prefs {
             gcal_key: String::new(),
             no_reply_needed: vec![],
             invite_answers: vec![],
+            invite_versions: vec![],
             meeting_reminders: true,
             google_calendar: true,
             google_contacts: true,

@@ -303,8 +303,8 @@ fn prepare(m: &Message) -> Option<String> {
     }
     // The page's own script also marks a link whose text is one web address while it opens
     // another site (the usual trick of a fake bank email): the real site is written after it.
-    // shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl),
-    // not the public suffix list; upgrade if it marks or misses real cases.
+    // shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
+    // and the like), not the public suffix list; upgrade if it marks or misses real cases.
     let head = "<meta charset=\"utf-8\"><base target=\"_blank\"><meta name=\"color-scheme\" content=\"light\">\
         <style>html{background:#fff;color-scheme:light}\
         ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:transparent}\
@@ -315,7 +315,7 @@ fn prepare(m: &Message) -> Option<String> {
         if(t&&t.tagName==='LINK'&&t.hasAttribute('data-pz-late'))t.media='all';},true);\
         document.addEventListener('DOMContentLoaded',function(){\
         var site=function(h){var p=h.toLowerCase().replace(/^www\\./,'').split('.');\
-        var n=p.length>2&&p[p.length-1].length===2&&p[p.length-2].length<=3?3:2;return p.slice(-n).join('.')};\
+        var n=p.length>2&&p[p.length-1].length===2&&/^(co|com|org|net|gov|edu|ac|or|ne|go|gob|mil|nom)$/.test(p[p.length-2])?3:2;return p.slice(-n).join('.')};\
         document.querySelectorAll('a[href]').forEach(function(a){if(!/^https?:$/.test(a.protocol))return;\
         var m=/^(https?:\\/\\/|www\\.)?((?:[a-z0-9-]+\\.)+([a-z]{2,}))(?:[\\/:?#]|$)/i.exec(a.textContent.trim());\
         if(!m||(!m[1]&&/^(pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|gif|html?|txt|csv|ics|eml|exe|php|aspx?|js)$/i.test(m[3])))return;\
@@ -376,14 +376,28 @@ fn theme() -> wry::Theme {
 /// (it carries `nonce`, a number made anew for every page, which an email cannot know).
 fn only_own_script(html: &mut String, nonce: &str) {
     let rule = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'\">");
-    // The rule holds for what comes after it, so it goes first: right after the doctype when
-    // only comments stand before that (ahead of the doctype it would change how the page is laid out).
+    // The rule holds for what comes after it, so it goes first: past the comments and blanks
+    // the page starts with, and right after the doctype when that comes next (ahead of the
+    // doctype it would change how the page is laid out). A comment not closed: the very first
+    // thing. It can never land inside a comment or after the email's own text or tags.
     let lower = html.to_ascii_lowercase();
-    let at = lower
-        .find("<!doctype")
-        .filter(|&d| !lower[..d].replace("<!--", "").contains('<'))
-        .and_then(|d| lower[d..].find('>').map(|e| d + e + 1))
-        .unwrap_or(0);
+    let mut at = 0;
+    loop {
+        at = lower.len() - lower[at..].trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']).len();
+        if !lower[at..].starts_with("<!--") {
+            break;
+        }
+        match lower[at..].find("-->") {
+            Some(e) => at += e + 3,
+            None => {
+                at = 0;
+                break;
+            }
+        }
+    }
+    if lower[at..].starts_with("<!doctype") {
+        at = lower[at..].find('>').map_or(0, |e| at + e + 1);
+    }
     html.insert_str(at, &rule);
 }
 
@@ -665,6 +679,10 @@ mod tests {
         // something of the email before the doctype, or no doctype: the rule is the very first thing
         assert_eq!(rule_at("<script>x()</script><!doctype html><p>a"), "<meta http-equiv=\"".len());
         assert_eq!(rule_at("<p onclick=\"x()\">a"), "<meta http-equiv=\"".len());
+        assert_eq!(rule_at("x<!doctype html><html><head><script>x()</script>"), "<meta http-equiv=\"".len());
+        // a doctype written inside a comment is not one: after the comment, before the email
+        assert_eq!(rule_at("<!-- <!doctype html> --><html><body><script>x()</script>"), "<!-- <!doctype html> --><meta http-equiv=\"".len());
+        assert_eq!(rule_at("<!-- not closed <!doctype html><script>x()</script>"), "<meta http-equiv=\"".len());
         // stylesheets loaded late no longer need a script attribute of their own
         let late = no_waiting_for_internet("<link rel=\"stylesheet\" href=\"https://a.example/s.css\"><style>@import url(https://a.example/t.css);</style>");
         assert!(!late.contains("onload") && late.matches("data-pz-late").count() == 2);

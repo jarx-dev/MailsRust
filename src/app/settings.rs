@@ -183,6 +183,8 @@ impl MailApp {
                     self.store.events.retain(|e| !e.google || (crate::gcal::is_invite(e.id) && !google_has(e)));
                     self.store.events.extend(evs);
                     self.gcal_uids = uids;
+                    // (a meeting moved there is reminded of at its new time)
+                    self.remind_next = 0.0;
                     self.gcal_said = Some(Ok(format!("{}, {}", i18n::plural("ui.settings.google_events", n), Local::now().format("%H:%M"))));
                     crate::diag::log(format!("Google calendar: {n} events"));
                     self.save_now = true;
@@ -252,6 +254,8 @@ impl MailApp {
         }
         let now = self.clock();
         if now < self.remind_next && self.store.events.len() == self.remind_events {
+            // (asked again each time: an earlier repaint replaces the wake-up asked for)
+            self.ctx.request_repaint_after(std::time::Duration::from_secs_f64(self.remind_next - now));
             return;
         }
         self.remind_events = self.store.events.len();

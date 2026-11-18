@@ -561,13 +561,14 @@ pub fn parse(html: &str) -> Vec<Block> {
 /// A link whose text is one web address while it opens another site (the usual trick of a fake
 /// bank email): the site it really opens. The same check as the email page's own script
 /// (`webview.rs`), for emails drawn here.
-/// shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl),
-/// not the public suffix list; upgrade if it marks or misses real cases.
+/// shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
+/// and the like), not the public suffix list; upgrade if it marks or misses real cases.
 pub fn link_elsewhere(text: &str, href: &str) -> Option<String> {
+    const SECOND: [&str; 13] = ["co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nom"];
     let site = |h: &str| {
         let h = h.to_ascii_lowercase();
         let p: Vec<&str> = h.strip_prefix("www.").unwrap_or(&h).split('.').collect();
-        let n = if p.len() > 2 && p[p.len() - 1].len() == 2 && p[p.len() - 2].len() <= 3 { 3 } else { 2 };
+        let n = if p.len() > 2 && p[p.len() - 1].len() == 2 && SECOND.contains(&p[p.len() - 2]) { 3 } else { 2 };
         p[p.len().saturating_sub(n)..].join(".")
     };
     // where the link goes: http(s) only, the host without a user name or port
@@ -607,7 +608,7 @@ mod link_tests {
         assert_eq!(e("www.mojbank.pl", "https://evil.example/login").as_deref(), Some("evil.example"));
         assert_eq!(e(" https://c.d.com.pl/x ", "https://user@a.b.com.pl:8443/").as_deref(), Some("a.b.com.pl"));
         // the same site, a file name, plain words, a mail address, other kinds of link
-        for (text, href) in [("mojbank.pl", "https://www.mojbank.pl/x"), ("WWW.Shop.co.uk/sale", "http://deals.shop.co.uk"), ("raport.pdf", "https://drive.example/f"), ("Click here", "https://x.example"), ("a@b.pl", "https://x.example"), ("www.a.pl", "mailto:x@y.pl"), ("www.a.pl,", "https://b.pl")] {
+        for (text, href) in [("mojbank.pl", "https://www.mojbank.pl/x"), ("WWW.Shop.co.uk/sale", "http://deals.shop.co.uk"), ("ing.pl", "https://login.ing.pl/"), ("www.wp.pl", "https://poczta.wp.pl"), ("raport.pdf", "https://drive.example/f"), ("Click here", "https://x.example"), ("a@b.pl", "https://x.example"), ("www.a.pl", "mailto:x@y.pl"), ("www.a.pl,", "https://b.pl")] {
             assert_eq!(e(text, href), None, "{text} → {href}");
         }
         assert_eq!(e("www.report.pdf", "https://drive.example/f").as_deref(), Some("drive.example"));

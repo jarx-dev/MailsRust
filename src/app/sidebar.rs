@@ -1027,13 +1027,14 @@ impl MailApp {
             }
             CalAction::Edit(id) => {
                 if let Some(e) = self.store.events.iter().find(|e| e.id == id) {
-                    if e.google && e.gid.is_empty() {
+                    // a whole-day event in Google: kept as one event a day, all with its id (read
+                    // up to 31 days: a longer one is not changed here, or saving would shorten it)
+                    let same: Vec<NaiveDate> = if e.all_day && !e.gid.is_empty() { self.store.events.iter().filter(|x| x.gid == e.gid).map(|x| x.date).collect() } else { vec![e.date] };
+                    if e.google && (e.gid.is_empty() || same.len() >= 31) {
                         let when = if e.all_day { t!("ui.sidebar.all_day").into_owned() } else { format!("{} – {}", e.start.format("%H:%M"), (e.start + Duration::minutes(e.minutes)).format("%H:%M")) };
                         let place = if e.location.is_empty() { String::new() } else { format!(" · {}", e.location) };
                         self.set_status(t!("ui.sidebar.google_event", title = e.title, when = when, place = place));
                     } else {
-                        // a whole-day event in Google: kept as one event a day, all with its id
-                        let same: Vec<NaiveDate> = if e.all_day && !e.gid.is_empty() { self.store.events.iter().filter(|x| x.gid == e.gid).map(|x| x.date).collect() } else { vec![e.date] };
                         let (first, days) = (same.iter().min().copied().unwrap_or(e.date), same.len() as i64);
                         self.editor = Some(EventEditor::from_event(e, first, days));
                     }
@@ -1126,6 +1127,7 @@ impl MailApp {
                 self.cal_day = date;
                 self.side_day = date;
                 self.editor = None;
+                self.remind_next = 0.0; // (reminded of at its new time)
                 self.set_status(t!("ui.sidebar.event_saved"));
             }
         }

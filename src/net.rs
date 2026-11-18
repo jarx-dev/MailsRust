@@ -1546,7 +1546,7 @@ pub fn build_email(acc: &Account, m: &Outgoing) -> Result<lettre::Message, Strin
     // an answer to an invitation (the app's own: plain text and its calendar file): the calendar
     // part goes beside the text, marked as an answer, where calendar programs look (RFC 6047)
     if let [f] = m.files.as_slice() {
-        let reply = Some(f).filter(|f| m.html.is_none() && f.ends_with(".ics")).and_then(|f| std::fs::read_to_string(f).ok()).filter(|t| t.contains("\r\nMETHOD:REPLY\r\n"));
+        let reply = Some(f).filter(|f| m.html.is_none() && f.ends_with(".ics")).and_then(|f| std::fs::read_to_string(f).ok()).filter(|t| t.contains("\r\nPRODID:-//Poczta//") && t.contains("\r\nMETHOD:REPLY\r\n"));
         if let Some(ics) = reply {
             let ct = ContentType::parse("text/calendar; method=REPLY; charset=utf-8").map_err(|e| e.to_string())?;
             return b.multipart(MultiPart::alternative().singlepart(SinglePart::plain(m.body.clone())).singlepart(SinglePart::builder().header(ct).body(ics))).map_err(|e| e.to_string());
