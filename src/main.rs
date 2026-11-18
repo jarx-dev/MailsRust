@@ -96,10 +96,6 @@ fn main() -> eframe::Result<()> {
         update::startup_complete(true);
         return Ok(());
     }
-    // (only the real copy offers itself for .eml files: a test copy's EXE is in a test folder)
-    if !test_run && std::env::var_os("POCZTA_DATA_DIR").is_none() {
-        std::thread::spawn(open_file::register);
-    }
 
     // a window size saved while the window was minimized (tiny) is forgotten: the window then
     // opens at its normal size instead of as a small strip in the corner

@@ -10,6 +10,8 @@ pub(super) enum ImgState {
 
 /// Ids of messages opened from .eml files (the mailbox's own ids never get this high).
 pub(super) const FILE_IDS: u64 = 1 << 62;
+/// A .eml file read in the background: its message, or the file's name when it can't be read.
+pub(super) type FileRead = Result<Message, String>;
 
 /// A message opened in a window of its own.
 pub(super) struct ReaderWin {
@@ -1039,20 +1041,50 @@ impl MailApp {
     // ------------------------------------------------------------ windows
 
     /// Email files (.eml) handed over by a start from Explorer (see open_file), each in a reading
-    /// window. The message is not in the mailbox: its id is from the top of the range, where
-    /// `msg` finds it among the open windows (for reply, forward and its attachments).
-    pub(super) fn open_files(&mut self) {
-        for path in crate::open_file::take() {
-            let name = std::path::Path::new(&path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-            match std::fs::read(&path).ok().and_then(|raw| crate::net::parse(&raw, true, false)) {
-                Some(mut m) => {
+    /// window. They are read in the background (a big file, or one on a network drive, would
+    /// hold every window) and come back through `files`; true when there was one.
+    pub(super) fn open_files(&mut self) -> bool {
+        // (a copy closing for an update leaves them to the new one)
+        if self.quitting {
+            return false;
+        }
+        let files = crate::open_file::take();
+        if files.is_empty() {
+            return false;
+        }
+        let (tx, ctx) = (self.files.0.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            for path in files {
+                let name = std::path::Path::new(&path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                let _ = tx.send(std::fs::read(&path).ok().and_then(|raw| crate::net::parse(&raw, true, false)).ok_or(name));
+                ctx.request_repaint();
+            }
+        });
+        true
+    }
+
+    /// The .eml files read meanwhile, each opened in a reading window. The message is not in the
+    /// mailbox: its id is from the top of the range, where `msg` finds it among the open windows
+    /// (for reply, forward and its attachments).
+    pub(super) fn files_read(&mut self) {
+        while let Ok(read) = self.files.1.try_recv() {
+            match read {
+                Ok(mut m) => {
                     let key = self.next_key;
                     self.next_key += 1;
                     m.id = FILE_IDS + key;
+                    // (answered from the account it came to, when it is one of them)
+                    let to = format!("{} {}", m.to, m.cc).to_lowercase();
+                    if let Some(a) = (0..=self.store.extra.len() as u32).find(|&a| {
+                        let e = self.account_ref(a).email.to_lowercase();
+                        !e.is_empty() && to.contains(&e)
+                    }) {
+                        m.account = a;
+                    }
                     self.readers.push(ReaderWin { key, msg: m, web: None, failed: false, tries: 0, last: None });
                     crate::diag::log("email files: a .eml file opened in a reading window");
                 }
-                None => {
+                Err(name) => {
                     crate::diag::log("email files: a .eml file could not be read");
                     self.set_status(t!("core.open_file.unreadable", name = name));
                 }
@@ -1138,6 +1170,10 @@ impl MailApp {
                             (ic::REPLY, t!("mail.reading.reply")),
                         ];
                         for (k, (icon, tip)) in acts.iter().enumerate() {
+                            // (a message from a file has no lasting id for an AI link to come back to)
+                            if k == 0 && m.id >= FILE_IDS {
+                                continue;
+                            }
                             let rr = Rect::from_center_size(Pos2::new(x, sr.top() + 36.0), Vec2::splat(26.0));
                             let resp = ui.interact(rr, id(("reader-act", r.key, k)), Sense::click());
                             if resp.hovered() {

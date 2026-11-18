@@ -230,6 +230,8 @@ pub struct MailApp {
     composers: Vec<Compose>,
     /// messages opened in windows of their own
     readers: Vec<ReaderWin>,
+    /// .eml files read in the background (see `open_files`): the message, or the file's name
+    files: (Sender<reading::FileRead>, Receiver<reading::FileRead>),
     /// attachments shown in windows of their own
     previews: Vec<PreviewWin>,
     /// address suggestions for the recipients boxes, and the mailbox size they were made for
@@ -466,6 +468,11 @@ impl MailApp {
         // the language first: the tray menu and every text after it are drawn in it
         let saved = if shot.is_none() { cc.storage.and_then(|s| eframe::get_value::<Prefs>(s, "prefs")) } else { None };
         crate::i18n::set(&saved.as_ref().map(|p| p.lang.clone()).or_else(|| std::env::var("POCZTA_LANG").ok()).unwrap_or_default());
+        // the real copy offers itself for .eml files, named in the person's language (a test copy's
+        // EXE is in a test folder)
+        if shot.is_none() && !crate::unseen() && std::env::var_os("POCZTA_DATA_DIR").is_none() {
+            std::thread::spawn(crate::open_file::register);
+        }
         let t = std::time::Instant::now();
         apply(&cc.egui_ctx);
         crate::diag::took("startup: fonts and colours", t, "");
@@ -517,6 +524,7 @@ impl MailApp {
             account_expanded: true,
             composers: vec![],
             readers: vec![],
+            files: channel(),
             previews: vec![],
             contacts: Default::default(),
             contacts_sig: (0, 0),
@@ -711,7 +719,10 @@ impl MailApp {
             }
         }
         // started with an email file (double click in Explorer): it opens in a window of its own
-        app.open_files();
+        // (a picture never takes the real copy's files)
+        if app.shot.is_none() {
+            app.open_files();
+        }
         // a key pressed inside the email wakes the app
         app.mail_view.wake = Some(cc.egui_ctx.clone());
         let _ = APP_CTX.set(cc.egui_ctx.clone());
@@ -1171,14 +1182,16 @@ tel.: 600-100-200".into();
     }
 
     fn msg(&self, id: u64) -> Option<&Message> {
+        // (a message opened from a .eml file is only in its reading window)
+        if id >= reading::FILE_IDS {
+            return self.readers.iter().map(|r| &r.msg).find(|m| m.id == id);
+        }
         if let Some(&i) = self.index.get(&id) {
             if let Some(m) = self.store.messages.get(i).filter(|m| m.id == id) {
                 return Some(m);
             }
         }
         self.store.messages.iter().find(|m| m.id == id)
-            // (a message opened from a .eml file is only in its reading window)
-            .or_else(|| self.readers.iter().map(|r| &r.msg).find(|m| m.id == id && id >= reading::FILE_IDS))
     }
 
     fn msg_mut(&mut self, id: u64) -> Option<&mut Message> {
@@ -1770,10 +1783,13 @@ impl eframe::App for MailApp {
         }
         // the tray icon (or the program started again): show the window again, or quit for good
         if SHOW_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            self.show_window(ctx);
-            // (started again with an email file: it opens in a window of its own)
-            self.open_files();
+            // started again with an email file: only its own window comes up (the main window
+            // in front of it would take the keys meant for the message)
+            if !self.open_files() {
+                self.show_window(ctx);
+            }
         }
+        self.files_read();
         // (eframe shows the window after its first frame: started into the tray, hidden then,
         // once — unless it was asked to show meanwhile)
         if self.start_hidden && self.drawn >= 1 {

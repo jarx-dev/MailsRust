@@ -1,46 +1,63 @@
 //! Email files (.eml): Poczta offers itself in Explorer's "Open with" for them (under HKCU, no
-//! administrator rights), and a file given on the command line opens in a reading window. The
-//! file goes through a short list next to the log, so a second start (which only wakes the
+//! administrator rights), and a file given on the command line opens in a reading window. Each
+//! start leaves a note in a folder next to the log, so a second start (which only wakes the
 //! running copy, see `another_copy_shown`) hands its file over the same way the first one does.
 
 use std::path::PathBuf;
 
-/// The list of files waiting to be opened (next to sync.log: each data folder has its own).
-fn list_path() -> PathBuf {
+/// The folder of notes waiting to be opened (next to sync.log: each data folder has its own).
+fn queue_dir() -> PathBuf {
     match std::env::var("POCZTA_DATA_DIR") {
-        Ok(d) => PathBuf::from(d).join("open-files.txt"),
-        Err(_) => crate::model::cache_dir().parent().map(|p| p.join("open-files.txt")).unwrap_or_else(|| "open-files.txt".into()),
+        Ok(d) => PathBuf::from(d).join("open-files"),
+        Err(_) => crate::model::cache_dir().parent().map(|p| p.join("open-files")).unwrap_or_else(|| "open-files".into()),
     }
 }
 
-/// The .eml files named on the command line (Explorer passes one per start).
+/// The .eml files named on the command line (Explorer passes one per start), as full paths: the
+/// running copy that opens them has another working folder.
 pub fn from_args(args: &[String]) -> Vec<String> {
-    args.iter().skip(1).filter(|a| a.to_lowercase().ends_with(".eml") && std::path::Path::new(a).is_file()).cloned().collect()
+    args.iter()
+        .skip(1)
+        .filter(|a| a.to_lowercase().ends_with(".eml") && std::path::Path::new(a).is_file())
+        .filter_map(|a| std::path::absolute(a).ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
 }
 
-/// Puts files on the list, for the copy that runs (this one, or one already running).
+/// Leaves a note for the copy that runs (this one, or one already running). Written under a
+/// temporary name and then renamed, so the reader never sees half of it.
 pub fn hand_over(files: &[String]) {
-    use std::io::Write;
     if files.is_empty() {
         return;
     }
-    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(list_path()) else { return };
-    for p in files {
-        let _ = writeln!(f, "{p}");
+    let dir = queue_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let name = format!("{}-{}", std::process::id(), crate::share::new_token());
+    let tmp = dir.join(format!("{name}.tmp"));
+    if std::fs::write(&tmp, files.join("\n")).is_ok() {
+        let _ = std::fs::rename(&tmp, dir.join(format!("{name}.txt")));
     }
 }
 
-/// The files waiting to be opened; the list is emptied.
+/// The files waiting to be opened; their notes are removed. A note older than two minutes is
+/// dropped unopened: its start found a copy that was closing, or crashed meanwhile.
 pub fn take() -> Vec<String> {
-    let path = list_path();
-    // (moved away first: a file handed over meanwhile starts a new list instead of being lost)
-    let taken = path.with_extension("taken");
-    if std::fs::rename(&path, &taken).is_err() {
-        return vec![];
+    let Ok(entries) = std::fs::read_dir(queue_dir()) else { return vec![] };
+    let mut files = vec![];
+    for e in entries.flatten() {
+        let p = e.path();
+        let fresh = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() < 120);
+        let note = p.extension().is_some_and(|x| x == "txt");
+        if note && fresh {
+            let text = std::fs::read_to_string(&p).unwrap_or_default();
+            files.extend(text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from));
+        }
+        // (a fresh .tmp is a note still being written)
+        if note || !fresh {
+            let _ = std::fs::remove_file(&p);
+        }
     }
-    let text = std::fs::read_to_string(&taken).unwrap_or_default();
-    let _ = std::fs::remove_file(&taken);
-    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
+    files
 }
 
 /// Adds Poczta to "Open with" for .eml files (the person makes it the default there once;
@@ -69,11 +86,12 @@ pub fn register() {
     if now.as_deref() == Some(command.as_str()) {
         return;
     }
-    let ok = set(r"Software\Classes\Poczta.eml", "", &t!("core.open_file.type_name"))
+    // (the command last: it marks the entries as done, so a failed write is tried again)
+    let ok = set(r"Software\Classes\.eml\OpenWithProgids", "Poczta.eml", "")
+        && set(r"Software\Classes\Poczta.eml", "", &t!("core.open_file.type_name"))
         && set(r"Software\Classes\Poczta.eml\DefaultIcon", "", &format!("\"{}\",0", exe.display()))
         && set(r"Software\Classes\Poczta.eml\Application", "ApplicationName", "Poczta")
-        && set(open, "", &command)
-        && set(r"Software\Classes\.eml\OpenWithProgids", "Poczta.eml", "");
+        && set(open, "", &command);
     unsafe {
         windows::Win32::UI::Shell::SHChangeNotify(windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED, windows::Win32::UI::Shell::SHCNF_IDLIST, None, None);
     }
