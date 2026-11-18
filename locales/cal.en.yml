@@ -64,6 +64,13 @@ cal:
     decline: "Decline"
     clash: "At the same time: %{title}"
     clash_more: "At the same time: %{title} (+%{n})"
+    goes_to: "The answer goes by email to %{who}"
+    mail_accepted: "Accepted: %{title}"
+    mail_tentative: "Tentative: %{title}"
+    mail_declined: "Declined: %{title}"
+    said_accepted: "%{name} has accepted this meeting."
+    said_tentative: "%{name} has tentatively accepted this meeting."
+    said_declined: "%{name} has declined this meeting."
   google:
     api_disabled: "%{api} is not turned on in your Google Cloud project — turn it on (the button in this window), wait a minute and try again"
     no_consent: "access was not granted — click “Sign in with Google again” and allow access to the calendar and contacts"

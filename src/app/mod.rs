@@ -81,6 +81,8 @@ struct Prefs {
     gcal_key: String,
     /// messages marked "Nie wymaga odpowiedzi" (left out of the list without replies)
     no_reply_needed: Vec<u64>,
+    /// answers to invitations sent by email (meeting id, answer), newest last
+    invite_answers: Vec<(String, String)>,
     /// the calendar and the contacts shared with Google (through the Google sign-in)
     google_calendar: bool,
     google_contacts: bool,
@@ -117,6 +119,7 @@ impl Default for Prefs {
             gcal_saved: String::new(),
             gcal_key: String::new(),
             no_reply_needed: vec![],
+            invite_answers: vec![],
             google_calendar: true,
             google_contacts: true,
             google_chat: true,

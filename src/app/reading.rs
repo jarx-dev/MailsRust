@@ -938,6 +938,10 @@ impl MailApp {
         let inv = crate::gcal::invitation(&ics).filter(|i| i.asks || i.cancelled);
         self.invites.insert(file.to_string(), inv.clone());
         let inv = inv?;
+        // an answer sent by email in an earlier run
+        if let Some((_, a)) = self.prefs.invite_answers.iter().find(|(u, _)| *u == inv.uid) {
+            self.invite_said.entry(inv.uid.clone()).or_insert_with(|| a.clone());
+        }
         let before = self.store.events.len();
         self.store.events.retain(|e| e.id != crate::gcal::invite_id(&inv.uid, e.date));
         let mut changed = self.store.events.len() != before;
@@ -1005,6 +1009,64 @@ impl MailApp {
         });
     }
 
+    /// The answer to an invitation as an email to its organiser, with the calendar part his
+    /// calendar program reads (for accounts without Google Calendar). It goes out the way written
+    /// mail does: through the Outbox (sent later when offline), then kept in Sent.
+    fn answer_by_mail(&mut self, m: &Message, inv: &crate::gcal::Invitation, file: &str, answer: &'static str) {
+        let acc = self.account_for(m.account);
+        let ics = std::fs::read_to_string(file).unwrap_or_default();
+        let Some(reply) = crate::gcal::reply(&ics, &acc.email, answer, chrono::Utc::now()) else { return };
+        let reply_file = crate::model::cache_put(reply.as_bytes(), "ics");
+        let name = if acc.display_name.trim().is_empty() { acc.email.trim().to_string() } else { acc.display_name.trim().to_string() };
+        let (subject, body) = match answer {
+            "accepted" => (t!("cal.invite.mail_accepted", title = inv.title), t!("cal.invite.said_accepted", name = name)),
+            "tentative" => (t!("cal.invite.mail_tentative", title = inv.title), t!("cal.invite.said_tentative", name = name)),
+            _ => (t!("cal.invite.mail_declined", title = inv.title), t!("cal.invite.said_declined", name = name)),
+        };
+        let id = self.store.new_id();
+        let sent = Message {
+            id,
+            folder: Folder::Outbox,
+            account: m.account,
+            from_name: acc.display_name.clone(),
+            from_addr: acc.email.clone(),
+            to: inv.organizer.clone(),
+            cc: String::new(),
+            subject: subject.into_owned(),
+            body: format!("{body}\n"),
+            date: Local::now().naive_local(),
+            read: true,
+            flagged: false,
+            attachments: vec!["response.ics".into()],
+            sample: false,
+            html_path: String::new(),
+            inline: vec![],
+            attachment_files: vec![reply_file.clone()],
+            labels: vec![],
+            uid: None,
+            body_path: String::new(),
+            partial: false,
+            snippet: String::new(),
+            on_disk: false,
+        };
+        let out = Outgoing { id, to: sent.to.clone(), cc: String::new(), subject: sent.subject.clone(), body: sent.body.clone(), html: None, inline: vec![], files: vec![reply_file] };
+        self.store.messages.push(sent);
+        // remembered, so the answer still shows after a restart (the last 200)
+        self.prefs.invite_answers.retain(|(u, _)| *u != inv.uid);
+        self.prefs.invite_answers.push((inv.uid.clone(), answer.to_string()));
+        let over = self.prefs.invite_answers.len().saturating_sub(200);
+        self.prefs.invite_answers.drain(..over);
+        self.save_now = true;
+        self.touched = true;
+        if self.can_connect() {
+            self.busy += 1;
+            net::send(acc, out, self.tx.clone(), self.ctx.clone());
+            self.set_status(t!("compose.status.sending"));
+        } else {
+            self.set_status(t!("compose.status.saved_outbox"));
+        }
+    }
+
     /// An email inviting to a meeting (it carries a calendar file): what and when, above the
     /// text, what else is in the calendar then, and the answer, written to the meeting in Google
     /// Calendar (Google tells the organiser); the answer already given is read from there.
@@ -1013,8 +1075,10 @@ impl MailApp {
         let Some(inv) = self.invitation_to_calendar(file) else { return };
         let test = self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("invite");
         let google = m.account == 0 && self.google_calendar();
-        let can_answer = inv.asks && !inv.cancelled && (google || test);
-        if can_answer && !test && self.invite_asked.insert(inv.uid.clone()) {
+        // without Google Calendar: an email to the organiser (not to oneself)
+        let by_mail = !google && !inv.organizer.is_empty() && !inv.organizer.eq_ignore_ascii_case(self.account_ref(m.account).email.trim());
+        let can_answer = inv.asks && !inv.cancelled && (google || by_mail || test);
+        if can_answer && google && !test && self.invite_asked.insert(inv.uid.clone()) {
             self.ask_google_invite(&inv.uid, None);
         }
         let end = inv.start + chrono::Duration::minutes(inv.minutes);
@@ -1052,7 +1116,10 @@ impl MailApp {
                     let said = self.invite_said.get(&inv.uid).cloned();
                     for (answer, label) in [("accepted", t!("cal.invite.accept")), ("tentative", t!("cal.invite.maybe")), ("declined", t!("cal.invite.decline"))] {
                         let on = said.as_deref() == Some(answer);
-                        if ui.add(egui::Button::new(RichText::new(label).size(13.5)).selected(on)).clicked() && !on && !test {
+                        let b = ui.add(egui::Button::new(RichText::new(label).size(13.5)).selected(on));
+                        // (who the answer goes to, when it goes as an email)
+                        let b = if by_mail { b.on_hover_text(t!("cal.invite.goes_to", who = inv.organizer)) } else { b };
+                        if b.clicked() && !on && !test {
                             self.invite_said.insert(inv.uid.clone(), answer.to_string());
                             if answer == "declined" {
                                 // (Google's own copy goes at the next reading: declined meetings are not read)
@@ -1060,7 +1127,11 @@ impl MailApp {
                                 self.save_now = true;
                                 self.touched = true;
                             }
-                            self.ask_google_invite(&inv.uid, Some(answer));
+                            if google {
+                                self.ask_google_invite(&inv.uid, Some(answer));
+                            } else {
+                                self.answer_by_mail(m, &inv, file, answer);
+                            }
                         }
                     }
                 });

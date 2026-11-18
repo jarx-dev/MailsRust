@@ -302,7 +302,7 @@ pub fn invite_events(ics: &str, today: NaiveDate) -> Vec<Event> {
 
 /// The events of a calendar file, each as its lines (lines continued on the next one joined back).
 fn blocks(ics: &str) -> Vec<Vec<Prop>> {
-    let text = ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
+    let text = unfold(ics);
     let mut blocks: Vec<Vec<Prop>> = Vec::new();
     let mut cur: Option<Vec<Prop>> = None;
     for line in text.lines() {
@@ -322,6 +322,79 @@ fn blocks(ics: &str) -> Vec<Vec<Prop>> {
     blocks
 }
 
+/// A calendar file with its long lines joined back (a line continued starts with a space or tab).
+fn unfold(ics: &str) -> String {
+    ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "")
+}
+
+/// The e-mail address of a calendar person (`mailto:a@b`), lower-case; "" when there is none.
+fn mailto(value: &str) -> String {
+    let v = value.trim();
+    let v = match v.get(..7) {
+        Some(p) if p.eq_ignore_ascii_case("mailto:") => &v[7..],
+        _ => v,
+    };
+    if v.contains('@') { v.trim().to_lowercase() } else { String::new() }
+}
+
+/// The answer to an invitation for its organiser (iTIP `REPLY`, RFC 5546): the meeting named as
+/// the invitation names it (its time zones too), and one guest, `me`, with `answer` (`accepted`,
+/// `tentative` or `declined`). None when the file has no meeting or no organiser to answer.
+pub fn reply(ics: &str, me: &str, answer: &str, now: chrono::DateTime<Utc>) -> Option<String> {
+    let partstat = match answer {
+        "accepted" => "ACCEPTED",
+        "tentative" => "TENTATIVE",
+        _ => "DECLINED",
+    };
+    let text = unfold(ics);
+    let (mut zones, mut kept, mut zone, mut event, mut done) = (String::new(), String::new(), false, false, false);
+    for line in text.lines().map(str::trim_end) {
+        let upper = line.to_ascii_uppercase();
+        if upper == "BEGIN:VTIMEZONE" {
+            zone = true;
+        }
+        if zone {
+            zones.push_str(line);
+            zones.push_str("\r\n");
+            zone = upper != "END:VTIMEZONE";
+        } else if upper == "BEGIN:VEVENT" && !done {
+            event = true;
+        } else if upper == "END:VEVENT" && event {
+            (event, done) = (false, true);
+        } else if event {
+            let name = upper.split([';', ':']).next().unwrap_or("");
+            if ["UID", "RECURRENCE-ID", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY", "ORGANIZER"].contains(&name) {
+                kept.push_str(line);
+                kept.push_str("\r\n");
+            }
+        }
+    }
+    let organizer = kept.lines().find(|l| l.to_ascii_uppercase().starts_with("ORGANIZER")).and_then(parse_line).map(|p| mailto(&p.value))?;
+    if organizer.is_empty() || !kept.to_ascii_uppercase().contains("UID:") {
+        return None;
+    }
+    let me = me.trim();
+    let lines = format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Poczta//Poczta//EN\r\nMETHOD:REPLY\r\n{zones}BEGIN:VEVENT\r\n{kept}DTSTAMP:{}\r\nATTENDEE;PARTSTAT={partstat}:mailto:{me}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        now.format("%Y%m%dT%H%M%SZ")
+    );
+    // lines longer than 75 bytes go on in the next line, after a space (RFC 5545)
+    let mut out = String::with_capacity(lines.len() + 64);
+    for line in lines.split_terminator("\r\n") {
+        let mut n = 0;
+        for c in line.chars() {
+            if n + c.len_utf8() > 75 {
+                out.push_str("\r\n ");
+                n = 1;
+            }
+            out.push(c);
+            n += c.len_utf8();
+        }
+        out.push_str("\r\n");
+    }
+    Some(out)
+}
+
 /// A meeting sent by email (the calendar file inside an invitation).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Invitation {
@@ -338,6 +411,8 @@ pub struct Invitation {
     pub cancelled: bool,
     /// an invitation asking for an answer (not somebody's answer or a plain calendar file)
     pub asks: bool,
+    /// who to answer (an e-mail address, lower-case; "" when it does not say)
+    pub organizer: String,
 }
 
 /// The meeting of an invitation's calendar file (its first event), if it is one.
@@ -367,6 +442,7 @@ pub fn invitation(ics: &str) -> Option<Invitation> {
         zone: start_p.params.get("TZID").cloned().unwrap_or_default(),
         cancelled: method == "CANCEL" || get("STATUS").is_some_and(|p| p.value.eq_ignore_ascii_case("CANCELLED")),
         asks: method == "REQUEST",
+        organizer: get("ORGANIZER").map(|p| mailto(&p.value)).unwrap_or_default(),
     })
 }
 
@@ -901,5 +977,25 @@ mod tests {
         // touching at the end or the start is no clash; the meeting itself and whole days are not counted
         assert_eq!(titles, ["Stand-up"]);
         assert!(clashes(&evs, &Invitation { all_day: true, ..inv }).is_empty());
+    }
+
+    #[test]
+    fn the_answer_to_an_invitation_for_its_organiser() {
+        assert_eq!(invitation(SAMPLE_INVITE).unwrap().organizer, "anna@example.com");
+        let now = Utc.with_ymd_and_hms(2026, 11, 18, 7, 0, 0).unwrap();
+        let zoned = SAMPLE_INVITE
+            .replace("METHOD:REQUEST\r\n", "METHOD:REQUEST\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\nBEGIN:STANDARD\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n")
+            .replace("DTSTART:20261120T090000Z", "DTSTART;TZID=Europe/Warsaw:20261120T100000\r\nSEQUENCE:2")
+            .replace("SUMMARY:Przegląd wdrożenia\\, etap 2", &format!("SUMMARY:{}\r\n {}", "Bardzo długi tytuł spotkania o przeglądzie wdrożenia", "i jego drugim etapie"));
+        let r = reply(&zoned, "Me@Example.com", "tentative", now).unwrap();
+        for part in ["METHOD:REPLY\r\n", "UID:invite-1@example.com\r\n", "SEQUENCE:2\r\n", "DTSTART;TZID=Europe/Warsaw:20261120T100000\r\n", "DTSTAMP:20261118T070000Z\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:Me@Example.com\r\n", "ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r\n", "BEGIN:VTIMEZONE\r\nTZID:Europe/Warsaw\r\n"] {
+            assert!(r.contains(part), "{part} in {r}");
+        }
+        // only the guest answering; the location is not repeated; long lines are folded
+        assert!(!r.contains("me@example.com") && !r.contains("LOCATION") && r.lines().all(|l| l.len() <= 75));
+        assert_eq!(invitation(&r).unwrap().title, "Bardzo długi tytuł spotkania o przeglądzie wdrożeniai jego drugim etapie");
+        assert!(reply(&zoned, "me@example.com", "declined", now).unwrap().contains("PARTSTAT=DECLINED"));
+        // nobody to answer
+        assert!(reply(&SAMPLE_INVITE.replace("ORGANIZER;CN=Anna Nowak:mailto:anna@example.com\r\n", ""), "me@example.com", "accepted", now).is_none());
     }
 }

@@ -68,6 +68,13 @@ cal:
     decline: "Odrzuć"
     clash: "W tym samym czasie: %{title}"
     clash_more: "W tym samym czasie: %{title} (+%{n})"
+    goes_to: "Odpowiedź pójdzie mailem do %{who}"
+    mail_accepted: "Przyjęto: %{title}"
+    mail_tentative: "Wstępnie przyjęto: %{title}"
+    mail_declined: "Odrzucono: %{title}"
+    said_accepted: "%{name} przyjmuje to spotkanie."
+    said_tentative: "%{name} wstępnie przyjmuje to spotkanie."
+    said_declined: "%{name} odrzuca to spotkanie."
   google:
     api_disabled: "w Twoim projekcie Google Cloud nie jest włączone %{api} — włącz je (przycisk w tym oknie), odczekaj minutę i spróbuj ponownie"
     no_consent: "brak zgody na dostęp — kliknij „Zaloguj ponownie przez Google” i zaznacz dostęp do kalendarza i kontaktów"
