@@ -85,6 +85,7 @@ ui:
       enabled: "Odpowiadaj automatycznie"
       dates: "Dni"
       dates_hint: "Od–do, włącznie (DD-MM-RRRR)"
+      pick_day: "Wybierz w kalendarzu"
       hours: "Godziny pracy"
       hours_hint: "Odpowiedź idzie przed nimi i po nich. Początek później niż koniec (np. 15–13) znaczy: odpowiadaj tylko między 13 a 15."
       address: "Na adres"

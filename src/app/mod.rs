@@ -796,7 +796,7 @@ impl MailApp {
         }
         // test pictures: the AI settings, the Google Calendar window
         app.ai_open = std::env::var("POCZTA_START").as_deref() == Ok("ai-settings");
-        app.auto_open = std::env::var("POCZTA_START").as_deref() == Ok("autoresponder");
+        app.auto_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("autoresponder" | "autoresponder-days"));
         app.about_open = std::env::var("POCZTA_START").as_deref() == Ok("about");
         app.gcal_open = matches!(std::env::var("POCZTA_START").as_deref(), Ok("account-calendar") | Ok("google-check"));
         app.gcal_open |= std::env::var("POCZTA_START").as_deref() == Ok("google-scopes");
