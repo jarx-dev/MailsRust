@@ -247,21 +247,24 @@ pub fn apply_colors(ctx: &egui::Context) {
     });
 }
 
+/// An emoji or pictogram that tag names leave out (see `strip_emoji`).
+pub fn is_decoration(c: char) -> bool {
+    let u = c as u32;
+    u >= 0x1F000
+        || (0x2190..=0x2BFF).contains(&u)
+        || (0x2300..=0x23FF).contains(&u)
+        || u == 0x200D
+        // ℹ ™ © ® and other symbols used as decoration in tag names
+        || u == 0x2139
+        || u == 0x24C2
+        || (0xFE00..=0xFE0F).contains(&u)
+        || (0xE000..=0xF8FF).contains(&u)
+}
+
 /// Emoji and pictograms can't be drawn in colour here, so they are left out of tag names.
 pub fn strip_emoji(s: &str) -> String {
     s.chars()
-        .filter(|c| {
-            let u = *c as u32;
-            !(u >= 0x1F000
-                || (0x2190..=0x2BFF).contains(&u)
-                || (0x2300..=0x23FF).contains(&u)
-                || u == 0x200D
-                // ℹ ™ © ® and other symbols used as decoration in tag names
-                || u == 0x2139
-                || u == 0x24C2
-                || (0xFE00..=0xFE0F).contains(&u)
-                || (0xE000..=0xF8FF).contains(&u))
-        })
+        .filter(|c| !is_decoration(*c))
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()

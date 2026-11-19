@@ -2090,5 +2090,10 @@ mod tests {
         // a folder takes in its label however an account spells it
         use super::list::same_label;
         assert!(same_label("Ważne", "WAŻNE") && same_label("faktury", "Faktury") && !same_label("Faktury", "Faktura"));
+        // and however the tag list shows it: emoji and extra spaces left out
+        assert!(same_label("📌 Do zrobienia", "Do zrobienia") && same_label("Do  zrobienia ✅", "do zrobienia") && same_label("Do\u{a0}zrobienia", "Do zrobienia"));
+        assert!(!same_label("📌", "⭐") && !same_label("n8n/Do zrobienia", "Do zrobienia") && !same_label("Dozrobienia", "Do zrobienia"));
+        assert_eq!(folder_name("✅ do zrobienia", &have), None);
+        assert_eq!(folder_name("⭐ Ulubione", &have), None);
     }
 }
