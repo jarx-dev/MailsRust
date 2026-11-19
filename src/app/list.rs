@@ -31,9 +31,16 @@ pub(super) fn moves_on_server(from: Folder, to: Folder) -> bool {
 }
 
 /// The same Gmail label in any letter case (Gmail ignores it; two accounts may spell it apart),
-/// compared without copying either name.
+/// or one that only differs by what the tag list never shows (emoji, extra spaces), compared
+/// without copying either name.
 pub(super) fn same_label(a: &str, b: &str) -> bool {
-    a.chars().flat_map(char::to_lowercase).eq(b.chars().flat_map(char::to_lowercase))
+    // the name as the tag list shows it (`strip_emoji`): words without emoji, one space apart
+    fn shown(s: &str) -> impl Iterator<Item = char> + '_ {
+        let words = s.split_whitespace().filter(|w| w.chars().any(|c| !is_decoration(c)));
+        words.enumerate().flat_map(|(i, w)| (i > 0).then_some(' ').into_iter().chain(w.chars().filter(|c| !is_decoration(*c)))).flat_map(char::to_lowercase)
+    }
+    // (a name of emoji only shows as it is, so only an exact match counts for it)
+    a.chars().flat_map(char::to_lowercase).eq(b.chars().flat_map(char::to_lowercase)) || (shown(a).next().is_some() && shown(a).eq(shown(b)))
 }
 
 pub(super) const ROW_H: f32 = 66.0;
@@ -56,6 +63,8 @@ pub(super) struct Counts {
     pub(super) group_total: HashMap<String, usize>,
     /// the person's own folders: messages of every account with that label
     pub(super) mine: HashMap<String, usize>,
+    /// labels that belong to one of the person's own folders (their rows are up top, not in tags)
+    pub(super) folder_tags: HashSet<String>,
 }
 
 /// Where a search looks: everywhere, in received mail, or in sent mail.
@@ -190,6 +199,9 @@ impl MailApp {
         let mut tags: HashMap<&str, usize> = HashMap::new();
         let mut group_total: HashMap<&str, usize> = HashMap::new();
         let mut mine: HashMap<&str, usize> = HashMap::new();
+        // label → the own folders it belongs to, and the folders one message reached
+        let mut folder_of: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut hits: Vec<usize> = Vec::new();
         let mut folder_count = [0usize; 16];
         let mut folder_unread = [0usize; 16];
         for m in &self.store.messages {
@@ -220,10 +232,18 @@ impl MailApp {
             if m.flagged && m.account == 0 {
                 c.flagged += 1;
             }
-            // own folders: every account (counted under the folder's own spelling)
-            for l in &m.labels {
-                if let Some(f) = self.prefs.my_folders.iter().find(|f| same_label(f, l)) {
-                    *mine.entry(f.as_str()).or_default() += 1;
+            // own folders: every account (counted under the folder's own spelling; a message with
+            // two spellings of the label counts once). Each label is matched once: comparing
+            // without emoji costs too much to repeat for every message (none: nothing to look up)
+            hits.clear();
+            let labels = if self.prefs.my_folders.is_empty() { &[][..] } else { &m.labels[..] };
+            for l in labels {
+                let of = folder_of.entry(l.as_str()).or_insert_with(|| (0..self.prefs.my_folders.len()).filter(|&i| same_label(&self.prefs.my_folders[i], l)).collect());
+                for &i in of.iter() {
+                    if !hits.contains(&i) {
+                        hits.push(i);
+                        *mine.entry(self.prefs.my_folders[i].as_str()).or_default() += 1;
+                    }
                 }
             }
             // tags: of the account in focus only
@@ -260,9 +280,21 @@ impl MailApp {
         c.tags = tags.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
         c.group_total = group_total.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
         c.mine = mine.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        c.folder_tags = folder_of.into_iter().filter(|(_, of)| !of.is_empty()).map(|(l, _)| l.to_string()).collect();
         let c = Arc::new(c);
         self.counts = Some((key, c.clone()));
         c
+    }
+
+    /// The label that puts message `id` into own folder `folder`: the spelling of it that the
+    /// message's account uses most (with an emoji the tag list hides, say), else the folder's name.
+    pub(super) fn folder_label(&self, folder: &str, id: u64) -> String {
+        let account = self.msg(id).map(|m| m.account);
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for l in self.store.messages.iter().filter(|m| Some(m.account) == account).flat_map(|m| &m.labels).filter(|l| same_label(l, folder)) {
+            *seen.entry(l.as_str()).or_default() += 1;
+        }
+        seen.into_iter().max_by_key(|&(l, n)| (n, std::cmp::Reverse(l))).map_or_else(|| folder.to_string(), |(l, _)| l.to_string())
     }
 
     pub(super) fn thread_of(&self, m: &Message) -> Arc<Vec<u64>> {
@@ -594,6 +626,7 @@ impl MailApp {
                 return vec![];
             }
         }
+        let mut in_folder: HashMap<&str, bool> = HashMap::new();
         let mut v: Vec<&Message> = self
             .store
             .messages
@@ -616,7 +649,8 @@ impl MailApp {
                                 *l == self.label_filter || (self.label_filter.ends_with('/') && l.starts_with(&self.label_filter))
                             })
                     }
-                    MailView::Mine => m.folder != Folder::Trash && m.labels.iter().any(|l| same_label(l, &self.label_filter)),
+                    // (each label compared once: comparing without emoji is slow for every message)
+                    MailView::Mine => m.folder != Folder::Trash && m.labels.iter().any(|l| *in_folder.entry(l.as_str()).or_insert_with(|| same_label(l, &self.label_filter))),
                 }
             })
             .filter(|m| {
@@ -1018,7 +1052,7 @@ impl MailApp {
                 ui.menu_button(t!("mail.list.menu_to_folder"), |ui| {
                     for f in self.prefs.my_folders.clone() {
                         if ui.add_enabled(!has.iter().any(|l| same_label(l, &f)), egui::Button::new(format!("{}  {}", ic::FOLDER, f))).clicked() {
-                            self.actions.push(Action::AddTag(id, f.clone()));
+                            self.actions.push(Action::AddTag(id, self.folder_label(&f, id)));
                             ui.close();
                         }
                     }

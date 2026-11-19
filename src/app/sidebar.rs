@@ -4,13 +4,13 @@ use super::*;
 pub(super) const FAVOURITES: &str = "Ulubione";
 
 /// A new folder's name from what was typed: trimmed, not empty, not the favourites' label, not
-/// a folder already there (in any letter case), and a label Gmail gives back as it was sent
+/// a folder already there (in any letter case or emoji), and a label Gmail gives back as it was sent
 /// (none of its own names, no quotes or backslashes, no "/" at either end).
 pub(super) fn folder_name(typed: &str, have: &[String]) -> Option<String> {
     let name = typed.trim();
     let low = name.to_lowercase();
     const GMAIL: [&str; 9] = ["inbox", "sent", "drafts", "spam", "trash", "starred", "important", "unread", "chats"];
-    let taken = low == FAVOURITES.to_lowercase() || GMAIL.contains(&low.as_str()) || low.starts_with("[gmail]") || have.iter().any(|f| f.to_lowercase() == low);
+    let taken = same_label(name, FAVOURITES) || GMAIL.contains(&low.as_str()) || low.starts_with("[gmail]") || have.iter().any(|f| same_label(f, name));
     let odd = name.contains(['"', '\\']) || name.starts_with('/') || name.ends_with('/');
     (!name.is_empty() && !taken && !odd).then(|| name.to_string())
 }
@@ -605,7 +605,7 @@ impl MailApp {
             let on = self.view == MailView::Mine && self.label_filter == name && self.search.is_empty();
             let row = folder_row_r(ui, ic::FOLDER, MUTED(), &name, n, false, on, 28.0);
             if let Some(mid) = self.dropped_on(&row, |m| !m.labels.iter().any(|l| same_label(l, &name)) && self.labels_on_server(m)) {
-                self.actions.push(Action::AddTag(mid, name.clone()));
+                self.actions.push(Action::AddTag(mid, self.folder_label(&name, mid)));
                 self.set_status(t!("ui.actions.tagged", tag = name));
             }
             row.context_menu(|ui| {
@@ -777,7 +777,7 @@ impl MailApp {
         let mut tags = counts.tags.clone();
         tags.remove(FAVOURITES);
         // (own folders have their rows up top)
-        tags.retain(|t, _| !self.prefs.my_folders.iter().any(|f| same_label(f, t)));
+        tags.retain(|t, _| !counts.folder_tags.contains(t));
         if !tags.is_empty() {
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
             if resp.hovered() {
