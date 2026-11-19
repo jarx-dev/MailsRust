@@ -291,10 +291,10 @@ impl MailApp {
     pub(super) fn folder_label(&self, folder: &str, id: u64) -> String {
         let account = self.msg(id).map(|m| m.account);
         let mut seen: HashMap<&str, usize> = HashMap::new();
-        for l in self.store.messages.iter().filter(|m| Some(m.account) == account).flat_map(|m| &m.labels).filter(|l| same_label(l, folder)) {
+        for l in self.store.messages.iter().filter(|m| Some(m.account) == account).flat_map(|m| &m.labels) {
             *seen.entry(l.as_str()).or_default() += 1;
         }
-        seen.into_iter().max_by_key(|&(l, n)| (n, std::cmp::Reverse(l))).map_or_else(|| folder.to_string(), |(l, _)| l.to_string())
+        seen.into_iter().filter(|(l, _)| same_label(l, folder)).max_by_key(|&(l, n)| (n, std::cmp::Reverse(l))).map_or_else(|| folder.to_string(), |(l, _)| l.to_string())
     }
 
     pub(super) fn thread_of(&self, m: &Message) -> Arc<Vec<u64>> {
