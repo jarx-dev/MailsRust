@@ -23,6 +23,8 @@ pub enum Msg {
     Md { text: String },
     /// „Popraw z AI”: the written part (pictures as [[obrazek-N]]) to correct in a style
     Ai { style: String, html: String },
+    /// „Dodaj do DW” on a mailto: link: its address(es), separated by , or ;
+    Cc { addr: String },
     /// the title of a pasted link's page (empty: none), for link `n`
     Title { n: u64, title: String },
     /// files dropped on the field (pictures go into the text, other files are attached)
@@ -289,6 +291,7 @@ impl ComposeView {
                     Some("img") => Msg::Img { data: s("data") },
                     Some("md") => Msg::Md { text: s("text") },
                     Some("ai") => Msg::Ai { style: s("style"), html: s("html") },
+                    Some("cc") => Msg::Cc { addr: s("addr") },
                     // a pasted link: its page's title is fetched meanwhile
                     Some("link") => {
                         let (url, n, tx, ctx) = (s("url"), v["n"].as_u64().unwrap_or(0), tx.clone(), ctx.clone());
@@ -539,7 +542,8 @@ html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font
 #pz-img,#pz-a{{position:absolute;display:none;z-index:25;align-items:center;gap:2px;background:#fff;border:1px solid #d9dce0;border-radius:7px;box-shadow:0 2px 10px rgba(0,0,0,.14);padding:3px;font-family:'Segoe UI',Arial,sans-serif;user-select:none}}
 #pz-img button,#pz-a button{{border:0;background:transparent;height:26px;min-width:26px;padding:0 7px;border-radius:5px;font-size:13px;cursor:pointer;color:#333}}
 #pz-img button:hover,#pz-a button:hover{{background:#eef1f5}}
-#pz-ah{{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#1e6fd9;padding:0 6px}}
+#pz-a{{max-width:calc(100vw - 16px)}}#pz-a button{{flex:none;white-space:nowrap}}
+#pz-ah{{max-width:280px;min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#1e6fd9;padding:0 6px}}
 #pz-w{{font-size:12px;color:#777;padding:0 6px;min-width:52px;text-align:center}}
 #pz-ai{{color:#6a3fd1!important;font-size:13px!important;font-weight:600}}
 #pz-ai.busy{{color:#888!important;cursor:wait}}
@@ -585,7 +589,7 @@ html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font
 <div id="pz-drop"><div>{t_drop}<small>{t_drop_note}</small></div></div>
 <div id="pz-ed" contenteditable="true" spellcheck="true" lang="pl">{content}</div>
 <div id="pz-img"><button data-w="-" title="{t_pic_smaller}">−</button><span id="pz-w"></span><button data-w="+" title="{t_pic_larger}">+</button><button data-w="fit" title="{t_pic_fit_tip}">{t_pic_fit}</button><button data-w="orig" title="{t_pic_orig}">100%</button><button data-w="del" title="{t_pic_remove}">🗑</button></div>
-<div id="pz-a"><span id="pz-ah"></span><button data-a="edit">{t_link_edit}</button><button data-a="off">{t_link_remove}</button></div>
+<div id="pz-a"><span id="pz-ah"></span><button data-a="cc">{t_link_cc}</button><button data-a="edit">{t_link_edit}</button><button data-a="off">{t_link_remove}</button></div>
 <div id="pz-handle" title="{t_drag}"></div>
 <script nonce="{nonce}">
 var pzPtr=0;
@@ -717,10 +721,13 @@ function setLink(a,u){{const r=document.createRange();r.selectNodeContents(a);co
 let link=null;
 function showLink(){{link=linkAt();if(!link||sel){{abox.style.display='none';return;}}
  ahref.textContent=link.getAttribute('href')||'';ahref.title=ahref.textContent;abox.style.display='flex';
+ abox.querySelector('[data-a=cc]').style.display=/^mailto:/i.test(ahref.textContent)?'':'none';abox.style.left='0px';
  const r=link.getBoundingClientRect();abox.style.left=Math.max(4,Math.min(r.left,innerWidth-abox.offsetWidth-8)+scrollX)+'px';abox.style.top=(r.bottom+scrollY+4)+'px';}}
 document.addEventListener('selectionchange',showLink);window.addEventListener('scroll',showLink);window.addEventListener('resize',showLink);
 abox.addEventListener('mousedown',e=>e.preventDefault());
 abox.addEventListener('click',e=>{{const b=e.target.closest('button');if(!b||!link||!ed.contains(link))return;
+ // a person in a quoted mail (mailto: link) into the Cc field above
+ if(b.dataset.a==='cc'){{const h=link.getAttribute('href')||'';let a='';try{{if(/^mailto:/i.test(h))a=decodeURIComponent(h.slice(7).split('?')[0]);}}catch(x){{}}if(a)post({{t:'cc',addr:a}});abox.style.display='none';return;}}
  if(b.dataset.a==='edit'){{const u=prompt('{t_link_prompt}',link.getAttribute('href')||'');if(u!==null)setLink(link,u.trim());}}
  else setLink(link,'');}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
@@ -760,6 +767,7 @@ window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,bloc
         t_pic_remove = t!("compose.view.pic_remove"),
         t_drag = t!("compose.page.drag"),
         t_link_prompt = t!("compose.page.link_prompt"),
+        t_link_cc = t!("compose.page.link_cc"),
         t_link_edit = t!("compose.page.link_edit"),
         t_link_remove = t!("compose.page.link_remove"),
         maxw = crate::rich::DEFAULT_WIDTH,

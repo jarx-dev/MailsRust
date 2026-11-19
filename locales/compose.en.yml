@@ -74,6 +74,7 @@ compose:
     pic_orig: "Original size"
     drag: "Drag to resize"
     link_prompt: "Link address:"
+    link_cc: "Add to Cc"
     link_edit: "Change address"
     link_remove: "Remove link"
   ask:

@@ -709,6 +709,15 @@ impl MailApp {
                                                 crate::diag::log(format!("aitest: {}", text.lines().take(3).collect::<Vec<_>>().join(" | ")));
                                             }
                                         }
+                                        if std::env::var("POCZTA_CC_TEST").is_ok() {
+                                            use std::sync::atomic::{AtomicBool, Ordering};
+                                            static CLICKED: AtomicBool = AtomicBool::new(false);
+                                            if !CLICKED.swap(true, Ordering::Relaxed) {
+                                                // test: a person's link in the text, the cursor in it, „Dodaj do DW” clicked
+                                                v.insert_html("<a href=\"mailto:cc.test@example.com\">&lt;cc.test@example.com&gt;</a>");
+                                                v.run_js("setTimeout(()=>{const a=document.querySelector('#pz-ed a[href^=mailto]'),r=document.createRange();r.setStart(a.firstChild,2);r.collapse(true);const s=getSelection();s.removeAllRanges();s.addRange(r);setTimeout(()=>{const b=[...document.querySelectorAll('#pz-a')].pop().querySelector('[data-a=cc]');if(b.offsetParent!==null)b.click();},200);},300)");
+                                            }
+                                        }
                                         if std::env::var("POCZTA_LINK_TEST").is_ok() {
                                             use std::sync::atomic::{AtomicBool, Ordering};
                                             static PASTED: AtomicBool = AtomicBool::new(false);
@@ -764,6 +773,13 @@ Wpisy są **gotowe** i *sprawdzone*:
                                     }
                                     crate::compose_view::Msg::Md { text } => v.insert_html(&crate::rich::to_html(&text)),
                                     crate::compose_view::Msg::Title { n, title } => v.link_title(n, &title),
+                                    crate::compose_view::Msg::Cc { addr } => {
+                                        add_cc(&c.to, &mut c.cc, &addr, &contacts);
+                                        c.show_cc |= !c.cc.is_empty();
+                                        if std::env::var("POCZTA_CC_TEST").is_ok() {
+                                            crate::diag::log(format!("cctest: in Cc {}", c.cc.contains("cc.test@example.com")));
+                                        }
+                                    }
                                     crate::compose_view::Msg::Clicked => {
                                         // the text was clicked: it has the keyboard, the fields above let go
                                         c.editor_clicked = true;
@@ -1431,5 +1447,51 @@ pub(super) fn add_files(list: &mut Vec<String>, new: Vec<String>) {
         if !list.iter().any(|x| x.eq_ignore_ascii_case(&f)) {
             list.push(f);
         }
+    }
+}
+
+/// „Dodaj do DW” on a mailto: link in the text: its addresses (separated by , or ;, taken from a
+/// mail, so only ones the sending side reads back unchanged) go to Cc, with the name from the
+/// contacts, each once in To and Cc.
+fn add_cc(to: &str, cc: &mut String, addrs: &str, contacts: &[crate::contacts::Contact]) {
+    // a quoted address could hide a separator, and splitting it would make another one
+    if addrs.contains('"') {
+        return;
+    }
+    for a in addrs.split([',', ';']).map(str::trim) {
+        if a.parse::<lettre::message::Mailbox>().map(|m| m.email.to_string()).as_deref() != Ok(a) {
+            continue;
+        }
+        let has = |list: &str| list.split([',', ';']).any(|p| crate::model::split_address(p).1.eq_ignore_ascii_case(a));
+        if has(to) || has(cc) {
+            continue;
+        }
+        let who = contacts.iter().find(|k| k.addr.eq_ignore_ascii_case(a)).map(|k| k.text()).unwrap_or_else(|| a.to_string());
+        let kept = cc.trim_end().trim_end_matches([',', ';']).trim_end().len();
+        cc.truncate(kept);
+        if !cc.is_empty() {
+            cc.push_str(", ");
+        }
+        cc.push_str(&who);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn add_cc_once_with_name() {
+        let contacts = [crate::contacts::Contact::person("Laura K", "laura@x.pl")];
+        let mut cc = "Ola <ola@x.pl>, ".to_string();
+        super::add_cc("ewa@x.pl", &mut cc, "LAURA@x.pl,ewa@x.pl,ola@x.pl,a b@x.pl,anna@;new@x.pl", &contacts);
+        assert_eq!(cc, "Ola <ola@x.pl>, Laura K <laura@x.pl>, new@x.pl");
+        let mut named = String::new();
+        super::add_cc("", &mut named, "jan@x.pl", &[crate::contacts::Contact::person("Kowalski, Jan", "jan@x.pl")]);
+        assert_eq!(named, "jan@x.pl");
+        let mut quoted = String::new();
+        super::add_cc("", &mut quoted, "\"a,b@x.pl,c\"@x.pl", &[]);
+        assert_eq!(quoted, "");
+        let mut empty = String::new();
+        super::add_cc("", &mut empty, "z@x.pl", &[]);
+        assert_eq!(empty, "z@x.pl");
     }
 }

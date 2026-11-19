@@ -31,10 +31,12 @@ impl Contact {
         if !self.members.is_empty() {
             return self.members.join(", ");
         }
-        if self.name.is_empty() || self.name.eq_ignore_ascii_case(&self.addr) {
+        // (a name the sending side can't read back as one recipient, e.g. „Kowalski, Jan”: the address alone)
+        let full = format!("{} <{}>", self.name, self.addr);
+        if self.name.is_empty() || self.name.eq_ignore_ascii_case(&self.addr) || self.name.contains([',', ';']) || full.parse::<lettre::message::Mailbox>().is_err() {
             self.addr.clone()
         } else {
-            format!("{} <{}>", self.name, self.addr)
+            full
         }
     }
 }

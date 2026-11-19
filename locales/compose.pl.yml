@@ -74,6 +74,7 @@ compose:
     pic_orig: "Oryginalny rozmiar"
     drag: "Przeciągnij, aby zmienić rozmiar"
     link_prompt: "Adres linku:"
+    link_cc: "Dodaj do DW"
     link_edit: "Zmień adres"
     link_remove: "Usuń link"
   ask:
