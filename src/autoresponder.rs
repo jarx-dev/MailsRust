@@ -5,6 +5,9 @@
 
 use std::time::Duration;
 
+/// The Gmail label n8n puts on a message it answered: its reply is then not counted as yours.
+pub const LABEL: &str = "Autoresponder";
+
 /// The settings as n8n keeps them (one row of its table).
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
