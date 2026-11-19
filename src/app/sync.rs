@@ -355,15 +355,16 @@ specjalista ds. Informatyki".into();
     /// Groups all messages by conversation subject, on another thread (it takes a moment with
     /// tens of thousands of messages); opening a message then finds its conversation at once.
     pub(super) fn start_topics(&mut self) {
-        // (id, subject, sent by me, date, sender, recipients)
-        let subjects: Vec<(u64, String, bool, NaiveDateTime, String, String)> = self
+        // (id, subject, sent by me, date, sender, recipients, answered by the autoresponder)
+        let subjects: Vec<(u64, String, bool, NaiveDateTime, String, String, bool)> = self
             .store
             .messages
             .iter()
             .filter(|x| !matches!(x.folder, Folder::Trash | Folder::Junk | Folder::Drafts | Folder::Outbox))
             .map(|x| {
                 let sent = x.folder == Folder::Sent;
-                (x.id, x.subject.clone(), sent, x.date, if sent { String::new() } else { x.from_addr.to_lowercase() }, if sent { format!("{},{}", x.to, x.cc).to_lowercase() } else { String::new() })
+                let auto = !sent && x.labels.iter().any(|l| l.eq_ignore_ascii_case(crate::autoresponder::LABEL));
+                (x.id, x.subject.clone(), sent, x.date, if sent { String::new() } else { x.from_addr.to_lowercase() }, if sent { format!("{},{}", x.to, x.cc).to_lowercase() } else { String::new() }, auto)
             })
             .collect();
         let sig = self.struct_sig;
@@ -373,9 +374,10 @@ specjalista ds. Informatyki".into();
         std::thread::spawn(move || {
             let t = std::time::Instant::now();
             let mut map: HashMap<String, Vec<u64>> = HashMap::new();
-            let mut info: HashMap<u64, (bool, NaiveDateTime, String, String)> = HashMap::new();
+            let mut info: TopicInfo = HashMap::new();
             let mut fwd: std::collections::HashSet<u64> = std::collections::HashSet::new();
-            for (id, subj, sent, date, from, rcpt) in subjects {
+            let mut auto_answered: std::collections::HashSet<u64> = std::collections::HashSet::new();
+            for (id, subj, sent, date, from, rcpt, auto) in subjects {
                 if sent && is_forward_subject(&subj) {
                     fwd.insert(id);
                 }
@@ -383,6 +385,9 @@ specjalista ds. Informatyki".into();
                 if topic.len() >= 3 {
                     map.entry(topic).or_default().push(id);
                     info.insert(id, (sent, date, from, rcpt));
+                    if auto {
+                        auto_answered.insert(id);
+                    }
                 }
             }
             map.retain(|_, v| v.len() > 1);
@@ -407,10 +412,12 @@ specjalista ds. Informatyki".into();
                     }
                 }
             }
+            let automatic = autoresponder_replies(&map, &info, &auto_answered);
             // a received message is answered when you wrote to its sender later in the same conversation
             let mut answered: HashMap<u64, NaiveDateTime> = HashMap::new();
             for ids in map.values() {
-                let replies: Vec<(&NaiveDateTime, &String)> = ids.iter().filter_map(|i| info.get(i)).filter(|x| x.0).map(|x| (&x.1, &x.3)).collect();
+                let replies: Vec<(&NaiveDateTime, &String)> =
+                    ids.iter().filter(|i| !automatic.contains(i)).filter_map(|i| info.get(i)).filter(|x| x.0).map(|x| (&x.1, &x.3)).collect();
                 if replies.is_empty() {
                     continue;
                 }
@@ -1158,6 +1165,36 @@ specjalista ds. Informatyki".into();
             }
         }
     }
+}
+
+/// Each message as conversations are grouped: (sent by you, date, sender, recipients).
+pub(super) type TopicInfo = HashMap<u64, (bool, NaiveDateTime, String, String)>;
+
+/// The replies the autoresponder sent, which are not yours: n8n labels the message it answered
+/// (`labeled`), and its reply is the first one sent to that sender up to half an hour after it
+/// (it goes a minute or two later); only when there is none, one up to five minutes before it
+/// (the sender's clock may be ahead).
+pub(super) fn autoresponder_replies(map: &HashMap<String, Vec<u64>>, info: &TopicInfo, labeled: &std::collections::HashSet<u64>) -> std::collections::HashSet<u64> {
+    let mut automatic = std::collections::HashSet::new();
+    for ids in map.values() {
+        for i in ids.iter().filter(|i| labeled.contains(*i)) {
+            let Some((false, date, from, _)) = info.get(i) else { continue };
+            if from.is_empty() {
+                continue;
+            }
+            let reply = ids
+                .iter()
+                .filter_map(|s| info.get(s).map(|x| (*s, x)))
+                .filter(|(s, x)| x.0 && !automatic.contains(s) && x.3.contains(from.as_str()))
+                .map(|(s, x)| (s, (x.1 - *date).num_seconds()))
+                .filter(|(_, gap)| (-5 * 60..=30 * 60).contains(gap))
+                .min_by_key(|(_, gap)| (*gap < 0, gap.abs()));
+            if let Some((s, _)) = reply {
+                automatic.insert(s);
+            }
+        }
+    }
+    automatic
 }
 
 /// After reading the mailbox: the saved password back in memory, and message texts that older

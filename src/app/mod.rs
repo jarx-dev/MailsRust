@@ -396,6 +396,8 @@ pub struct MailApp {
     msg_sig: u64,
     /// the same, but only what conversations depend on (not read / flagged / tags)
     struct_sig: u64,
+    /// the messages the autoresponder answered (conversations are grouped again when they change)
+    labels_sig: u64,
     /// conversations: subject without "Re:" etc. → message ids; made in the background
     topics: Option<(u64, Arc<HashMap<String, Vec<u64>>>)>,
     topics_rx: Option<Receiver<(u64, HashMap<String, Vec<u64>>, HashMap<u64, NaiveDateTime>, HashMap<u64, u64>)>>,
@@ -727,6 +729,7 @@ impl MailApp {
             last_check: 0.0,
             msg_sig: 0,
             struct_sig: 0,
+            labels_sig: 0,
             topics: None,
             topics_rx: None,
             forwarded: Arc::new(HashMap::new()),
@@ -1999,6 +2002,34 @@ impl Drop for FrameTimer {
 
 #[cfg(test)]
 mod tests {
+    /// The autoresponder's reply (the one closest to the message n8n labeled) is not counted as
+    /// yours; your own later reply, and replies in unlabeled conversations, still are.
+    #[test]
+    fn autoresponder_reply_is_not_yours() {
+        use chrono::NaiveDate;
+        let at = |h: u32, m: u32| NaiveDate::from_ymd_opt(2026, 11, 19).unwrap().and_hms_opt(h, m, 0).unwrap();
+        let got = |d| (false, d, "anna@example.com".to_string(), String::new());
+        let sent = |d| (true, d, String::new(), "anna@example.com,".to_string());
+        // (7: your reply to an earlier mail a minute before this one: the autoresponder's is after it)
+        let info: super::sync::TopicInfo = [
+            (1, got(at(20, 0))),
+            (2, sent(at(20, 1))),
+            (3, sent(at(20, 10))),
+            (4, got(at(21, 0))),
+            (5, sent(at(21, 2))),
+            (7, sent(at(19, 59))),
+        ]
+        .into_iter()
+        .collect();
+        let map = [("oferta".to_string(), vec![7, 1, 2, 3]), ("faktura".to_string(), vec![4, 5])].into_iter().collect();
+        let labeled = [1].into_iter().collect();
+        assert_eq!(super::sync::autoresponder_replies(&map, &info, &labeled), [2].into_iter().collect());
+        // a labeled message whose reply is not here (yet): your earlier or much later mail is not taken for it
+        let far: super::sync::TopicInfo = [(1, got(at(20, 0))), (3, sent(at(19, 50))), (6, sent(at(20, 40)))].into_iter().collect();
+        let map = [("oferta".to_string(), vec![1, 3, 6])].into_iter().collect();
+        assert!(super::sync::autoresponder_replies(&map, &far, &labeled).is_empty());
+    }
+
     /// Settings saved before the language choice existed keep the Polish interface; a fresh
     /// install starts in English.
     #[test]

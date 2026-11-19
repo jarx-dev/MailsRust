@@ -131,16 +131,20 @@ impl MailApp {
         }
         self.touched = false;
         self.last_check = now;
-        let ssig = self.store.messages.iter().fold(self.store.messages.len() as u64, |h, m| {
+        // (`lsig`: the messages the autoresponder answered; it regroups conversations, since the
+        // label decides which replies are yours, but does not rebuild the search index as `ssig` does)
+        let (ssig, lsig) = self.store.messages.iter().fold((self.store.messages.len() as u64, 0u64), |(h, l), m| {
             let x = m.id
                 ^ ((m.folder as u64) << 40)
                 ^ (m.subject.len() as u64).rotate_left(23)
                 ^ ((m.snippet.len() as u64) << 1 | m.partial as u64).rotate_left(31)
                 ^ (m.date.and_utc().timestamp() as u64).rotate_left(17);
-            h.wrapping_mul(0x100000001B3).wrapping_add(x)
+            let auto = m.labels.iter().any(|t| t.eq_ignore_ascii_case(crate::autoresponder::LABEL));
+            (h.wrapping_mul(0x100000001B3).wrapping_add(x), if auto { l.wrapping_mul(0x100000001B3).wrapping_add(m.id) } else { l })
         });
-        if ssig != self.struct_sig {
+        if ssig != self.struct_sig || lsig != self.labels_sig {
             self.struct_sig = ssig;
+            self.labels_sig = lsig;
             self.start_topics();
         }
         let sig = self.store.messages.iter().fold(self.store.messages.len() as u64, |h, m| {
