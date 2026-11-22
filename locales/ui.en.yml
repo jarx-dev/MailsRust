@@ -211,6 +211,8 @@ ui:
       google_hint: "Sync with Google Calendar and Contacts"
       notify: "Notify about new messages"
       notify_hint: "Sound, taskbar icon flashing and a pop-up in the screen corner"
+      crash_reports: "Send crash reports"
+      crash_reports_hint: "Anonymous: app version, Windows version and the place in the code where the app crashed. No file names or content."
       autostart: "Start with Windows"
       autostart_hint: "After you sign in to Windows, Poczta starts minimized and receives mail in the background"
       autostart_error: "Autostart: %{e}"

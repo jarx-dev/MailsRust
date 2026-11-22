@@ -103,6 +103,40 @@ download and run it, no installation needed (Windows 10 or 11). The app download
 The file is not signed, so the first time Windows may warn about an unknown publisher:
 "More info" → "Run anyway".
 
+## Crash reports
+
+When the app hits a Rust panic, it sends one short anonymous report so the bug can be found and
+fixed. Only the first panic of a run is reported, also one the app recovers from (some background
+jobs catch panics and go on). It is on by default; turn it off in the ☰ menu: **Send crash reports**.
+The change takes effect at once. Builds made with `cargo build` in debug mode never send anything.
+
+This is the whole report, the three lines of a Sentry envelope:
+
+```
+{"event_id":"4f0c1d0e9a2b4c7d8e6f5a4b3c2d1e0f"}
+{"type":"event"}
+{"event_id":"4f0c1d0e9a2b4c7d8e6f5a4b3c2d1e0f","level":"fatal","platform":"native","release":"poczta@26.1104.2135","environment":"production","contexts":{"os":{"name":"Windows","version":"10.0.26100"}},"exception":{"values":[{"type":"panic","value":"src/app/list.rs:123","mechanism":{"type":"panic","handled":false}}]},"fingerprint":["src/app/list.rs:123"]}
+```
+
+That is: the build number (when the app was built, in UTC), the Windows version, and the place in
+the source code where it crashed. `event_id` is a random number for this one report. The place's path
+is shortened so that no folder of the machine that built the app goes out: files of this repository
+stay as they are (`src/app/list.rs`), a library from cargo's registry keeps the part from its crate
+folder on (`ureq-2.12.1/src/pool.rs`), the standard library the part after `library/`
+(`core/src/option.rs`), and any other path only its file name. The request also carries the `User-Agent` and `X-Sentry-Auth` headers
+with the app's name and version and the project's public key, nothing more.
+
+Never sent: the panic message (it can contain an address, a subject or a piece of a message), names or
+paths of your files, the computer or user name, email addresses, mail content, account names,
+settings, logs, environment variables, any installation or user id, and no session tracking.
+
+Reports go to the author's own [Rustrak](https://github.com/rustrak/rustrak) server (open source,
+Sentry-compatible) at errors.jarx.pl, not to any error-tracking company. Like every site behind
+Cloudflare, the traffic passes through Cloudflare. The report itself has no IP address, but the server,
+like any web server, sees the connection's IP in its access log.
+
+The code is short and can be checked in [src/crash_report.rs](src/crash_report.rs).
+
 ## Building
 
 On Windows:
