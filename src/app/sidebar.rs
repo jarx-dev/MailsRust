@@ -296,6 +296,14 @@ impl MailApp {
                 {
                     self.save_now = true;
                 }
+                if ui
+                    .checkbox(&mut self.prefs.crash_reports, t!("ui.sidebar.menu.crash_reports"))
+                    .on_hover_text(t!("ui.sidebar.menu.crash_reports_hint"))
+                    .changed()
+                {
+                    crate::crash_report::set_enabled(self.prefs.crash_reports && !crate::unseen());
+                    self.save_now = true;
+                }
                 let mut autostart = crate::autostart::is_on();
                 if ui
                     .checkbox(&mut autostart, t!("ui.sidebar.menu.autostart"))

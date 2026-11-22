@@ -212,6 +212,8 @@ ui:
       google_hint: "Synchronizacja z Kalendarzem i Kontaktami Google"
       notify: "Powiadamiaj o nowych wiadomościach"
       notify_hint: "Dźwięk, miganie ikony na pasku zadań i okienko w rogu ekranu"
+      crash_reports: "Wysyłaj raporty o awariach"
+      crash_reports_hint: "Anonimowo: wersja aplikacji, wersja Windows i miejsce w kodzie, w którym aplikacja się wywróciła. Bez nazw plików i treści."
       autostart: "Uruchamiaj razem z Windows"
       autostart_hint: "Po zalogowaniu do Windows Poczta startuje zminimalizowana i odbiera pocztę w tle"
       autostart_error: "Autostart: %{e}"

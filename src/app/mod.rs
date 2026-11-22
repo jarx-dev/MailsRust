@@ -101,6 +101,8 @@ struct Prefs {
     google_chat: bool,
     /// the person's own folders: Gmail labels shown with every account's mail, under "Ulubione"
     my_folders: Vec<String>,
+    /// an anonymous report after a crash (see crash_report.rs); settings saved before it existed: on
+    crash_reports: bool,
     /// the interface language ("en" or "pl"); settings saved before it existed were Polish
     #[serde(default = "lang_before_choice")]
     lang: String,
@@ -139,6 +141,7 @@ impl Default for Prefs {
             google_contacts: true,
             google_chat: true,
             my_folders: vec![],
+            crash_reports: true,
             lang: "en".into(),
         }
     }
@@ -524,6 +527,8 @@ impl MailApp {
         // the language first: the tray menu and every text after it are drawn in it
         let saved = if shot.is_none() { cc.storage.and_then(|s| eframe::get_value::<Prefs>(s, "prefs")) } else { None };
         crate::i18n::set(&saved.as_ref().map(|p| p.lang.clone()).or_else(|| std::env::var("POCZTA_LANG").ok()).unwrap_or_default());
+        // a picture or an unseen test run never reports a crash
+        crate::crash_report::set_enabled(shot.is_none() && !crate::unseen() && saved.as_ref().is_none_or(|p| p.crash_reports));
         // the real copy offers itself for .eml files, named in the person's language (a test copy's
         // EXE is in a test folder)
         if shot.is_none() && !crate::unseen() && std::env::var_os("POCZTA_DATA_DIR").is_none() {
@@ -2037,6 +2042,8 @@ mod tests {
         let old: super::Prefs = ron::from_str("(nav_width: 250.0, dark: true, notify: false)").unwrap();
         assert_eq!(old.lang, "pl");
         assert!(old.dark);
+        // crash reports are on unless turned off
+        assert!(old.crash_reports);
         assert_eq!(super::Prefs::default().lang, "en");
         let saved = ron::to_string(&super::Prefs { lang: "en".into(), ..Default::default() }).unwrap();
         assert_eq!(ron::from_str::<super::Prefs>(&saved).unwrap().lang, "en");

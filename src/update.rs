@@ -44,7 +44,7 @@ const STARTUP_GRACE: Duration = Duration::from_secs(180);
 
 static AFTER_UPDATE: AtomicBool = AtomicBool::new(false);
 
-fn built_at() -> u64 {
+pub(crate) fn built_at() -> u64 {
     env!("POCZTA_BUILT_AT").parse().unwrap_or(0)
 }
 

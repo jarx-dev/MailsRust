@@ -100,6 +100,41 @@ pobrać i uruchomić, bez instalacji (Windows 10 lub 11). Kolejne wydania progra
 Plik nie jest podpisany, więc za pierwszym razem Windows może ostrzec przed nieznanym wydawcą:
 „Więcej informacji” → „Uruchom mimo to”.
 
+## Raporty o awariach
+
+Gdy w programie wystąpi panika (w Ruście), wysyła on jeden krótki, anonimowy raport, żeby błąd dało
+się znaleźć i poprawić. Zgłaszana jest tylko pierwsza panika w danym uruchomieniu, także taka, po
+której program działa dalej (część zadań w tle przechwytuje paniki). Domyślnie jest to włączone;
+wyłączysz w menu ☰: **Wysyłaj raporty o awariach**. Zmiana działa od razu. Wersje zbudowane
+`cargo build` w trybie debug nigdy nic nie wysyłają.
+
+Tak wygląda cały raport, trzy linie koperty Sentry:
+
+```
+{"event_id":"4f0c1d0e9a2b4c7d8e6f5a4b3c2d1e0f"}
+{"type":"event"}
+{"event_id":"4f0c1d0e9a2b4c7d8e6f5a4b3c2d1e0f","level":"fatal","platform":"native","release":"poczta@26.1104.2135","environment":"production","contexts":{"os":{"name":"Windows","version":"10.0.26100"}},"exception":{"values":[{"type":"panic","value":"src/app/list.rs:123","mechanism":{"type":"panic","handled":false}}]},"fingerprint":["src/app/list.rs:123"]}
+```
+
+Czyli: numer kompilacji (kiedy program zbudowano, w UTC), wersja Windows i miejsce w kodzie
+źródłowym, w którym się wywrócił. `event_id` to losowy numer tego jednego raportu. Ścieżka miejsca jest
+skracana tak, żeby nie wyszedł żaden katalog komputera, na którym program zbudowano: pliki tego
+repozytorium zostają bez zmian (`src/app/list.rs`), biblioteka z rejestru cargo od katalogu crate'a
+(`ureq-2.12.1/src/pool.rs`), biblioteka standardowa od `library/` (`core/src/option.rs`), a każda
+inna ścieżka to sama nazwa pliku. Żądanie ma też nagłówki `User-Agent` i `X-Sentry-Auth` z nazwą i wersją programu
+oraz publicznym kluczem projektu, nic więcej.
+
+Nigdy nie jest wysyłane: treść komunikatu paniki (bywa w niej adres, temat albo fragment wiadomości),
+nazwy ani ścieżki Twoich plików, nazwa komputera i użytkownika, adresy e-mail, treść poczty, nazwy kont,
+ustawienia, logi, zmienne środowiska, żaden identyfikator instalacji ani użytkownika; nie ma też śledzenia sesji.
+
+Raporty trafiają na własny serwer autora [Rustrak](https://github.com/rustrak/rustrak) (open source,
+zgodny z Sentry) pod errors.jarx.pl, nie do żadnej firmy zbierającej błędy. Jak każda strona za
+Cloudflare, ruch przechodzi przez Cloudflare. Sam raport nie zawiera adresu IP, ale serwer, jak każdy
+serwer WWW, widzi IP połączenia w logu dostępu.
+
+Kod jest krótki i można go sprawdzić w [src/crash_report.rs](src/crash_report.rs).
+
 ## Budowanie
 
 Na Windows:

@@ -15,6 +15,7 @@ mod calendar;
 mod chat;
 mod compose_view;
 mod contacts;
+mod crash_report;
 mod db;
 mod diag;
 mod finder;
@@ -56,6 +57,8 @@ fn main() -> eframe::Result<()> {
         let thread = std::thread::current().name().unwrap_or("?").to_string();
         diag::log(format!("ERROR (panic) in thread {thread} at {place}: {what}
 {}", std::backtrace::Backtrace::force_capture()));
+        // only the version, Windows version and the place in the code (see crash_report.rs)
+        crash_report::report(info.location());
     }));
     let args: Vec<String> = std::env::args().collect();
     // the previous build watching over a freshly installed one (see update.rs)
