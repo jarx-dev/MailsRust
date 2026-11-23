@@ -475,7 +475,9 @@ pub fn show_cids(html: &str, inline: &[(String, String)]) -> String {
 
 /// Only the inside of an email's page (no scripts, no page head).
 pub fn body_of(html: &str) -> String {
-    let lower = html.to_lowercase();
+    // ASCII only: full lowercasing changes byte lengths (İ, the Kelvin sign) and the cuts below would miss
+    // a char boundary
+    let lower = html.to_ascii_lowercase();
     let mut inner = match (lower.find("<body"), lower.rfind("</body>")) {
         (Some(a), Some(b)) if a < b => {
             let start = lower[a..].find('>').map(|x| a + x + 1).unwrap_or(a);
@@ -496,7 +498,7 @@ pub fn body_of(html: &str) -> String {
         s
     };
     loop {
-        let l = inner.to_lowercase();
+        let l = inner.to_ascii_lowercase();
         let Some(a) = l.find("<script") else { break };
         let b = l[a..].find("</script>").map(|x| a + x + 9).unwrap_or(inner.len());
         inner.replace_range(a..b, "");

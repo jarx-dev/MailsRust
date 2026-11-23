@@ -201,7 +201,7 @@ fn tools() -> Value {
         {
             "name": "create_draft",
             "title": "Save a draft",
-            "description": "Saves a draft in Poczta's Drafts, marked as written by AI. Nothing is sent: the person reviews and sends it. With `reply_to` it is a reply: Poczta sets the recipients (the sender, or everyone with reply_all), the subject and the quoted message itself, from the account the message came to; `to`, `cc` and `subject` are then not allowed. Without `reply_to` it is a new email and `to` is required. The body is plain text without a signature or quote.",
+            "description": "Saves a draft in Poczta's Drafts, marked as written by AI. Nothing is sent: the person reviews and sends it. With `reply_to` it is a reply: Poczta sets the recipients (the sender, or everyone with reply_all), the subject and the quoted message itself, from the account the message came to; `to`, `cc` and `subject` are then not allowed. Without `reply_to` it is a new email and `to` is required. The body is plain text without a signature or quote: Poczta adds the signature and the quoted message (formatted, with its pictures) itself.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
