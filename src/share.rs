@@ -135,7 +135,8 @@ impl Shared {
             s += "\n";
         }
         s += &format!(
-            "\n---\n\nSzkic odpowiedzi: wyślij POST z treścią odpowiedzi (zwykły tekst, UTF-8) na {base}/draft — \
+            "\n---\n\nSzkic odpowiedzi: wyślij POST z treścią odpowiedzi (Markdown, UTF-8: pogrubienia, nagłówki, listy, tabele; \
+             bez podpisu i cytatu, które aplikacja dodaje sama) na {base}/draft — \
              trafi do Szkiców w aplikacji pocztowej jako odpowiedź na ten e-mail. Nic nie zostanie wysłane automatycznie.\n"
         );
         s
@@ -555,7 +556,7 @@ fn handle(mut conn: TcpStream, env: &Env) -> std::io::Result<()> {
             };
             let draft = String::from_utf8_lossy(&body).trim().to_string();
             if draft.is_empty() {
-                return respond(&mut conn, "400 Bad Request", text, "", "Pusty szkic — wyślij treść odpowiedzi jako zwykły tekst.\n".as_bytes());
+                return respond(&mut conn, "400 Bad Request", text, "", "Pusty szkic — wyślij treść odpowiedzi (Markdown).\n".as_bytes());
             }
             let _ = env.drafts.send(Draft::reply(shared.id, draft));
             if let Some(c) = &env.ctx {

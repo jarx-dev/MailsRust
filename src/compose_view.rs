@@ -420,24 +420,51 @@ pub fn to_email(html: &str) -> (String, Vec<(String, String)>) {
     let mut inline: Vec<(String, String)> = Vec::new();
     let mut seen: std::collections::HashMap<String, String> = Default::default();
     let mut rest = html;
+    // where the last '<' and '>' of `out` are (kept as it grows: searching back each time made a
+    // long message quadratic)
+    let (mut lt, mut gt) = (None, None);
+    fn push(out: &mut String, s: &str, lt: &mut Option<usize>, gt: &mut Option<usize>) {
+        if let Some(p) = s.rfind('<') {
+            *lt = Some(out.len() + p);
+        }
+        if let Some(p) = s.rfind('>') {
+            *gt = Some(out.len() + p);
+        }
+        out.push_str(s);
+    }
     while let Some(i) = rest.find("src=\"") {
-        out.push_str(&rest[..i + 5]);
+        push(&mut out, &rest[..i + 5], &mut lt, &mut gt);
         let after = &rest[i + 5..];
         let Some(end) = after.find('"') else {
             rest = after;
             break;
         };
         let url = &after[..end];
-        let replaced = if url.starts_with("file:///") || url.starts_with("data:image/") {
+        // only a picture tag's own src (escaped text such as `&lt;img src="…"` is not a picture),
+        // and from disk only the app's own cache: a quoted or agent-written message must not be
+        // able to name any other file to be sent along
+        let in_img = match (lt, gt) {
+            (Some(lt), gt) if gt.is_none_or(|g| g < lt) => out[lt..].get(..4).is_some_and(|t| t.eq_ignore_ascii_case("<img")),
+            _ => false,
+        };
+        let replaced = if in_img && (url.starts_with("file:///") || url.starts_with("data:image/")) {
             if let Some(cid) = seen.get(url) {
                 Some(cid.clone())
             } else {
                 let file = if url.starts_with("file:///") {
-                    Some(url_to_path(url)).filter(|p| std::path::Path::new(p).exists())
+                    Some(url_to_path(url)).filter(|p| in_cache(p))
                 } else {
                     url.split_once(',').and_then(|(h, b)| {
-                        let ext = h.split('/').nth(1).and_then(|x| x.split(';').next()).unwrap_or("png").to_string();
-                        base64::engine::general_purpose::STANDARD.decode(b.trim()).ok().map(|bytes| crate::model::cache_put(&bytes, &ext))
+                        // (the type names the file: only picture types, never a path)
+                        let ext = match h.split('/').nth(1).and_then(|x| x.split(';').next()).unwrap_or("png").to_ascii_lowercase().as_str() {
+                            "png" => "png",
+                            "jpeg" | "jpg" => "jpg",
+                            "gif" => "gif",
+                            "webp" => "webp",
+                            _ => return None,
+                        };
+                        let bytes = base64::engine::general_purpose::STANDARD.decode(b.trim()).ok()?;
+                        Some(crate::model::cache_put(&bytes, ext)).filter(|f| std::path::Path::new(f).is_file())
                     })
                 };
                 file.map(|f| {
@@ -451,14 +478,23 @@ pub fn to_email(html: &str) -> (String, Vec<(String, String)>) {
             None
         };
         match replaced {
-            Some(cid) => out.push_str(&format!("cid:{cid}")),
-            None => out.push_str(url),
+            Some(cid) => push(&mut out, &format!("cid:{cid}"), &mut lt, &mut gt),
+            None => push(&mut out, url, &mut lt, &mut gt),
         }
         rest = &after[end..];
     }
     out.push_str(rest);
     let out = out.replace(" pz-sel", "").replace("class=\"pz-sel\"", "");
     (format!("<div style=\"font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:#222\">{out}</div>"), inline)
+}
+
+/// A file in the app's cache, where every picture of the editor, a signature and received mail
+/// is kept.
+fn in_cache(path: &str) -> bool {
+    match (std::fs::canonicalize(path), std::fs::canonicalize(crate::model::cache_dir())) {
+        (Ok(f), Ok(dir)) => f.starts_with(dir) && f.is_file(),
+        _ => false,
+    }
 }
 
 /// Pictures of another message shown from their files (cid: → file://), for quoting it.
