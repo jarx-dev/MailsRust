@@ -244,9 +244,10 @@ impl MailApp {
         self.render_html(ui, &m, &blocks);
     }
 
-    /// What the formatted writing field starts with: the text, the signature (main account only)
-    /// and the quoted message as it looked, its pictures shown from their files.
-    pub(super) fn start_content(&self, account: u32, body: &str, original: Option<&Original>) -> String {
+    /// What the formatted writing field starts with: the text (`text_html`, already HTML), the
+    /// signature (main account only) and the quoted message as it looked, its pictures shown
+    /// from their files.
+    pub(super) fn start_content(&self, account: u32, text_html: &str, original: Option<&Original>) -> String {
         let a = &self.store.account;
         // (the signature found in sent mail is the main account's)
         let sig = (account == 0 && a.signature_on && !a.signature_text.trim().is_empty()).then(|| {
@@ -261,8 +262,7 @@ impl MailApp {
             let from = if o.from_name.is_empty() { o.from_addr.clone() } else { format!("{} <{}>", o.from_name, o.from_addr) };
             crate::compose_view::quote_html(&o.title(), &from, &o.to, &o.stamp(false), &o.subject, html, &o.body)
         });
-        let text = if body.trim().is_empty() { String::new() } else { crate::signature::text_to_html(body) };
-        crate::compose_view::start_content(&text, sig, quote)
+        crate::compose_view::start_content(text_html, sig, quote)
     }
 
     pub(super) fn open_composer(&mut self, to: String, cc: String, subject: String, body: String, draft_id: Option<u64>, original: Option<Original>) {
@@ -285,7 +285,10 @@ impl MailApp {
             let draft_html = draft_html.or_else(|| self.compose_start.clone());
             let content = match draft_html {
                 Some(h) => crate::compose_view::body_of(&h),
-                None => self.start_content(account, &body, original.as_ref()),
+                None => {
+                    let text = if body.trim().is_empty() { String::new() } else { crate::signature::text_to_html(&body) };
+                    self.start_content(account, &text, original.as_ref())
+                }
             };
             Some(crate::compose_view::page(&content))
         };

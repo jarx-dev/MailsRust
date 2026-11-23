@@ -23,12 +23,44 @@ pub fn colours() -> [(String, &'static str); 7] {
 /// The written text as HTML: Markdown (with line breaks kept as typed) plus the small HTML
 /// pieces the toolbar adds (colours, sizes, underline, pictures).
 pub fn to_html(md: &str) -> String {
-    use pulldown_cmark::{html, Event, Options, Parser};
+    render(md, false)
+}
+
+/// Markdown written by an AI agent (a draft through MCP): as [`to_html`], but its own HTML and
+/// pictures stay text, since a picture of `file:///…` would be sent along as an attachment.
+pub fn agent_to_html(md: &str) -> String {
+    render(md, true)
+}
+
+fn render(md: &str, agent: bool) -> String {
+    use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
-    // in an email, Enter means a new line
-    let parser = Parser::new_ext(md, opts).map(|e| if matches!(e, Event::SoftBreak) { Event::HardBreak } else { e });
+    // For an agent: a picture keeps only its description, as plain text (also its links), and a
+    // link it may not make keeps only its text. `links`: whether each open link was kept.
+    let (mut links, mut picture): (Vec<bool>, u32) = (vec![], 0);
+    let parser = Parser::new_ext(md, opts).filter_map(move |e| match e {
+        // in an email, Enter means a new line
+        Event::SoftBreak => Some(Event::HardBreak),
+        _ if !agent => Some(e),
+        Event::Html(s) | Event::InlineHtml(s) => Some(Event::Text(s)),
+        Event::Start(Tag::Image { .. }) => {
+            picture += 1;
+            None
+        }
+        Event::End(TagEnd::Image) => {
+            picture = picture.saturating_sub(1);
+            None
+        }
+        Event::Start(Tag::Link { ref dest_url, .. }) => {
+            let keep = picture == 0 && web_link(dest_url);
+            links.push(keep);
+            keep.then_some(e)
+        }
+        Event::End(TagEnd::Link) => links.pop().unwrap_or(true).then_some(e),
+        e => Some(e),
+    });
     let mut out = String::new();
     html::push_html(&mut out, parser);
     // pictures never wider than the message
@@ -36,6 +68,15 @@ pub fn to_html(md: &str) -> String {
         .replace("<table>", "<table class=\"md\" style=\"border-collapse:collapse\">")
         .replace("<td>", "<td style=\"border:1px solid #d6d9dd;padding:4px 8px\">")
         .replace("<th>", "<th style=\"border:1px solid #d6d9dd;padding:4px 8px;background:#f4f5f7\">")
+        // (an aligned column's cells come with their own style)
+        .replace("<td style=\"text-align", "<td style=\"border:1px solid #d6d9dd;padding:4px 8px;text-align")
+        .replace("<th style=\"text-align", "<th style=\"border:1px solid #d6d9dd;padding:4px 8px;background:#f4f5f7;text-align")
+}
+
+/// A link an agent may put in a draft: a web page or an email address.
+fn web_link(url: &str) -> bool {
+    let l = url.trim_start().to_ascii_lowercase();
+    ["https:", "http:", "mailto:"].iter().any(|p| l.starts_with(p))
 }
 
 /// The text without formatting marks, for the plain-text version of the email.

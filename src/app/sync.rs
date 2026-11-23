@@ -168,16 +168,28 @@ specjalista ds. Informatyki".into();
             let with_pictures = self.store.messages.iter().rev().find(|m| m.folder == Folder::Inbox && !m.inline.is_empty() && !m.html_path.is_empty()).map(|m| m.id);
             if let Some(id) = with_pictures.or(self.selected) {
                 let pictures = self.msg(id).map(|m| (m.html_path.is_empty(), m.inline.len()));
-                let said = self.save_ai_draft(&crate::share::Draft::reply(id, "Test".into()));
+                // Markdown the agent writes, and a picture / raw HTML that must stay text
+                let md = "**Bold** text\n\n## Heading\n\n- one\n- two\n\n| A | B |\n|---|--:|\n| x | 1 |\n\n![p](file:///C:/Windows/win.ini) <img src=\"file:///C:/Windows/win.ini\"> [bad](javascript:alert(1)) [ok](https://example.com)";
+                let said = self.save_ai_draft(&crate::share::Draft::reply(id, md.into()));
                 let html = said.as_ref().ok().and(self.store.messages.last()).map(|m| std::fs::read_to_string(&m.html_path).unwrap_or_default()).unwrap_or_default();
+                // what sending it would put inside the email (the quote's pictures only)
+                let sent = crate::compose_view::to_email(&crate::compose_view::body_of(&html)).1;
                 crate::diag::log(format!(
-                    "aidraft: original (no html, pictures) {pictures:?}; saved {}, html {} bytes, quote {}, signature {}, img {}, file pictures {}",
+                    "aidraft: original (no html, pictures) {pictures:?}; saved {}, html {} bytes, quote {}, signature {}, img {}, bold {}, heading {}, list {}, table {}, agent html as text {}, bad link dropped {}, good link {}, pictures sent {}, agent file sent {}",
                     said.is_ok(),
                     html.len(),
                     html.contains("pz-quote-head"),
                     html.contains("pz-sig"),
                     html.matches("<img").count(),
-                    html.matches("file:").count()
+                    html.contains("<strong>Bold</strong>"),
+                    html.contains("<h2>Heading</h2>"),
+                    html.contains("<li>two</li>"),
+                    html.contains("<table class=\"md\""),
+                    html.contains("&lt;img src="),
+                    !html.contains("javascript:"),
+                    html.contains("<a href=\"https://example.com\">ok</a>"),
+                    sent.len(),
+                    sent.iter().any(|(_, f)| f.to_ascii_lowercase().ends_with("win.ini"))
                 ));
             }
         }
@@ -224,9 +236,10 @@ specjalista ds. Informatyki".into();
                 (account, d.to.clone(), d.cc.clone(), d.subject.clone(), d.body.clone(), None)
             }
         };
-        // formatted like a draft left in the writing field: the signature and the quoted message
-        // as it looked, with its pictures (a plain-text draft lost them)
-        let html_path = crate::model::cache_put(self.start_content(account, &d.body, orig.as_ref()).as_bytes(), "html");
+        // formatted like a draft left in the writing field: the agent's Markdown as HTML, the
+        // signature and the quoted message as it looked, with its pictures
+        let text = crate::rich::agent_to_html(&d.body);
+        let html_path = crate::model::cache_put(self.start_content(account, &text, orig.as_ref()).as_bytes(), "html");
         let acc = self.account_for(account);
         let id = self.store.new_id();
         let said = format!(
