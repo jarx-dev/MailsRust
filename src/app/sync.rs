@@ -162,6 +162,25 @@ specjalista ds. Informatyki".into();
             }
         }
         self.restore_ai_shares();
+        if std::env::var("POCZTA_START").as_deref() == Ok("aidraft") && std::env::var_os("POCZTA_DATA_DIR").is_some() {
+            // test: an AI agent's reply draft keeps the quoted message formatted, with its pictures
+            // (a message with pictures of its own, when the mailbox has one)
+            let with_pictures = self.store.messages.iter().rev().find(|m| m.folder == Folder::Inbox && !m.inline.is_empty() && !m.html_path.is_empty()).map(|m| m.id);
+            if let Some(id) = with_pictures.or(self.selected) {
+                let pictures = self.msg(id).map(|m| (m.html_path.is_empty(), m.inline.len()));
+                let said = self.save_ai_draft(&crate::share::Draft::reply(id, "Test".into()));
+                let html = said.as_ref().ok().and(self.store.messages.last()).map(|m| std::fs::read_to_string(&m.html_path).unwrap_or_default()).unwrap_or_default();
+                crate::diag::log(format!(
+                    "aidraft: original (no html, pictures) {pictures:?}; saved {}, html {} bytes, quote {}, signature {}, img {}, file pictures {}",
+                    said.is_ok(),
+                    html.len(),
+                    html.contains("pz-quote-head"),
+                    html.contains("pz-sig"),
+                    html.matches("<img").count(),
+                    html.matches("file:").count()
+                ));
+            }
+        }
         self.start_agents();
     }
 
@@ -183,15 +202,16 @@ specjalista ds. Informatyki".into();
         if self.read_only {
             return Err("Poczta is open in another window; this one can't save drafts.".into());
         }
-        let (account, to, cc, subject, body) = match d.reply_to {
+        let (account, to, cc, subject, body, orig) = match d.reply_to {
             Some(oid) => {
                 self.ensure_body(oid);
                 let orig = self.msg(oid).filter(|m| m.id < reading::FILE_IDS).cloned().ok_or_else(|| format!("There is no message {oid}."))?;
                 // the reply goes from the account the message came to, to the people Poczta picks
                 let (to, cc, subject) = self.reply_heads(&orig, d.reply_all);
+                let quoted = Original::from(&orig, false);
                 let mut body = d.body.clone();
-                body.push_str(&Original::from(&orig, false).as_text());
-                (orig.account, to, cc, subject, body)
+                body.push_str(&quoted.as_text());
+                (orig.account, to, cc, subject, body, Some(quoted))
             }
             None => {
                 let from = d.from.trim().to_lowercase();
@@ -201,9 +221,12 @@ specjalista ds. Informatyki".into();
                         .find(|a| self.account_ref(*a).email.to_lowercase() == from)
                         .ok_or_else(|| format!("No account has the address {}.", d.from.trim()))?,
                 };
-                (account, d.to.clone(), d.cc.clone(), d.subject.clone(), d.body.clone())
+                (account, d.to.clone(), d.cc.clone(), d.subject.clone(), d.body.clone(), None)
             }
         };
+        // formatted like a draft left in the writing field: the signature and the quoted message
+        // as it looked, with its pictures (a plain-text draft lost them)
+        let html_path = crate::model::cache_put(self.start_content(account, &d.body, orig.as_ref()).as_bytes(), "html");
         let acc = self.account_for(account);
         let id = self.store.new_id();
         let said = format!(
@@ -226,7 +249,7 @@ specjalista ds. Informatyki".into();
             flagged: false,
             attachments: vec![],
             sample: false,
-            html_path: String::new(),
+            html_path,
             inline: vec![],
             attachment_files: vec![],
             labels: vec![],
