@@ -878,7 +878,7 @@ specjalista ds. Informatyki".into();
                             }
                         }
                     }
-                    let mut by_key = copies_by_fingerprint(&self.store.messages, acct, f);
+                    let mut by_key = copies_by_fingerprint(&self.store.messages, acct, f, changes_waiting);
                     let mut added = 0;
                     // new unread mail in the inbox (not the first download, not older mail coming in)
                     let tell = f == Folder::Inbox && !backfill && !by_uid.is_empty();
@@ -1244,18 +1244,19 @@ pub(super) fn fingerprint(subject: &str, from: &str, date: &NaiveDateTime) -> u6
 
 /// The copies here a message of the server's folder `f` may be, by fingerprint: sent mail among
 /// sent mail, the bin and spam among themselves, the inbox among the inbox, the bin and spam
-/// (also what is on its way to the bin; the archive, drafts and outbox keep their copies without
-/// a number for good and would hide new mail). Only copies without a server number (just moved,
+/// (also what is on its way to the bin), and the archive only while a move is on its way to the
+/// server (`moving`): later the archive, like drafts and the outbox, keeps its copies without a
+/// number for good and would hide new mail. Only copies without a server number (just moved,
 /// or the folder was renumbered): one with its number is found by it alone, so another message
 /// with the same subject, sender and date never takes it over. Taken with `take_copy`.
-pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) -> HashMap<u64, Vec<usize>> {
+pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder, moving: bool) -> HashMap<u64, Vec<usize>> {
     let mut by_key: HashMap<u64, Vec<usize>> = HashMap::new();
     for (i, x) in messages.iter().enumerate() {
         let same = x.account == acct
             && match f {
                 Folder::Sent => x.folder == Folder::Sent,
                 Folder::Trash | Folder::Junk => x.folder == f,
-                _ => matches!(x.folder, Folder::Inbox | Folder::Trash | Folder::Junk),
+                _ => matches!(x.folder, Folder::Inbox | Folder::Trash | Folder::Junk) || (moving && x.folder == Folder::Archive),
             };
         if same && x.uid.is_none() {
             by_key.entry(fingerprint(&x.subject, &x.from_addr, &x.date)).or_default().push(i);
@@ -1266,19 +1267,26 @@ pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) 
 
 /// Which of the copies with `m`'s fingerprint it is, taken off the list so no other message gets
 /// it too (nor one that got a number meanwhile): the only one left, or of several the one that
-/// starts with the same text; none when that doesn't tell them apart (a second copy beats
-/// giving one message another one's number).
+/// starts with the same text and, if that still leaves several, has the same attachments (then
+/// they are one message delivered twice); none when that doesn't tell them apart (a second copy
+/// beats giving one message another one's number).
 pub(super) fn take_copy(messages: &[Message], copies: &mut Vec<usize>, m: &Message) -> Option<usize> {
     copies.retain(|&i| messages[i].uid.is_none());
-    let k = if copies.len() == 1 {
-        0
-    } else {
-        let start = |x: &Message| x.preview().chars().take(100).collect::<String>();
-        let text = start(m);
-        if text.trim().is_empty() {
-            return None;
+    let k = match copies.len() {
+        0 => return None,
+        1 => 0,
+        _ => {
+            let start = |x: &Message| x.preview().chars().take(100).collect::<String>();
+            let text = start(m);
+            if text.trim().is_empty() {
+                return None;
+            }
+            let same: Vec<usize> = (0..copies.len()).filter(|&k| start(&messages[copies[k]]) == text).collect();
+            match same[..] {
+                [k] => k,
+                _ => same.into_iter().find(|&k| messages[copies[k]].attachments == m.attachments)?,
+            }
         }
-        copies.iter().position(|&i| start(&messages[i]) == text)?
     };
     Some(copies.swap_remove(k))
 }

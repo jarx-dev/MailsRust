@@ -2151,7 +2151,7 @@ mod tests {
         other.account = 1;
         let mut here = vec![msg(Trash, Some(7), "A"), msg(Trash, None, "B"), msg(Trash, None, "C"), msg(Sent, None, ""), other, msg(Archive, None, "D")];
         let key = fingerprint("Faktura", "a@example.com", &date);
-        let mut bin = copies_by_fingerprint(&here, 0, Trash);
+        let mut bin = copies_by_fingerprint(&here, 0, Trash, false);
         let mut found = bin.get(&key).cloned().unwrap();
         found.sort();
         assert_eq!(found, vec![1, 2]);
@@ -2170,12 +2170,25 @@ mod tests {
         // a copy that got its number meanwhile is never taken
         here[3].uid = Some(12);
         assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "E")), Some(1));
-        // the inbox looks at the inbox, the bin and spam (not the archive); sent mail at sent mail
+        // the same start of text: the attachments tell them apart, or nothing is taken; a copy
+        // whose text is on disk (only its start kept) is compared by that start
+        let long = "Dzień dobry, w załączniku przesyłamy fakturę za listopad. ".repeat(4);
+        let with = |files: &[&str]| Message { attachments: files.iter().map(|s| s.to_string()).collect(), ..msg(Trash, None, &long) };
+        let mut on_disk = with(&["a.pdf"]);
+        on_disk.snippet = crate::model::snippet_of(&on_disk.body);
+        on_disk.body.clear();
+        let twins = vec![on_disk, with(&["b.pdf"])];
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["b.pdf"]) }), Some(1));
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["a.pdf"]) }), Some(0));
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["c.pdf"]) }), None);
+        // the inbox looks at the inbox, the bin and spam (the archive only while a move is on its
+        // way to the server); sent mail at sent mail
         let here = vec![msg(Trash, None, ""), msg(Junk, None, ""), msg(Archive, None, ""), msg(Sent, None, ""), msg(Inbox, None, "")];
-        let mut inbox = copies_by_fingerprint(&here, 0, Inbox).remove(&key).unwrap();
+        let mut inbox = copies_by_fingerprint(&here, 0, Inbox, false).remove(&key).unwrap();
         inbox.sort();
         assert_eq!(inbox, vec![0, 1, 4]);
-        assert_eq!(copies_by_fingerprint(&here, 0, Sent).get(&key).cloned(), Some(vec![3]));
+        assert_eq!(copies_by_fingerprint(&here, 0, Inbox, true).get(&key).map(Vec::len), Some(4));
+        assert_eq!(copies_by_fingerprint(&here, 0, Sent, false).get(&key).cloned(), Some(vec![3]));
     }
 
     /// A new folder needs a name of its own: not empty, not the favourites, not one already
