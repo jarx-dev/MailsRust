@@ -203,7 +203,11 @@ impl MailApp {
                         self.set_status(t!("ui.actions.deleted_forever"));
                     } else {
                         // also into the server's Trash (Gmail: Kosz)
+                        let queued = self.pending_ops.len();
                         self.queue_op(id, |uid| net::Op::Trash { uid });
+                        // a sync right after the move gives it its number in the bin, so it can
+                        // be restored at once (until then the server could not follow a restore)
+                        self.watch_due |= self.pending_ops.len() > queued;
                         if let Some(m) = self.msg_mut(id) {
                             m.folder = Folder::Trash;
                             m.uid = None;
@@ -215,10 +219,18 @@ impl MailApp {
                     }
                 }
                 Action::Move(id, f) => {
+                    // Out of the bin before the sync found it in the server's bin: moved here
+                    // alone, it would stay in the server's bin and come back with the next sync.
+                    if f == Folder::Inbox && self.msg(id).is_some_and(|m| m.folder == Folder::Trash && !self.drop_moves(m, f)) {
+                        self.set_status(t!("ui.actions.restore_wait"));
+                        self.watch_due = true;
+                        continue;
+                    }
                     let next = self.neighbour(id);
                     // (one opened from outside the list, e.g. from a conversation, stays open)
                     let leaves = self.msg(id).is_some_and(|m| m.folder != f) && self.visible_ids().contains(&id);
                     let from = self.msg(id).map(|m| m.folder);
+                    let queued = self.pending_ops.len();
                     match (from, f) {
                         (Some(a), b) if a == b => {}
                         (_, Folder::Trash) => self.queue_op(id, |uid| net::Op::Trash { uid }),
@@ -228,6 +240,8 @@ impl MailApp {
                         (Some(Folder::Trash | Folder::Junk), Folder::Inbox) => self.queue_op(id, |uid| net::Op::ToInbox { uid }),
                         _ => {}
                     }
+                    // (the new folder's number comes with a sync right after, as after deleting)
+                    self.watch_due |= self.pending_ops.len() > queued;
                     if let Some(m) = self.msg_mut(id) {
                         if m.folder != f {
                             // its number belonged to the old folder; the sync finds it again

@@ -1014,6 +1014,16 @@ tel.: 600-100-200".into();
                 app.actions.push(Action::Delete(id));
             }
         }
+        if matches!(std::env::var("POCZTA_START").as_deref(), Ok("trash") | Ok("trash-restore")) {
+            // test picture: a message of the bin open (Przywróć on the bar and on the message);
+            // with "trash-restore" it is restored at once and the bin shows the next one
+            app.view = MailView::Folder(Folder::Trash);
+            app.selected = None;
+            app.selected = app.visible_ids().first().copied();
+            if let Some(id) = app.selected.filter(|_| std::env::var("POCZTA_START").as_deref() == Ok("trash-restore")) {
+                app.actions.push(Action::Move(id, Folder::Inbox));
+            }
+        }
         if std::env::var("POCZTA_START").as_deref() == Ok("thread-later") {
             // test picture: a conversation with an earlier message and a newer reply of yours
             if let Some(base) = app.store.messages.iter().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date).cloned() {

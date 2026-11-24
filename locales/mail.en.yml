@@ -21,6 +21,7 @@ mail:
     more: "More"
     delete_tip: "Delete (Del)"
     archive: "Archive"
+    restore: "Restore to Inbox"
     flag: "Flag"
     mark_unread: "Mark as unread"
     mark_read: "Mark as read"

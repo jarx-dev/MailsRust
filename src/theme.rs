@@ -85,6 +85,7 @@ pub mod ic {
     pub const NEXT: &str = "\u{E76C}";
     pub const ARCHIVE: &str = "\u{E7B8}";
     pub const DELETE: &str = "\u{E74D}";
+    pub const UNDO: &str = "\u{E7A7}";
     pub const MOON: &str = "\u{E708}";
     pub const SUN: &str = "\u{E706}";
     pub const CALENDAR: &str = "\u{E787}";
