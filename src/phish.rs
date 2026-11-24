@@ -123,34 +123,64 @@ fn claimed_domain(name: &str) -> Option<String> {
     None
 }
 
-/// Where the email really comes from. A forwarder on the account's own address writes the first
-/// sender into it ("biuro+info=shop.pl@own.pl" for biuro@own.pl): then that one, but only when
-/// DMARC passed (the own domain vouches for that From; a DKIM pass alone may be anyone's).
-/// `None`: that address otherwise, which cannot be told either way.
-fn sender_domain(from: &str, own: &str, auth: &str) -> Option<String> {
+/// Where the email really comes from. A forwarder of one of the person's own addresses (`mine`:
+/// the account's, or an alias like addy.io's, see `alias_of`) writes the first sender into it
+/// ("biuro+info=shop.pl@own.pl" for biuro@own.pl): then that one, but only when DMARC passed (the
+/// own domain vouches for that From; a DKIM pass alone may be anyone's). `None`: that address
+/// otherwise, which cannot be told either way.
+fn sender_domain(from: &str, mine: &[&str], auth: &str) -> Option<String> {
     let (local, domain) = from.rsplit_once('@').unwrap_or(("", from));
     let (local, domain) = (local.trim().to_ascii_lowercase(), domain.trim().to_ascii_lowercase());
-    let (own_local, own_domain) = own.rsplit_once('@').map(|(l, d)| (l.trim().to_ascii_lowercase(), d.trim().to_ascii_lowercase())).unwrap_or_default();
-    if !own_domain.is_empty() && domain == own_domain {
-        if let Some((_, first)) = local.split_once('+').filter(|(base, _)| *base == own_local).and_then(|(_, rest)| rest.rsplit_once('=')) {
-            if domain_like(first) {
-                return (result(auth, "dmarc") == "pass").then(|| first.to_string());
-            }
+    let own = |base: &str| mine.iter().any(|a| a.trim().eq_ignore_ascii_case(&format!("{base}@{domain}")));
+    if let Some((_, first)) = local.split_once('+').filter(|(base, _)| !domain.is_empty() && own(base)).and_then(|(_, rest)| rest.rsplit_once('=')) {
+        if domain_like(first) {
+            return (result(auth, "dmarc") == "pass").then(|| first.to_string());
         }
     }
     Some(domain)
 }
 
+/// The address a forwarder's From was made of ("biuro+info=shop.pl@own.pl" → "biuro@own.pl").
+pub fn alias_of(from: &str) -> Option<String> {
+    let (local, domain) = from.trim().rsplit_once('@')?;
+    let (base, rest) = local.split_once('+')?;
+    (!base.is_empty() && rest.contains('=')).then(|| format!("{base}@{domain}").to_ascii_lowercase())
+}
+
+/// Whether an address list ("Ann <a@b.pl>, c@d.pl") has `addr` in it, as a whole address.
+pub fn addressed_to(list: &str, addr: &str) -> bool {
+    list.split([',', ';']).any(|p| p.rsplit_once('<').map_or(p, |(_, a)| a.trim_end_matches(['>', ' '])).trim().eq_ignore_ascii_case(addr))
+}
+
+/// Whether an alias is the person's own, from the dates of other mail sent to it: at least 5
+/// messages over at least 30 days. To and From are written by the sender, so one email proves
+/// nothing; a month of the person's own mail does.
+/// shortcut: the dates are the senders' own, so someone who plants 5 emails with false dates can
+/// silence the name/address line for their domain (the address stays shown, the AI check still
+/// works); upgrade to a list of the person's aliases in the settings if that is ever seen.
+pub fn long_used(dates: impl Iterator<Item = chrono::NaiveDateTime>) -> bool {
+    let (mut n, mut first, mut last) = (0, None, None);
+    for d in dates {
+        n += 1;
+        first = Some(first.map_or(d, |f: chrono::NaiveDateTime| f.min(d)));
+        last = Some(last.map_or(d, |l: chrono::NaiveDateTime| l.max(d)));
+    }
+    n >= 5 && first.zip(last).is_some_and(|(f, l)| (l - f).num_days() >= 30)
+}
+
 /// What the app itself finds wrong with `m`, one line each (empty: nothing). `auth`: what
-/// `auth_results` gave; `own`: the account's address.
-pub fn signals(m: &Message, auth: &str, own: &str) -> Vec<String> {
+/// `auth_results` gave; `mine`: the person's addresses (the account's, and an alias known to be
+/// theirs, see `long_used`).
+pub fn signals(m: &Message, auth: &str, mine: &[&str]) -> Vec<String> {
     let mut out = vec![];
     if result(auth, "dmarc") == "fail" {
         out.push(t!("mail.phish.dmarc_fail").into_owned());
     } else if result(auth, "spf") == "fail" && result(auth, "dkim") != "pass" {
         out.push(t!("mail.phish.spf_fail").into_owned());
     }
-    if let (Some(claimed), Some(real)) = (claimed_domain(&m.from_name), sender_domain(&m.from_addr, own, auth)) {
+    // (a sender with no name gets the address as the name: nothing is claimed then)
+    let named = !m.from_name.trim().eq_ignore_ascii_case(m.from_addr.trim());
+    if let (true, Some(claimed), Some(real)) = (named, claimed_domain(&m.from_name), sender_domain(&m.from_addr, mine, auth)) {
         if domain_like(&real) && crate::html::site(&claimed) != crate::html::site(&real) {
             out.push(t!("mail.phish.name_other", claimed = claimed, real = real).into_owned());
         }
@@ -330,9 +360,10 @@ pub fn parse_verdict(reply: &str, nonce: &str) -> Result<Verdict, String> {
 
 /// The whole check, on a thread of its own: the model asked about `m` (`head`: its header from
 /// the server, when it could be read).
-pub fn check(s: &crate::ai::Settings, m: &Message, head: Option<Vec<u8>>, html: Option<String>, own: &str, links: &[String], pl: bool) -> Check {
+pub fn check(s: &crate::ai::Settings, m: &Message, head: Option<Vec<u8>>, html: Option<String>, mine: &[String], links: &[String], pl: bool) -> Check {
     let auth = head.as_deref().map(auth_results).filter(|a| !a.is_empty()).unwrap_or_else(|| m.auth.clone());
-    let mut warnings = signals(m, &auth, own);
+    let mine: Vec<&str> = mine.iter().map(String::as_str).collect();
+    let mut warnings = signals(m, &auth, &mine);
     warnings.extend(weak_signals(links, false));
     let (value, injected) = data(m, head.as_deref(), html.as_deref(), &auth, &warnings);
     let nonce = crate::oauth::random_token(12);
@@ -379,7 +410,7 @@ mod tests {
 
     #[test]
     fn signals_name_what_is_wrong() {
-        let own = "office@own.example";
+        let own: &[&str] = &["office@own.example"];
         // nothing wrong
         assert!(signals(&msg("Bank", "info@bank.pl"), "spf=pass dkim=pass dmarc=pass", own).is_empty());
         assert!(signals(&msg("Jan jan@firma.pl", "jan@mail.firma.pl"), "", own).is_empty());
@@ -390,9 +421,28 @@ mod tests {
         assert!(signals(&fwd, "", own).is_empty());
         assert!(signals(&msg("PayPal service@paypal.com", "office+x=paypal.com@own.example"), "dkim=pass", own).is_empty());
         assert_eq!(signals(&msg("PayPal service@paypal.com", "office+x=paypal.com@own.example"), "dmarc=fail", own).len(), 1);
+        // an alias service (addy.io): the account has another address, the alias is known as the
+        // person's own (`long_used`); an alias not known so is not believed
+        let alias: &[&str] = &["me@mail.example", "office@own.example"];
+        assert!(signals(&fwd, "", alias).is_empty());
+        assert!(signals(&fwd, "spf=pass dkim=pass dmarc=pass", alias).is_empty());
+        assert_eq!(signals(&msg("PayPal service@paypal.com", "office+x=shop.example@own.example"), "dmarc=pass", alias).len(), 1);
+        assert_eq!(signals(&fwd, "dmarc=pass", &["me@mail.example"]).len(), 1);
+        let bare = "office+info=shop-mail.example@own.example";
+        assert!(signals(&msg(bare, bare), "dmarc=pass", alias).is_empty());
+        assert_eq!(alias_of("Office+info=Shop.example@Own.example").as_deref(), Some("office@own.example"));
+        assert_eq!(alias_of("office+news@own.example"), None);
+        assert!(addressed_to("Ann <a@b.pl>, Office@Own.example", "office@own.example"));
+        assert!(!addressed_to("xoffice@own.example; office@own.example.evil.ru", "office@own.example"));
+        assert!(!addressed_to("\"office@own.example\" <x@evil.ru>", "office@own.example"));
+        // known as own: at least 5 messages over at least 30 days
+        let day = |d: u32| chrono::NaiveDate::from_ymd_opt(2026, 10, d).and_then(|x| x.and_hms_opt(9, 0, 0)).unwrap();
+        assert!(long_used([1, 5, 10, 20, 31].map(day).into_iter()));
+        assert!(!long_used([1, 2, 3, 4, 5, 6, 7].map(day).into_iter()));
+        assert!(!long_used([1, 31].map(day).into_iter()));
         // anyone else doing the same is not believed, also on a shared domain like gmail.com
         assert_eq!(signals(&msg("service@paypal.com", "x+a=paypal.com@evil.ru"), "", own).len(), 1);
-        assert_eq!(signals(&msg("PayPal service@paypal.com", "x+service=paypal.com@gmail.com"), "dkim=pass", "ja@gmail.com").len(), 1);
+        assert_eq!(signals(&msg("PayPal service@paypal.com", "x+service=paypal.com@gmail.com"), "dkim=pass", &["ja@gmail.com"]).len(), 1);
         assert_eq!(signals(&msg("PayPal <service@paypal.com>", "noreply@pp-secure.ru"), "", own).len(), 1);
         assert_eq!(signals(&msg("Bank", "a@bank.pl"), "dmarc=fail", own).len(), 1);
         assert_eq!(signals(&msg("Bank", "a@bank.pl"), "spf=fail dkim=none", own).len(), 1);
