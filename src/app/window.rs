@@ -313,6 +313,14 @@ impl MailApp {
                 });
                 continue;
             }
+            // the email's page found links that show one address and open another (only the
+            // page's own script can send this, see `webview::prepare`)
+            if let Some((id, hosts)) = k.strip_prefix("elsewhere:").and_then(|r| r.split_once(':')) {
+                if let Ok(id) = id.parse::<u64>() {
+                    self.links_elsewhere.insert(id, hosts.split(' ').filter(|h| !h.is_empty()).take(5).map(String::from).collect());
+                }
+                continue;
+            }
             crate::diag::log(format!("key from the email view: {k}"));
             if k == "delete" && self.module == Module::Mail {
                 if let Some(id) = self.selected {

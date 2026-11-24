@@ -468,11 +468,20 @@ pub fn receive(
 
 /// The original message exactly as the server keeps it (.eml), read-only: it stays unread.
 pub fn fetch_raw(account: &Account, uid: u32) -> Result<Vec<u8>, String> {
+    fetch_inbox_part(account, uid, "BODY.PEEK[]")
+}
+
+/// Only the header of a message in the inbox (who sent it and the server's checks), read-only.
+pub fn fetch_header(account: &Account, uid: u32) -> Result<Vec<u8>, String> {
+    fetch_inbox_part(account, uid, "BODY.PEEK[HEADER]")
+}
+
+fn fetch_inbox_part(account: &Account, uid: u32, part: &str) -> Result<Vec<u8>, String> {
     guarded(|| {
         let mut session = open_session(account)?;
         session.examine("INBOX").map_err(|e| e.to_string())?;
-        let fetches = session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").map_err(|e| e.to_string())?;
-        let raw = fetches.iter().next().and_then(|f| f.body()).map(|b| b.to_vec()).ok_or_else(|| t!("core.net.message_gone").into_owned())?;
+        let fetches = session.uid_fetch(uid.to_string(), format!("(UID {part})")).map_err(|e| e.to_string())?;
+        let raw = fetches.iter().next().and_then(|f| f.body().or_else(|| f.header())).map(|b| b.to_vec()).ok_or_else(|| t!("core.net.message_gone").into_owned())?;
         drop(fetches);
         let _ = session.logout();
         Ok(raw)
@@ -1522,6 +1531,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         snippet: String::new(),
         on_disk: false,
         ai: false,
+        auth: crate::phish::auth_results(raw),
     })
 }
 

@@ -648,7 +648,28 @@ impl MailApp {
             ui.painter().text(Pos2::new(sr.right(), sr.top() + 4.0), Align2::RIGHT_TOP, &when, FontId::proportional(15.0), TEXT());
             let text_w = sr.width() - 70.0 - tw - 12.0;
             let full_w = sr.width() - 70.0;
-            line_f(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 4.0), &m.from_name, semibold(15.0), ACCENT(), text_w);
+            // the address next to the name: a name can claim anything, the address is what to check.
+            // Short of room the part before "@" goes first, then the name (it is in the hint and the
+            // avatar), so the domain stays whole.
+            let small = FontId::proportional(13.5);
+            let addr = if m.from_addr.is_empty() || m.from_addr == m.from_name { String::new() } else { format!("<{}>", m.from_addr) };
+            let short = m.from_addr.rsplit_once('@').filter(|_| !addr.is_empty()).map(|(_, d)| format!("<…@{d}>")).unwrap_or_else(|| addr.clone());
+            let name_full = text_width(ui, &m.from_name, semibold(15.0));
+            // a sender with no name: the address is the name, and keeps its domain the same way
+            let name = match m.from_addr.rsplit_once('@') {
+                Some((_, d)) if m.from_name == m.from_addr && name_full > text_w => format!("…@{d}"),
+                _ => m.from_name.clone(),
+            };
+            let addr_full = if addr.is_empty() { 0.0 } else { text_width(ui, &addr, small.clone()) + 6.0 };
+            // (no room even for "<…@domain>": the name alone, cut, as before)
+            let addr = if text_w - 6.0 < 34.0 { String::new() } else if name_full + addr_full <= text_w { addr } else { short };
+            let addr_need = if addr.is_empty() { 0.0 } else { (text_width(ui, &addr, small.clone()) + 6.0).min(text_w).max(0.0) };
+            // (no room left for the name: none at all rather than a lone "…")
+            let name_w = if text_w - addr_need < 16.0 { 0.0 } else { line_f(ui.painter(), Pos2::new(sr.left() + 60.0, sr.top() + 4.0), &name, semibold(15.0), ACCENT(), text_w - addr_need) };
+            let addr_room = text_w - name_w - 6.0;
+            let addr_w = if addr.is_empty() || addr_room < 34.0 { 0.0 } else { line_f(ui.painter(), Pos2::new(sr.left() + 66.0 + name_w, sr.top() + 6.0), &addr, small, MUTED(), addr_room) + 6.0 };
+            let who = ui.interact(Rect::from_min_size(Pos2::new(sr.left() + 60.0, sr.top() + 2.0), Vec2::new(name_w + addr_w, 22.0)), id(("from-line", m.id)), Sense::hover());
+            hint_above(ui, &who, &if m.from_name.is_empty() || m.from_name == m.from_addr { m.from_addr.clone() } else { format!("{} <{}>", m.from_name, m.from_addr) });
             let rcpt_key = egui::Id::new(("rcpt-open", m.id));
             let rcpt_open = ui.data(|d| d.get_temp::<bool>(rcpt_key)).unwrap_or(false);
             // (the names are fitted to the room left by the buttons, below)
@@ -853,6 +874,8 @@ impl MailApp {
             }
             self.invitation_bar(ui, &m);
             ui.add_space(12.0);
+            // (over a message with its header only too: the server's results are in the header)
+            self.phish_banner(ui, &m);
             // A big message stored with its header only: the rest is on its way (or it couldn't be had).
             if m.partial && m.body.is_empty() && m.html_path.is_empty() {
                 ui.add_space(20.0);
@@ -1120,6 +1143,7 @@ impl MailApp {
             snippet: String::new(),
             on_disk: false,
             ai: false,
+            auth: String::new(),
         };
         let out = Outgoing { id, to: sent.to.clone(), cc: String::new(), subject: sent.subject.clone(), body: sent.body.clone(), html: None, inline: vec![], files: vec![reply_file] };
         self.store.messages.push(sent);
@@ -1139,6 +1163,81 @@ impl MailApp {
             self.set_status(t!("compose.status.saved_outbox"));
         }
         true
+    }
+
+    /// The warning over an email that may not be from who it says (`crate::phish`): what the app
+    /// found itself, the AI check on its way or done, and a way to ask for one. What the app
+    /// found stays shown whatever the model says.
+    pub(super) fn phish_banner(&mut self, ui: &mut Ui, m: &Message) {
+        if matches!(m.folder, Folder::Sent | Folder::Outbox | Folder::Drafts) {
+            return;
+        }
+        let check = self.phish_checks.get(&m.id);
+        // (a .eml file's own Authentication-Results were not written by our server)
+        let auth = if m.id >= FILE_IDS { "" } else { check.map(|c| c.auth.as_str()).filter(|a| !a.is_empty()).unwrap_or(&m.auth) };
+        let found = crate::phish::signals(m, auth, &self.account_ref(m.account).email);
+        let weak = crate::phish::weak_signals(self.links_elsewhere.get(&m.id).map(Vec::as_slice).unwrap_or(&[]), check.is_some_and(|c| c.injected));
+        let busy = self.phish_checking.contains_key(&m.id);
+        if found.is_empty() && weak.is_empty() && check.is_none() && !busy {
+            return;
+        }
+        use crate::phish::Level;
+        let level = check.and_then(|c| c.verdict.as_ref().ok()).map(|v| v.level);
+        let danger = !found.is_empty() || level == Some(Level::Phishing);
+        let (tone, title) = if danger {
+            (FLAG, t!("mail.phish.title_danger"))
+        } else if level == Some(Level::Suspicious) || !weak.is_empty() {
+            (WARN(), t!("mail.phish.title_suspicious"))
+        } else {
+            (MUTED(), if busy { t!("mail.phish.checking") } else { t!("mail.phish.title_checked") })
+        };
+        let mut ask = false;
+        Frame::new()
+            .fill(if tone == MUTED() { SURFACE() } else { tone.gamma_multiply(0.12) })
+            .stroke(Stroke::new(1.0, tone.gamma_multiply(0.6)))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 3.0;
+                ui.label(RichText::new(format!("{}  {title}", ic::WARNING)).font(semibold(13.5)).color(if tone == MUTED() { TEXT() } else { tone }));
+                // (all of it plain text: nothing from the email or the model is a link here)
+                for f in found.iter().chain(&weak) {
+                    ui.label(RichText::new(format!("•  {f}")).size(13.0).color(TEXT()));
+                }
+                // (no spinner and no timer: the check's thread wakes the window when it is done)
+                if busy && tone != MUTED() {
+                    ui.label(RichText::new(t!("mail.phish.checking")).size(13.0).color(MUTED()));
+                }
+                match check.map(|c| &c.verdict) {
+                    Some(Ok(v)) => {
+                        let said = match v.level {
+                            Level::Phishing => t!("mail.phish.ai_phishing"),
+                            Level::Suspicious => t!("mail.phish.ai_suspicious"),
+                            Level::NoSigns => t!("mail.phish.ai_no_signs"),
+                        };
+                        ui.label(RichText::new(said).size(13.0).font(semibold(13.0)).color(TEXT()));
+                        for r in &v.reasons {
+                            ui.label(RichText::new(format!("•  {r}")).size(13.0).color(TEXT()));
+                        }
+                    }
+                    // (an earlier failure is not shown while it is being tried again)
+                    Some(Err(e)) if !busy => {
+                        ui.label(RichText::new(t!("mail.phish.failed", error = e)).size(13.0).color(MUTED()));
+                    }
+                    _ => {}
+                }
+                if danger {
+                    ui.label(RichText::new(t!("mail.phish.advice")).size(12.5).color(MUTED()));
+                }
+                if !busy && check.is_none_or(|c| c.verdict.is_err()) {
+                    ask = ui.link(RichText::new(t!("mail.phish.ask_ai")).size(13.0)).clicked();
+                }
+            });
+        if ask {
+            self.actions.push(Action::CheckPhishing(m.id));
+        }
+        ui.add_space(6.0);
     }
 
     /// An email inviting to a meeting (it carries a calendar file): what and when, above the
@@ -1536,6 +1635,7 @@ impl MailApp {
                                 }
                             });
                         }
+                        self.phish_banner(ui, &m);
                         self.invitation_bar(ui, &m);
                         ui.add_space(6.0);
                         // the text: formatted (Edge engine) when there is a formatted version
@@ -1863,7 +1963,8 @@ pub(super) fn hint_above(ui: &Ui, resp: &egui::Response, text: &str) {
     let galley = ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(13.0), TEXT());
     let size = galley.size() + Vec2::new(16.0, 8.0);
     let screen = ui.ctx().content_rect();
-    let x = (resp.rect.center().x - size.x / 2.0).clamp(screen.left() + 4.0, screen.right() - size.x - 4.0);
+    // (min/max, not clamp: a hint wider than the window, e.g. a sender's very long name, would panic)
+    let x = (resp.rect.center().x - size.x / 2.0).min(screen.right() - size.x - 4.0).max(screen.left() + 4.0);
     let r = Rect::from_min_size(Pos2::new(x, resp.rect.top() - size.y - 6.0), size);
     #[allow(deprecated)]
     let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("hint-above"));

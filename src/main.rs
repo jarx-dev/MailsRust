@@ -31,6 +31,7 @@ mod net;
 mod notify;
 mod oauth;
 mod open_file;
+mod phish;
 mod popup;
 mod prof;
 mod rawimap;

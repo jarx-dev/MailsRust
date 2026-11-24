@@ -1384,6 +1384,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         snippet: String::new(),
                         on_disk: false,
                         ai: false,
+                        auth: String::new(),
                     });
                     id
                 }
