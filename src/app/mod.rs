@@ -361,6 +361,9 @@ pub struct MailApp {
     phish_checking: HashMap<u64, Receiver<crate::phish::Check>>,
     phish_checks: HashMap<u64, crate::phish::Check>,
     links_elsewhere: HashMap<u64, Vec<String>>,
+    /// aliases (addy.io and the like) and whether they are the person's own, with the number of
+    /// messages when that was worked out (see `my_addresses`)
+    own_aliases: HashMap<String, (usize, bool)>,
     list_rect: Option<egui::Rect>,
     label_filter: String,
     tags_open: bool,
@@ -665,6 +668,7 @@ impl MailApp {
             phish_checking: HashMap::new(),
             phish_checks: HashMap::new(),
             links_elsewhere: HashMap::new(),
+            own_aliases: HashMap::new(),
             list_rect: None,
             label_filter: String::new(),
             tags_open: true,

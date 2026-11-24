@@ -411,7 +411,7 @@ impl MailApp {
                     let html_path = m.html_path.clone();
                     // the header from the server (the checks of older mail, Reply-To, Return-Path)
                     let acc = m.uid.filter(|_| m.folder == Folder::Inbox && m.id < FILE_IDS).map(|uid| (self.account_for(m.account), uid));
-                    let own = self.account_ref(m.account).email.clone();
+                    let own = self.my_addresses(&m);
                     let links = self.links_elsewhere.get(&id).cloned().unwrap_or_default();
                     let (tx, rx) = channel();
                     let ctx = self.ctx.clone();
