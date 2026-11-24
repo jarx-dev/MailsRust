@@ -568,6 +568,11 @@ pub fn link_elsewhere(text: &str, href: &str) -> Option<String> {
     let lower = href.trim().to_ascii_lowercase();
     let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://"))?;
     let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?.split(':').next()?.to_string();
+    // one name of letters is no public site, e.g. "http://applications/…" a mail program left
+    // from a broken relative link; digits, [ and % stay checked (IPv4 as a number, IPv6, %2E)
+    if !host.is_empty() && host.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+        return None;
+    }
     // what the text shows: an address (with http(s):// or www. before it, or a name ending in a
     // top-level domain that is not a file's extension)
     let t = text.trim().to_ascii_lowercase();
@@ -611,9 +616,13 @@ mod link_tests {
         assert_eq!(e("www.mojbank.pl", "https://evil.example/login").as_deref(), Some("evil.example"));
         assert_eq!(e(" https://c.d.com.pl/x ", "https://user@a.b.com.pl:8443/").as_deref(), Some("a.b.com.pl"));
         // the same site, a file name, plain words, a mail address, other kinds of link
-        for (text, href) in [("mojbank.pl", "https://www.mojbank.pl/x"), ("WWW.Shop.co.uk/sale", "http://deals.shop.co.uk"), ("ing.pl", "https://login.ing.pl/"), ("www.wp.pl", "https://poczta.wp.pl"), ("raport.pdf", "https://drive.example/f"), ("Click here", "https://x.example"), ("a@b.pl", "https://x.example"), ("www.a.pl", "mailto:x@y.pl"), ("www.a.pl,", "https://b.pl")] {
+        for (text, href) in [("mojbank.pl", "https://www.mojbank.pl/x"), ("WWW.Shop.co.uk/sale", "http://deals.shop.co.uk"), ("ing.pl", "https://login.ing.pl/"), ("www.wp.pl", "https://poczta.wp.pl"), ("raport.pdf", "https://drive.example/f"), ("Click here", "https://x.example"), ("a@b.pl", "https://x.example"), ("www.a.pl", "mailto:x@y.pl"), ("www.a.pl,", "https://b.pl"), ("shop.example", "http://applications/Mail.app/shop.example")] {
             assert_eq!(e(text, href), None, "{text} → {href}");
         }
         assert_eq!(e("www.report.pdf", "https://drive.example/f").as_deref(), Some("drive.example"));
+        // hidden addresses of real servers stay marked
+        assert!(e("www.mojbank.pl", "http://3105189123/login").is_some());
+        assert!(e("www.mojbank.pl", "http://[2a01:4f8::1]/login").is_some());
+        assert!(e("www.mojbank.pl", "http://evil%2Eexample/").is_some());
     }
 }

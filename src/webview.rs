@@ -374,7 +374,7 @@ fn prepare(m: &Message) -> Option<String> {
         document.querySelectorAll('a[href]').forEach(function(a){if(!/^https?:$/.test(a.protocol))return;\
         var m=/^(https?:\\/\\/|www\\.)?((?:[a-z0-9-]+\\.)+([a-z]{2,}))(?:[\\/:?#]|$)/i.exec(a.textContent.trim());\
         if(!m||(!m[1]&&/^(pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|gif|html?|txt|csv|ics|eml|exe|php|aspx?|js)$/i.test(m[3])))return;\
-        if(site(m[2])===site(a.hostname))return;\
+        if(/^[a-z-]+$/.test(a.hostname)||site(m[2])===site(a.hostname))return;\
         var w=document.createElement('span');w.className='pz-warn';w.textContent=' \\u26a0 '+a.hostname;\
         w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);if(hs.indexOf(a.hostname)<0)hs.push(a.hostname);});\
         if(hs.length)try{chrome.webview.postMessage('elsewhere:PZ-ID:'+hs.slice(0,5).join(' '))}catch(e){}});\
