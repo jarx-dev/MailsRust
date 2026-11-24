@@ -272,6 +272,7 @@ specjalista ds. Informatyki".into();
             snippet: String::new(),
             on_disk: false,
             ai: true,
+            auth: String::new(),
         });
         self.save_now = true;
         self.set_status(t!("core.sync.ai_draft"));
@@ -913,6 +914,7 @@ specjalista ds. Informatyki".into();
                                     && (x.date - m.date).num_minutes().abs() <= 15
                             });
                         }
+                        let by_number = m.uid.is_some_and(|u| by_uid.contains_key(&u));
                         if let Some(i) = found {
                             let old = &mut self.store.messages[i];
                             // (the first step comes without labels: they follow in a step of their own)
@@ -921,6 +923,11 @@ specjalista ds. Informatyki".into();
                             }
                             if old.folder == f {
                                 old.uid = m.uid;
+                            }
+                            // (only the same message by its number: one matched by subject and date
+                            // could be another one's results)
+                            if by_number && old.auth.is_empty() && !m.auth.is_empty() {
+                                old.auth = m.auth.clone();
                             }
                             if old.partial && !m.partial {
                                 // the full version of a message that only had its header

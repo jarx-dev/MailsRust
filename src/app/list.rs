@@ -1010,6 +1010,12 @@ impl MailApp {
             self.actions.push(Action::Translate(id));
             ui.close();
         }
+        // (by folder, not by sender: a fake "from you" is exactly what may need checking)
+        let received = self.msg(id).is_some_and(|m| !matches!(m.folder, Folder::Sent | Folder::Outbox | Folder::Drafts));
+        if received && ui.button(t!("mail.list.menu_check_phishing")).on_hover_text(t!("mail.list.menu_check_phishing_tip")).clicked() {
+            self.actions.push(Action::CheckPhishing(id));
+            ui.close();
+        }
         ui.separator();
         if ui.button(if read { t!("mail.list.menu_mark_unread") } else { t!("mail.list.menu_mark_read") }).clicked() {
             self.actions.push(Action::SetRead(id, !read));

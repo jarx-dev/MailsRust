@@ -320,6 +320,17 @@ pub fn autoresponder(s: &Settings, today: &str, current: &str, ask_for: &str) ->
     Ok(out.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim().to_string())
 }
 
+/// The model's answer to `crate::phish::prompt` (whether an email is phishing); `phish` reads it.
+pub fn judge(s: &Settings, prompt: &str) -> Result<String, String> {
+    let t = std::time::Instant::now();
+    let (text, stop, model) = ask(s, prompt, 8_000, Duration::from_secs(90))?;
+    crate::diag::log(format!("phishing check: model {model}, {:.1} s", t.elapsed().as_secs_f32()));
+    if stop == "max_tokens" {
+        return Err(t!("mail.phish.bad_answer").into_owned());
+    }
+    Ok(text)
+}
+
 /// A short question to check the address, the key and the model: the model's name and the time.
 pub fn test(s: &Settings) -> Result<String, String> {
     let t = std::time::Instant::now();

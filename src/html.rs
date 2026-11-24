@@ -564,13 +564,6 @@ pub fn parse(html: &str) -> Vec<Block> {
 /// shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
 /// and the like), not the public suffix list; upgrade if it marks or misses real cases.
 pub fn link_elsewhere(text: &str, href: &str) -> Option<String> {
-    const SECOND: [&str; 13] = ["co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nom"];
-    let site = |h: &str| {
-        let h = h.to_ascii_lowercase();
-        let p: Vec<&str> = h.strip_prefix("www.").unwrap_or(&h).split('.').collect();
-        let n = if p.len() > 2 && p[p.len() - 1].len() == 2 && SECOND.contains(&p[p.len() - 2]) { 3 } else { 2 };
-        p[p.len().saturating_sub(n)..].join(".")
-    };
     // where the link goes: http(s) only, the host without a user name or port
     let lower = href.trim().to_ascii_lowercase();
     let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://"))?;
@@ -597,6 +590,16 @@ pub fn link_elsewhere(text: &str, href: &str) -> Option<String> {
         return None;
     }
     (site(name) != site(&host)).then_some(host)
+}
+
+/// The site a host name belongs to: its last two names ("mail.bank.pl" → "bank.pl"), three
+/// for co.uk, com.pl and the like (see the shortcut on `link_elsewhere`).
+pub fn site(host: &str) -> String {
+    const SECOND: [&str; 13] = ["co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nom"];
+    let h = host.to_ascii_lowercase();
+    let p: Vec<&str> = h.strip_prefix("www.").unwrap_or(&h).split('.').collect();
+    let n = if p.len() > 2 && p[p.len() - 1].len() == 2 && SECOND.contains(&p[p.len() - 2]) { 3 } else { 2 };
+    p[p.len().saturating_sub(n)..].join(".")
 }
 
 #[cfg(test)]

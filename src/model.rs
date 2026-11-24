@@ -111,6 +111,10 @@ pub struct Message {
     /// A draft an AI agent wrote: the writing window warns to check it before sending.
     #[serde(default, skip_serializing_if = "is_false")]
     pub ai: bool,
+    /// What the receiving server found of the sender's SPF, DKIM and DMARC ("spf=pass dkim=none
+    /// dmarc=fail", see `phish::auth_results`); empty for older mail and mail without the header.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub auth: String,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -145,6 +149,7 @@ impl Message {
             snippet: String::new(),
             on_disk: false,
             ai: false,
+            auth: String::new(),
         }
     }
 }
@@ -562,6 +567,7 @@ impl Store {
                 snippet: String::new(),
                 on_disk: false,
                 ai: false,
+                auth: String::new(),
             });
         }
 
