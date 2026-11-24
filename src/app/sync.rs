@@ -870,31 +870,15 @@ specjalista ds. Informatyki".into();
                     }
                     // Finding messages already here: by server number, or by subject + sender + date.
                     // Looked up in a table instead of going through the whole mailbox each time.
-                    let fp = |subject: &str, from: &str, date: &NaiveDateTime| {
-                        use std::hash::{Hash, Hasher};
-                        let mut h = std::collections::hash_map::DefaultHasher::new();
-                        (subject, from, date).hash(&mut h);
-                        h.finish()
-                    };
                     let mut by_uid: HashMap<u32, usize> = HashMap::new();
-                    let mut by_key: HashMap<u64, usize> = HashMap::new();
                     for (i, x) in self.store.messages.iter().enumerate() {
                         if x.folder == f && x.account == acct {
                             if let Some(u) = x.uid {
                                 by_uid.insert(u, i);
                             }
                         }
-                        // sent mail is matched with sent mail, the bin and spam with themselves,
-                        // the inbox with everything received (also what is on its way to the bin)
-                        let same = x.account == acct && match f {
-                            Folder::Sent => x.folder == Folder::Sent,
-                            Folder::Trash | Folder::Junk => x.folder == f,
-                            _ => x.folder != Folder::Sent,
-                        };
-                        if same {
-                            by_key.insert(fp(&x.subject, &x.from_addr, &x.date), i);
-                        }
                     }
+                    let mut by_key = copies_by_fingerprint(&self.store.messages, acct, f);
                     let mut added = 0;
                     // new unread mail in the inbox (not the first download, not older mail coming in)
                     let tell = f == Folder::Inbox && !backfill && !by_uid.is_empty();
@@ -903,8 +887,8 @@ specjalista ds. Informatyki".into();
                     for mut m in sync.new {
                         m.folder = f;
                         m.account = acct;
-                        let key = fp(&m.subject, &m.from_addr, &m.date);
-                        let mut found = m.uid.and_then(|u| by_uid.get(&u).copied()).or_else(|| by_key.get(&key).copied());
+                        let key = fingerprint(&m.subject, &m.from_addr, &m.date);
+                        let mut found = m.uid.and_then(|u| by_uid.get(&u).copied()).or_else(|| by_key.get_mut(&key).and_then(|v| v.pop()));
                         if found.is_none() && f == Folder::Sent {
                             // sent from this app: the copy here has no server number yet and a
                             // time a moment different from the server's; same subject, a few minutes apart
@@ -961,8 +945,9 @@ specjalista ds. Informatyki".into();
                             let i = self.store.messages.len();
                             if let Some(u) = m.uid {
                                 by_uid.insert(u, i);
+                            } else {
+                                by_key.entry(key).or_default().push(i);
                             }
-                            by_key.insert(key, i);
                             if tell && !m.read && m.date >= recent {
                                 fresh.push(m.id);
                             }
@@ -1248,6 +1233,36 @@ pub(super) fn autoresponder_replies(map: &HashMap<String, Vec<u64>>, info: &Topi
 
 /// After reading the mailbox: the saved password back in memory, and message texts that older
 /// versions kept in separate files.
+/// What sync recognizes a message by when its server number is not known here: subject, sender, date.
+pub(super) fn fingerprint(subject: &str, from: &str, date: &NaiveDateTime) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (subject, from, date).hash(&mut h);
+    h.finish()
+}
+
+/// The copies here a message of the server's folder `f` may be, by fingerprint: sent mail among
+/// sent mail, the bin and spam among themselves, the inbox among everything received (also what
+/// is on its way to the bin). Only copies without a server number (just moved, or the folder was
+/// renumbered): one with its number is found by it alone, so another message with the same
+/// subject, sender and date never takes it over. Each copy is to be taken once (`pop`), so two
+/// such messages never merge into one.
+pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) -> HashMap<u64, Vec<usize>> {
+    let mut by_key: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, x) in messages.iter().enumerate() {
+        let same = x.account == acct
+            && match f {
+                Folder::Sent => x.folder == Folder::Sent,
+                Folder::Trash | Folder::Junk => x.folder == f,
+                _ => x.folder != Folder::Sent,
+            };
+        if same && x.uid.is_none() {
+            by_key.entry(fingerprint(&x.subject, &x.from_addr, &x.date)).or_default().push(i);
+        }
+    }
+    by_key
+}
+
 pub(super) fn prepare_store(store: &mut Store) {
     if store.account.password.is_empty() {
         if let Some(p) = crate::secret::unprotect(&store.account.password_saved) {

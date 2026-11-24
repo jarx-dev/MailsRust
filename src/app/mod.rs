@@ -2135,6 +2135,33 @@ mod tests {
         assert!(!moves_on_server(Archive, Inbox) && !moves_on_server(Inbox, Sent) && !moves_on_server(Drafts, Trash) && !moves_on_server(Inbox, Inbox));
     }
 
+    /// A message of the server is recognized by subject, sender and date only among copies
+    /// without a server number: one with its number is never taken over by another message
+    /// with the same three, and two such messages never merge into one copy.
+    #[test]
+    fn fingerprint_takes_only_copies_without_a_number() {
+        use super::sync::{copies_by_fingerprint, fingerprint};
+        use crate::model::{Folder::*, Message};
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 24).unwrap().and_hms_opt(9, 30, 0).unwrap();
+        let msg = |folder, uid| Message { folder, uid, date, subject: "Faktura".into(), from_addr: "a@example.com".into(), ..Message::blank() };
+        // 0: in the bin with its number; 1, 2: just moved to the bin; 3: sent mail; 4: another account
+        let mut other = msg(Trash, None);
+        other.account = 1;
+        let here = vec![msg(Trash, Some(7)), msg(Trash, None), msg(Trash, None), msg(Sent, None), other];
+        let key = fingerprint("Faktura", "a@example.com", &date);
+        let mut bin = copies_by_fingerprint(&here, 0, Trash);
+        let mut found = bin.get(&key).cloned().unwrap();
+        found.sort();
+        assert_eq!(found, vec![1, 2]);
+        // taken one by one: a third message with the same fingerprint finds nothing left
+        let v = bin.get_mut(&key).unwrap();
+        let (a, b) = (v.pop(), v.pop());
+        assert!(a.is_some() && b.is_some() && a != b && v.pop().is_none());
+        // the inbox looks at everything received (the bin too), sent mail only at sent mail
+        assert_eq!(copies_by_fingerprint(&here, 0, Inbox).get(&key).map(Vec::len), Some(2));
+        assert_eq!(copies_by_fingerprint(&here, 0, Sent).get(&key).cloned(), Some(vec![3]));
+    }
+
     /// A new folder needs a name of its own: not empty, not the favourites, not one already
     /// there in another letter case.
     #[test]
