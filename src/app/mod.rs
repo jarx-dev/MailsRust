@@ -356,6 +356,11 @@ pub struct MailApp {
     show_translated: HashSet<u64>,
     translating: HashMap<u64, Receiver<Result<String, String>>>,
     translate_error: Option<(u64, String)>,
+    /// phishing checks by AI on their way and done (see `crate::phish`), and the sites of links
+    /// that show one address and open another, as each email's page found them
+    phish_checking: HashMap<u64, Receiver<crate::phish::Check>>,
+    phish_checks: HashMap<u64, crate::phish::Check>,
+    links_elsewhere: HashMap<u64, Vec<String>>,
     list_rect: Option<egui::Rect>,
     label_filter: String,
     tags_open: bool,
@@ -657,6 +662,9 @@ impl MailApp {
             show_translated: HashSet::new(),
             translating: HashMap::new(),
             translate_error: None,
+            phish_checking: HashMap::new(),
+            phish_checks: HashMap::new(),
+            links_elsewhere: HashMap::new(),
             list_rect: None,
             label_filter: String::new(),
             tags_open: true,
@@ -1289,6 +1297,9 @@ tel.: 600-100-200".into();
             self.translate_error = None;
             self.mail_view.reload();
         }
+        // (the model's reasons are in the old language too)
+        self.phish_checks.clear();
+        self.phish_checking.clear();
         self.save_now = true;
         self.ctx.request_repaint();
     }
@@ -1734,6 +1745,21 @@ impl eframe::App for MailApp {
             }
             self.touched = true;
         }
+        let checked: Vec<(u64, crate::phish::Check)> = self.phish_checking.iter().filter_map(|(id, rx)| rx.try_recv().ok().map(|r| (*id, r))).collect();
+        for (id, mut c) in checked {
+            self.phish_checking.remove(&id);
+            if c.verdict.is_err() {
+                // (only that it failed: a proxy's error can quote the request, i.e. the email)
+                crate::diag::log("phishing check failed");
+            }
+            // a header read before stays when this time it could not be read
+            if c.auth.is_empty() {
+                if let Some(old) = self.phish_checks.get(&id) {
+                    c.auth = old.auth.clone();
+                }
+            }
+            self.phish_checks.insert(id, c);
+        }
         self.update_badges(frame);
         if std::env::var("POCZTA_START").as_deref() == Ok("google-scopes") && self.loading.is_none() && self.store.account.oauth_scopes.is_empty() {
             // test picture: signed in with Google for the mail only (calendar and contacts not allowed yet)
@@ -1743,6 +1769,23 @@ impl eframe::App for MailApp {
             a.oauth_client_id = "test.apps.googleusercontent.com".into();
             a.email = "jan.kowalski@example.com".into();
             a.oauth_scopes = "https://mail.google.com/ openid email profile".into();
+        }
+        if self.shot.is_some() && std::env::var("POCZTA_START").as_deref() == Ok("phish") && self.loading.is_none() {
+            // test picture: a fake bank email, what the app found and the AI's answer (no network)
+            if let Some(id) = self.selected.filter(|id| !self.phish_checks.contains_key(id)) {
+                if let Some(m) = self.msg_mut(id) {
+                    m.from_name = "PayPal service@paypal.com".into();
+                    m.from_addr = "security@paypa1-verify.example".into();
+                    m.auth = "spf=fail dkim=none dmarc=fail".into();
+                }
+                let reasons = if crate::i18n::is_pl() {
+                    vec!["Nadawca podszywa się pod PayPal z obcej domeny".to_string(), "Presja czasu: „konto zostanie zablokowane w 24 godziny”".to_string()]
+                } else {
+                    vec!["The sender poses as PayPal from another domain".to_string(), "Time pressure: “your account will be locked in 24 hours”".to_string()]
+                };
+                let verdict = Ok(crate::phish::Verdict { level: crate::phish::Level::Phishing, reasons });
+                self.phish_checks.insert(id, crate::phish::Check { auth: String::new(), injected: false, verdict });
+            }
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("translate") && self.loading.is_none() && self.clock() > 3.0 {
             use std::sync::atomic::{AtomicBool, Ordering};

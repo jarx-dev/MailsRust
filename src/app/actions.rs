@@ -26,6 +26,8 @@ pub(super) enum Action {
     SendAgain(u64),
     /// a received message translated into Polish by AI (or back to the original)
     Translate(u64),
+    /// a received message checked by AI for phishing (`crate::phish`)
+    CheckPhishing(u64),
     /// marked as needing no reply (or back), for the list without replies
     NoReplyNeeded(u64, bool),
     NewMessage,
@@ -381,6 +383,46 @@ impl MailApp {
                     });
                     self.translating.insert(id, rx);
                     self.translate_error = None;
+                }
+                Action::CheckPhishing(id) => {
+                    if self.phish_checking.contains_key(&id) {
+                        continue;
+                    }
+                    self.ensure_body(id);
+                    let Some(mut m) = self.msg(id).cloned() else { continue };
+                    if m.partial {
+                        // only the header is here: the whole message is fetched first and the
+                        // person asks again once it is in; when it cannot be had (spam, the bin,
+                        // offline, or a try that already failed) what there is gets judged
+                        let key = m.uid.map(|u| (m.account, m.folder, u));
+                        let failed_before = key.is_some_and(|k| self.fetching_full.get(&k) == Some(&true));
+                        if !failed_before {
+                            self.fetch_full_if_partial(id, true);
+                        }
+                        if key.is_some_and(|k| self.fetching_full.get(&k) == Some(&false)) {
+                            self.set_status(t!("mail.reading.downloading_full"));
+                            continue;
+                        }
+                    }
+                    // (a .eml file's own Authentication-Results were not written by our server)
+                    if m.id >= FILE_IDS {
+                        m.auth.clear();
+                    }
+                    let html_path = m.html_path.clone();
+                    // the header from the server (the checks of older mail, Reply-To, Return-Path)
+                    let acc = m.uid.filter(|_| m.folder == Folder::Inbox && m.id < FILE_IDS).map(|uid| (self.account_for(m.account), uid));
+                    let own = self.account_ref(m.account).email.clone();
+                    let links = self.links_elsewhere.get(&id).cloned().unwrap_or_default();
+                    let (tx, rx) = channel();
+                    let ctx = self.ctx.clone();
+                    let pl = crate::i18n::is_pl();
+                    std::thread::spawn(move || {
+                        let html = (!html_path.is_empty()).then(|| std::fs::read_to_string(&html_path).ok()).flatten();
+                        let head = acc.and_then(|(a, uid)| crate::net::fetch_header(&a, uid).map_err(|e| crate::diag::log(format!("phishing check: no header ({e})"))).ok());
+                        let _ = tx.send(crate::phish::check(&crate::ai::load(), &m, head, html, &own, &links, pl));
+                        ctx.request_repaint();
+                    });
+                    self.phish_checking.insert(id, rx);
                 }
                 Action::NoReplyNeeded(id, on) => {
                     // the message to show next in the list without replies (worked out while it is still there)

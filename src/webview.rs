@@ -7,6 +7,18 @@ use crate::model::Message;
 use eframe::egui;
 use wry::WebViewBuilderExtWindows;
 
+/// The pointer on a link (or a linked picture) shows where it really goes, in the corner as
+/// in Edge: wry turns that bar off, and without it a fake bank email cannot be checked.
+fn show_link_targets(view: &wry::WebView) {
+    #[cfg(windows)]
+    unsafe {
+        use wry::WebViewExtWindows;
+        if let Ok(s) = view.webview().Settings() {
+            let _ = s.SetIsStatusBarEnabled(true);
+        }
+    }
+}
+
 /// A picture (PNG) of what a browser view shows; `done` gets it (on this thread, later).
 pub fn capture_png(view: &wry::WebView, done: impl FnOnce(Vec<u8>) + 'static) -> bool {
     #[cfg(windows)]
@@ -208,6 +220,7 @@ pub fn standalone(hwnd: isize, m: &Message, rect: egui::Rect) -> Result<(wry::We
         })
         .build_as_child(&crate::compose_view::Parent(hwnd))
         .map_err(|e| e.to_string())?;
+    show_link_targets(&view);
     Ok((view, context))
 }
 
@@ -343,7 +356,8 @@ fn prepare(m: &Message) -> Option<String> {
         }
     }
     // The page's own script also marks a link whose text is one web address while it opens
-    // another site (the usual trick of a fake bank email): the real site is written after it.
+    // another site (the usual trick of a fake bank email): the real site is written after it,
+    // and the app is told those sites ("elsewhere:<message id>:<sites>") for its warning bar.
     // shortcut: "the same site" is the last two names of the address (three for co.uk, com.pl
     // and the like), not the public suffix list; upgrade if it marks or misses real cases.
     let head = "<base target=\"_blank\"><meta name=\"color-scheme\" content=\"light\">\
@@ -355,14 +369,15 @@ fn prepare(m: &Message) -> Option<String> {
         <script nonce=\"PZ-NONCE\">document.addEventListener('load',function(e){var t=e.target;\
         if(t&&t.tagName==='LINK'&&t.hasAttribute('data-pz-late'))t.media='all';},true);\
         document.addEventListener('DOMContentLoaded',function(){\
-        var site=function(h){var p=h.toLowerCase().replace(/^www\\./,'').split('.');\
+        var hs=[],site=function(h){var p=h.toLowerCase().replace(/^www\\./,'').split('.');\
         var n=p.length>2&&p[p.length-1].length===2&&/^(co|com|org|net|gov|edu|ac|or|ne|go|gob|mil|nom)$/.test(p[p.length-2])?3:2;return p.slice(-n).join('.')};\
         document.querySelectorAll('a[href]').forEach(function(a){if(!/^https?:$/.test(a.protocol))return;\
         var m=/^(https?:\\/\\/|www\\.)?((?:[a-z0-9-]+\\.)+([a-z]{2,}))(?:[\\/:?#]|$)/i.exec(a.textContent.trim());\
         if(!m||(!m[1]&&/^(pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|gif|html?|txt|csv|ics|eml|exe|php|aspx?|js)$/i.test(m[3])))return;\
         if(site(m[2])===site(a.hostname))return;\
         var w=document.createElement('span');w.className='pz-warn';w.textContent=' \\u26a0 '+a.hostname;\
-        w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);});});\
+        w.title='PZ-ELSEWHERE'.replace('%{host}',a.hostname);a.after(w);if(hs.indexOf(a.hostname)<0)hs.push(a.hostname);});\
+        if(hs.length)try{chrome.webview.postMessage('elsewhere:PZ-ID:'+hs.slice(0,5).join(' '))}catch(e){}});\
         document.addEventListener('keydown',function(e){var t=e.target;\
         if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;\
         if(e.key==='Delete'&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();try{chrome.webview.postMessage('delete')}catch(e){}}},true);\
@@ -382,6 +397,7 @@ fn prepare(m: &Message) -> Option<String> {
         format!("{head}{dark_css}")
     }
     .replace("PZ-NONCE", &nonce)
+    .replace("PZ-ID", &m.id.to_string())
     .replace("PZ-ELSEWHERE", &t!("mail.reading.link_goes_elsewhere", host = "%{host}").replace('\\', "\\\\").replace('\'', "\\'"));
     // (ahead of the email's own <head>, which the browser then joins to it: a "<head>" written
     // inside a comment can no longer swallow the app's script)
@@ -540,6 +556,7 @@ impl MailView {
             })
             .build_as_child(frame)
             .map_err(|e| e.to_string())?;
+        show_link_targets(&built);
         // A key pressed inside the email (see the page's little script) comes as a message only
         // a script on the page can send, and the email's own scripts are refused (an address
         // the email could write itself, `poczta-key://delete` in a link or a refresh, deleted
