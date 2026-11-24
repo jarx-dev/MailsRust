@@ -888,7 +888,7 @@ specjalista ds. Informatyki".into();
                         m.folder = f;
                         m.account = acct;
                         let key = fingerprint(&m.subject, &m.from_addr, &m.date);
-                        let mut found = m.uid.and_then(|u| by_uid.get(&u).copied()).or_else(|| by_key.get_mut(&key).and_then(|v| v.pop()));
+                        let mut found = m.uid.and_then(|u| by_uid.get(&u).copied()).or_else(|| by_key.get_mut(&key).and_then(|v| take_copy(&self.store.messages, v, &m)));
                         if found.is_none() && f == Folder::Sent {
                             // sent from this app: the copy here has no server number yet and a
                             // time a moment different from the server's; same subject, a few minutes apart
@@ -909,6 +909,9 @@ specjalista ds. Informatyki".into();
                             }
                             if old.folder == f {
                                 old.uid = m.uid;
+                                if let Some(u) = m.uid {
+                                    by_uid.insert(u, i);
+                                }
                             }
                             // (only the same message by its number: one matched by subject and date
                             // could be another one's results)
@@ -1231,8 +1234,6 @@ pub(super) fn autoresponder_replies(map: &HashMap<String, Vec<u64>>, info: &Topi
     automatic
 }
 
-/// After reading the mailbox: the saved password back in memory, and message texts that older
-/// versions kept in separate files.
 /// What sync recognizes a message by when its server number is not known here: subject, sender, date.
 pub(super) fn fingerprint(subject: &str, from: &str, date: &NaiveDateTime) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -1242,11 +1243,11 @@ pub(super) fn fingerprint(subject: &str, from: &str, date: &NaiveDateTime) -> u6
 }
 
 /// The copies here a message of the server's folder `f` may be, by fingerprint: sent mail among
-/// sent mail, the bin and spam among themselves, the inbox among everything received (also what
-/// is on its way to the bin). Only copies without a server number (just moved, or the folder was
-/// renumbered): one with its number is found by it alone, so another message with the same
-/// subject, sender and date never takes it over. Each copy is to be taken once (`pop`), so two
-/// such messages never merge into one.
+/// sent mail, the bin and spam among themselves, the inbox among the inbox, the bin and spam
+/// (also what is on its way to the bin; the archive, drafts and outbox keep their copies without
+/// a number for good and would hide new mail). Only copies without a server number (just moved,
+/// or the folder was renumbered): one with its number is found by it alone, so another message
+/// with the same subject, sender and date never takes it over. Taken with `take_copy`.
 pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) -> HashMap<u64, Vec<usize>> {
     let mut by_key: HashMap<u64, Vec<usize>> = HashMap::new();
     for (i, x) in messages.iter().enumerate() {
@@ -1254,7 +1255,7 @@ pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) 
             && match f {
                 Folder::Sent => x.folder == Folder::Sent,
                 Folder::Trash | Folder::Junk => x.folder == f,
-                _ => x.folder != Folder::Sent,
+                _ => matches!(x.folder, Folder::Inbox | Folder::Trash | Folder::Junk),
             };
         if same && x.uid.is_none() {
             by_key.entry(fingerprint(&x.subject, &x.from_addr, &x.date)).or_default().push(i);
@@ -1263,6 +1264,27 @@ pub(super) fn copies_by_fingerprint(messages: &[Message], acct: u32, f: Folder) 
     by_key
 }
 
+/// Which of the copies with `m`'s fingerprint it is, taken off the list so no other message gets
+/// it too (nor one that got a number meanwhile): the only one left, or of several the one that
+/// starts with the same text; none when that doesn't tell them apart (a second copy beats
+/// giving one message another one's number).
+pub(super) fn take_copy(messages: &[Message], copies: &mut Vec<usize>, m: &Message) -> Option<usize> {
+    copies.retain(|&i| messages[i].uid.is_none());
+    let k = if copies.len() == 1 {
+        0
+    } else {
+        let start = |x: &Message| x.preview().chars().take(100).collect::<String>();
+        let text = start(m);
+        if text.trim().is_empty() {
+            return None;
+        }
+        copies.iter().position(|&i| start(&messages[i]) == text)?
+    };
+    Some(copies.swap_remove(k))
+}
+
+/// After reading the mailbox: the saved password back in memory, and message texts that older
+/// versions kept in separate files.
 pub(super) fn prepare_store(store: &mut Store) {
     if store.account.password.is_empty() {
         if let Some(p) = crate::secret::unprotect(&store.account.password_saved) {

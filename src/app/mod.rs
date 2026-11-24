@@ -2137,28 +2137,44 @@ mod tests {
 
     /// A message of the server is recognized by subject, sender and date only among copies
     /// without a server number: one with its number is never taken over by another message
-    /// with the same three, and two such messages never merge into one copy.
+    /// with the same three, two such messages never merge into one copy, and of several copies
+    /// only the one with the same text is taken.
     #[test]
     fn fingerprint_takes_only_copies_without_a_number() {
-        use super::sync::{copies_by_fingerprint, fingerprint};
+        use super::sync::{copies_by_fingerprint, fingerprint, take_copy};
         use crate::model::{Folder::*, Message};
         let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 24).unwrap().and_hms_opt(9, 30, 0).unwrap();
-        let msg = |folder, uid| Message { folder, uid, date, subject: "Faktura".into(), from_addr: "a@example.com".into(), ..Message::blank() };
-        // 0: in the bin with its number; 1, 2: just moved to the bin; 3: sent mail; 4: another account
-        let mut other = msg(Trash, None);
+        let msg = |folder, uid, body: &str| Message { folder, uid, date, subject: "Faktura".into(), from_addr: "a@example.com".into(), body: body.into(), ..Message::blank() };
+        // 0: in the bin with its number; 1, 2: just moved to the bin; 3: sent mail; 4: another
+        // account; 5: archived (no number for good)
+        let mut other = msg(Trash, None, "");
         other.account = 1;
-        let here = vec![msg(Trash, Some(7)), msg(Trash, None), msg(Trash, None), msg(Sent, None), other];
+        let mut here = vec![msg(Trash, Some(7), "A"), msg(Trash, None, "B"), msg(Trash, None, "C"), msg(Sent, None, ""), other, msg(Archive, None, "D")];
         let key = fingerprint("Faktura", "a@example.com", &date);
         let mut bin = copies_by_fingerprint(&here, 0, Trash);
         let mut found = bin.get(&key).cloned().unwrap();
         found.sort();
         assert_eq!(found, vec![1, 2]);
-        // taken one by one: a third message with the same fingerprint finds nothing left
+        // of the two, the one with the same text; a text neither has (or none) takes nothing
         let v = bin.get_mut(&key).unwrap();
-        let (a, b) = (v.pop(), v.pop());
-        assert!(a.is_some() && b.is_some() && a != b && v.pop().is_none());
-        // the inbox looks at everything received (the bin too), sent mail only at sent mail
-        assert_eq!(copies_by_fingerprint(&here, 0, Inbox).get(&key).map(Vec::len), Some(2));
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(9), "C")), Some(2));
+        here[2].uid = Some(9);
+        // the one left is taken once, then nothing is left for a third message
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(8), "B")), Some(1));
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(10), "B")), None);
+        let mut two = vec![1, 3];
+        here[1].uid = None;
+        here[3].folder = Trash;
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "E")), None);
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "")), None);
+        // a copy that got its number meanwhile is never taken
+        here[3].uid = Some(12);
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "E")), Some(1));
+        // the inbox looks at the inbox, the bin and spam (not the archive); sent mail at sent mail
+        let here = vec![msg(Trash, None, ""), msg(Junk, None, ""), msg(Archive, None, ""), msg(Sent, None, ""), msg(Inbox, None, "")];
+        let mut inbox = copies_by_fingerprint(&here, 0, Inbox).remove(&key).unwrap();
+        inbox.sort();
+        assert_eq!(inbox, vec![0, 1, 4]);
         assert_eq!(copies_by_fingerprint(&here, 0, Sent).get(&key).cloned(), Some(vec![3]));
     }
 
