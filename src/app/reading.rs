@@ -715,7 +715,12 @@ impl MailApp {
                     if icon(ui, 8, ic::DELETE, &t!("mail.reading.delete_tip")).clicked() {
                         self.actions.push(Action::Delete(mid));
                     }
-                    if icon(ui, 9, ic::ARCHIVE, &t!("mail.reading.archive")).clicked() {
+                    if m.folder == Folder::Trash {
+                        // (archiving from the bin means nothing to the server: back to the inbox instead)
+                        if icon(ui, 9, ic::UNDO, &t!("mail.reading.restore")).clicked() {
+                            self.actions.push(Action::Move(mid, Folder::Inbox));
+                        }
+                    } else if icon(ui, 9, ic::ARCHIVE, &t!("mail.reading.archive")).clicked() {
                         self.actions.push(Action::Move(mid, Folder::Archive));
                     }
                     if icon(ui, 7, ic::FLAG, &if flagged { t!("mail.reading.remove_flag") } else { t!("mail.reading.flag") }).clicked() {
@@ -1157,6 +1162,7 @@ impl MailApp {
         self.touched = true;
         if self.can_connect() {
             self.busy += 1;
+            self.sending.insert(id);
             net::send(acc, out, self.tx.clone(), self.ctx.clone());
             self.set_status(t!("compose.status.sending"));
         } else {

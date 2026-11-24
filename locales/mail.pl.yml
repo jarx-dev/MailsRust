@@ -21,6 +21,7 @@ mail:
     more: "Więcej"
     delete_tip: "Usuń (Delete)"
     archive: "Archiwum"
+    restore: "Przywróć do Odebranych"
     flag: "Oznacz"
     mark_unread: "Oznacz jako nieprzeczytaną"
     mark_read: "Oznacz jako przeczytaną"

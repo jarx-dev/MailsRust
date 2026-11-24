@@ -1411,6 +1411,7 @@ Wpisy są **gotowe** i *sprawdzone*:
             if o == "send" {
                 if can_send {
                     self.busy += 1;
+                    self.sending.insert(id);
                     net::send(acc, Outgoing { id, to: c.to, cc: c.cc, subject: c.subject, body: c.body, html, inline, files: c.files }, self.tx.clone(), self.ctx.clone());
                     self.set_status(t!("compose.status.sending"));
                 } else {

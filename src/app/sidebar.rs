@@ -357,6 +357,12 @@ impl MailApp {
                             self.actions.push(Action::Delete(id));
                         }
                     }
+                    // a message of the bin: back into the inbox
+                    if let Some(id) = self.selected.filter(|id| self.msg(*id).is_some_and(|m| m.folder == Folder::Trash)) {
+                        if tool_button(ui, ic::UNDO, &l(t!("ui.sidebar.toolbar.restore_mail").into_owned()), true) {
+                            self.actions.push(Action::Move(id, Folder::Inbox));
+                        }
+                    }
                     // (the rest of what to do with a message sits on the open message itself)
                 }
                 Module::Contacts => {}

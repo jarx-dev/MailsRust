@@ -471,6 +471,8 @@ pub struct MailApp {
     watch: Vec<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<net::Watched>)>,
     /// the server said something changed: fetch as soon as the current work is done
     watch_due: bool,
+    /// messages of the outbox handed to the server and not answered yet (never sent twice)
+    sending: HashSet<u64>,
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it
     gcal_text: String,
     gcal_loaded: bool,
@@ -718,6 +720,7 @@ impl MailApp {
             },
             watch: Vec::new(),
             watch_due: false,
+            sending: HashSet::new(),
             gcal_text: String::new(),
             gcal_loaded: false,
             gcal_rx: None,
@@ -1024,6 +1027,16 @@ tel.: 600-100-200".into();
             app.selected = app.visible_ids().first().copied();
             if let Some(id) = app.selected {
                 app.actions.push(Action::Delete(id));
+            }
+        }
+        if matches!(std::env::var("POCZTA_START").as_deref(), Ok("trash") | Ok("trash-restore")) {
+            // test picture: a message of the bin open (Przywróć on the bar and on the message);
+            // with "trash-restore" it is restored at once and the bin shows the next one
+            app.view = MailView::Folder(Folder::Trash);
+            app.selected = None;
+            app.selected = app.visible_ids().first().copied();
+            if let Some(id) = app.selected.filter(|_| std::env::var("POCZTA_START").as_deref() == Ok("trash-restore")) {
+                app.actions.push(Action::Move(id, Folder::Inbox));
             }
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("thread-later") {
@@ -2124,6 +2137,62 @@ mod tests {
         use crate::model::Folder::*;
         assert!(moves_on_server(Inbox, Archive) && moves_on_server(Inbox, Trash) && moves_on_server(Junk, Inbox) && moves_on_server(Sent, Trash) && moves_on_server(Sent, Junk));
         assert!(!moves_on_server(Archive, Inbox) && !moves_on_server(Inbox, Sent) && !moves_on_server(Drafts, Trash) && !moves_on_server(Inbox, Inbox));
+    }
+
+    /// A message of the server is recognized by subject, sender and date only among copies
+    /// without a server number: one with its number is never taken over by another message
+    /// with the same three, two such messages never merge into one copy, and of several copies
+    /// only the one with the same text is taken.
+    #[test]
+    fn fingerprint_takes_only_copies_without_a_number() {
+        use super::sync::{copies_by_fingerprint, fingerprint, take_copy};
+        use crate::model::{Folder::*, Message};
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 24).unwrap().and_hms_opt(9, 30, 0).unwrap();
+        let msg = |folder, uid, body: &str| Message { folder, uid, date, subject: "Faktura".into(), from_addr: "a@example.com".into(), body: body.into(), ..Message::blank() };
+        // 0: in the bin with its number; 1, 2: just moved to the bin; 3: sent mail; 4: another
+        // account; 5: archived (no number for good)
+        let mut other = msg(Trash, None, "");
+        other.account = 1;
+        let mut here = vec![msg(Trash, Some(7), "A"), msg(Trash, None, "B"), msg(Trash, None, "C"), msg(Sent, None, ""), other, msg(Archive, None, "D")];
+        let key = fingerprint("Faktura", "a@example.com", &date);
+        let mut bin = copies_by_fingerprint(&here, 0, Trash, false);
+        let mut found = bin.get(&key).cloned().unwrap();
+        found.sort();
+        assert_eq!(found, vec![1, 2]);
+        // of the two, the one with the same text; a text neither has (or none) takes nothing
+        let v = bin.get_mut(&key).unwrap();
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(9), "C")), Some(2));
+        here[2].uid = Some(9);
+        // the one left is taken once, then nothing is left for a third message
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(8), "B")), Some(1));
+        assert_eq!(take_copy(&here, v, &msg(Trash, Some(10), "B")), None);
+        let mut two = vec![1, 3];
+        here[1].uid = None;
+        here[3].folder = Trash;
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "E")), None);
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "")), None);
+        // a copy that got its number meanwhile is never taken
+        here[3].uid = Some(12);
+        assert_eq!(take_copy(&here, &mut two, &msg(Trash, Some(11), "E")), Some(1));
+        // the same start of text: the attachments tell them apart, or nothing is taken; a copy
+        // whose text is on disk (only its start kept) is compared by that start
+        let long = "Dzień dobry, w załączniku przesyłamy fakturę za listopad. ".repeat(4);
+        let with = |files: &[&str]| Message { attachments: files.iter().map(|s| s.to_string()).collect(), ..msg(Trash, None, &long) };
+        let mut on_disk = with(&["a.pdf"]);
+        on_disk.snippet = crate::model::snippet_of(&on_disk.body);
+        on_disk.body.clear();
+        let twins = vec![on_disk, with(&["b.pdf"])];
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["b.pdf"]) }), Some(1));
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["a.pdf"]) }), Some(0));
+        assert_eq!(take_copy(&twins, &mut vec![0, 1], &Message { uid: Some(20), ..with(&["c.pdf"]) }), None);
+        // the inbox looks at the inbox, the bin and spam (the archive only while a move is on its
+        // way to the server); sent mail at sent mail
+        let here = vec![msg(Trash, None, ""), msg(Junk, None, ""), msg(Archive, None, ""), msg(Sent, None, ""), msg(Inbox, None, "")];
+        let mut inbox = copies_by_fingerprint(&here, 0, Inbox, false).remove(&key).unwrap();
+        inbox.sort();
+        assert_eq!(inbox, vec![0, 1, 4]);
+        assert_eq!(copies_by_fingerprint(&here, 0, Inbox, true).get(&key).map(Vec::len), Some(4));
+        assert_eq!(copies_by_fingerprint(&here, 0, Sent, false).get(&key).cloned(), Some(vec![3]));
     }
 
     /// A new folder needs a name of its own: not empty, not the favourites, not one already
