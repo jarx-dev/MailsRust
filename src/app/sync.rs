@@ -581,14 +581,16 @@ specjalista ds. Informatyki".into();
             });
             return;
         }
-        // waiting messages: their texts are read from disk before sending
-        let waiting: Vec<u64> = self.store.messages.iter().filter(|m| m.folder == Folder::Outbox).map(|m| m.id).collect();
+        // waiting messages: their texts are read from disk before sending (not one already on its
+        // way: sent again, it would reach the people twice)
+        let waiting: Vec<u64> = self.store.messages.iter().filter(|m| m.folder == Folder::Outbox && !self.sending.contains(&m.id)).map(|m| m.id).collect();
         for id in &waiting {
             self.ensure_body(*id);
         }
         let outbox: Vec<Message> = waiting.iter().filter_map(|id| self.msg(*id).cloned()).collect();
         for m in outbox {
             self.busy += 1;
+            self.sending.insert(m.id);
             net::send(
                 self.account_for(m.account),
                 Outgoing {
@@ -703,7 +705,7 @@ specjalista ds. Informatyki".into();
         // (what the waiting connections said was taken in by `watched`, earlier in this frame)
         if self.watch_due && !self.receiving && !self.ops_running && self.pending_ops.is_empty() {
             self.watch_due = false;
-            crate::diag::log("new mail reported by the server: fetching");
+            crate::diag::log("the server changed (new mail, or a move made here): fetching");
             self.quiet_sync = true;
             self.send_receive();
         } else if self.watch_due {
@@ -1035,6 +1037,7 @@ specjalista ds. Informatyki".into();
                     Err(e) => crate::diag::log(format!("copied people (DW) not read: {e}")),
                 },
                 NetResult::Sent { id } => {
+                    self.sending.remove(&id);
                     if let Some(m) = self.msg_mut(id) {
                         m.folder = Folder::Sent;
                         m.date = Local::now().naive_local();
@@ -1045,6 +1048,9 @@ specjalista ds. Informatyki".into();
                     self.ops_running = false;
                 }
                 NetResult::Failed { what, error, id } => {
+                    if let Some(id) = id {
+                        self.sending.remove(&id);
+                    }
                     if what == "Synchronizacja" {
                         self.ops_running = false;
                     }

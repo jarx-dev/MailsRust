@@ -463,6 +463,8 @@ pub struct MailApp {
     watch: Vec<(String, Arc<std::sync::atomic::AtomicBool>, Receiver<net::Watched>)>,
     /// the server said something changed: fetch as soon as the current work is done
     watch_due: bool,
+    /// messages of the outbox handed to the server and not answered yet (never sent twice)
+    sending: HashSet<u64>,
     /// Google Calendar: its addresses, the reading on its way, when it was read, what came of it
     gcal_text: String,
     gcal_loaded: bool,
@@ -706,6 +708,7 @@ impl MailApp {
             },
             watch: Vec::new(),
             watch_due: false,
+            sending: HashSet::new(),
             gcal_text: String::new(),
             gcal_loaded: false,
             gcal_rx: None,

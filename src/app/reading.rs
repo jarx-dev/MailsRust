@@ -1138,6 +1138,7 @@ impl MailApp {
         self.touched = true;
         if self.can_connect() {
             self.busy += 1;
+            self.sending.insert(id);
             net::send(acc, out, self.tx.clone(), self.ctx.clone());
             self.set_status(t!("compose.status.sending"));
         } else {

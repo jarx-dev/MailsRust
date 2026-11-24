@@ -219,9 +219,12 @@ impl MailApp {
                     }
                 }
                 Action::Move(id, f) => {
-                    // Out of the bin before the sync found it in the server's bin: moved here
-                    // alone, it would stay in the server's bin and come back with the next sync.
-                    if f == Folder::Inbox && self.msg(id).is_some_and(|m| m.folder == Folder::Trash && !self.drop_moves(m, f)) {
+                    // Out of the bin while the server's answer is on its way (the move into the
+                    // bin, or the sync that finds it there): moved here alone, it would stay in the
+                    // server's bin and come back with that sync. Otherwise (the move never reached
+                    // the server, a message of this computer only) the local move is right.
+                    let waiting = self.watch_due || self.receiving || self.ops_running || !self.pending_ops.is_empty();
+                    if f == Folder::Inbox && waiting && self.can_connect() && self.msg(id).is_some_and(|m| m.folder == Folder::Trash && m.uid.is_none() && self.account_ref(m.account).can_connect()) {
                         self.set_status(t!("ui.actions.restore_wait"));
                         self.watch_due = true;
                         continue;
