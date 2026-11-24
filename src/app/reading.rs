@@ -1165,6 +1165,32 @@ impl MailApp {
         true
     }
 
+    /// The person's addresses for `m`'s warning: the account's, and the alias its From was made of
+    /// (addy.io and the like) when a month of their own mail went to it (`phish::long_used`; worked
+    /// out once, a "no" again only when the mailbox has grown).
+    pub(super) fn my_addresses(&mut self, m: &Message) -> Vec<String> {
+        let mut mine = vec![self.account_ref(m.account).email.clone()];
+        if let Some(alias) = crate::phish::alias_of(&m.from_addr) {
+            let count = self.store.messages.len();
+            let known = match self.own_aliases.get(&alias) {
+                Some(&(at, yes)) if yes || at == count => yes,
+                _ => {
+                    // other received mail to that very address (not spam, not the bin)
+                    let sent_to = |x: &&Message| {
+                        x.id != m.id && !matches!(x.folder, Folder::Sent | Folder::Outbox | Folder::Drafts | Folder::Junk | Folder::Trash) && (crate::phish::addressed_to(&x.to, &alias) || crate::phish::addressed_to(&x.cc, &alias))
+                    };
+                    let yes = crate::phish::long_used(self.store.messages.iter().filter(sent_to).map(|m| m.date));
+                    self.own_aliases.insert(alias.clone(), (count, yes));
+                    yes
+                }
+            };
+            if known {
+                mine.push(alias);
+            }
+        }
+        mine
+    }
+
     /// The warning over an email that may not be from who it says (`crate::phish`): what the app
     /// found itself, the AI check on its way or done, and a way to ask for one. What the app
     /// found stays shown whatever the model says.
@@ -1172,10 +1198,12 @@ impl MailApp {
         if matches!(m.folder, Folder::Sent | Folder::Outbox | Folder::Drafts) {
             return;
         }
+        let mine = self.my_addresses(m);
+        let mine: Vec<&str> = mine.iter().map(String::as_str).collect();
         let check = self.phish_checks.get(&m.id);
         // (a .eml file's own Authentication-Results were not written by our server)
         let auth = if m.id >= FILE_IDS { "" } else { check.map(|c| c.auth.as_str()).filter(|a| !a.is_empty()).unwrap_or(&m.auth) };
-        let found = crate::phish::signals(m, auth, &self.account_ref(m.account).email);
+        let found = crate::phish::signals(m, auth, &mine);
         let weak = crate::phish::weak_signals(self.links_elsewhere.get(&m.id).map(Vec::as_slice).unwrap_or(&[]), check.is_some_and(|c| c.injected));
         let busy = self.phish_checking.contains_key(&m.id);
         if found.is_empty() && weak.is_empty() && check.is_none() && !busy {
