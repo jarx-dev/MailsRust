@@ -736,6 +736,13 @@ impl MailView {
         self.shown = None;
     }
 
+    /// Forget this message if it is the one shown (or kept while hidden): it changed.
+    pub fn forget(&mut self, id: u64) {
+        if self.shown == Some(id) {
+            self.shown = None;
+        }
+    }
+
     /// After switching the theme: the page background and the email shown again.
     pub fn retheme(&mut self) {
         self.shown = None;

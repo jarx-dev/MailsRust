@@ -1384,6 +1384,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         snippet: String::new(),
                         on_disk: false,
                         ai: false,
+                        ai_editable: false,
                         auth: String::new(),
                     });
                     id
@@ -1407,6 +1408,9 @@ Wpisy są **gotowe** i *sprawdzone*:
                 m.html_path = html_file.clone();
                 m.attachments = c.files.iter().map(|f| std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
                 m.attachment_files = c.files.clone();
+                // changed by the person (an untouched window closes without saving): AI agents may
+                // no longer rewrite it
+                m.ai_editable = false;
             }
             if o == "send" {
                 if can_send {

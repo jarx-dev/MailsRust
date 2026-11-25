@@ -186,13 +186,15 @@ pub struct Draft {
     pub reply_all: bool,
     /// a new email: the address of the account it goes from ("" for the main one)
     pub from: String,
+    /// an AI draft saved before, rewritten in place (keeps its number) instead of a new one
+    pub replace: Option<u64>,
     /// where the app says what it saved, or why it couldn't
     pub done: Option<Sender<Result<String, String>>>,
 }
 
 impl Draft {
     pub fn reply(id: u64, body: String) -> Self {
-        Draft { reply_to: Some(id), to: String::new(), cc: String::new(), subject: String::new(), body, reply_all: false, from: String::new(), done: None }
+        Draft { reply_to: Some(id), to: String::new(), cc: String::new(), subject: String::new(), body, reply_all: false, from: String::new(), replace: None, done: None }
     }
 }
 

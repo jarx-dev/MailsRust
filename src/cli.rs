@@ -754,7 +754,7 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
             }
             while let Ok(d) = drafts.try_recv() {
                 if let Some(tx) = d.done {
-                    let _ = tx.send(Ok(format!("saved: reply_to {:?}, to {:?}", d.reply_to, d.to)));
+                    let _ = tx.send(Ok(format!("saved: reply_to {:?}, to {:?}, replace {:?}", d.reply_to, d.to, d.replace)));
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -814,7 +814,9 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
         check(&format!("reply draft: {out}"), !err && out.contains(&format!("Some({id})")));
         check("new email without `to` refused", tool("create_draft", serde_json::json!({"body": "x"})).0);
         let (err, out) = tool("create_draft", serde_json::json!({"reply_to": "", "to": "anna@example.com", "subject": "Hej", "body": "Cześć"}));
-        check(&format!("new email draft (empty reply_to): {out}"), !err && out.contains("reply_to None"));
+        check(&format!("new email draft (empty reply_to): {out}"), !err && out.contains("reply_to None") && out.contains("replace None"));
+        let (err, out) = tool("create_draft", serde_json::json!({"replace": "77", "reply_to": id, "body": "Poprawione."}));
+        check(&format!("draft rewritten in place: {out}"), !err && out.contains("replace Some(77)"));
         check("show_in_poczta", !tool("show_in_poczta", serde_json::json!({"id": id})).0);
         // a link handed to an agent ends with its key
         let path = link.split_once("/m/").map(|x| format!("/m/{}", x.1)).unwrap_or_default();

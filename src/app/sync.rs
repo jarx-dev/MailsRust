@@ -191,6 +191,31 @@ specjalista ds. Informatyki".into();
                     sent.len(),
                     sent.iter().any(|(_, f)| f.to_ascii_lowercase().ends_with("win.ini"))
                 ));
+                // the agent rewrites its draft: same number, no second draft, the new text shown;
+                // a message that is not an AI draft is refused
+                if let Some(did) = said.as_ref().ok().and(self.store.messages.last()).map(|m| m.id) {
+                    let count = self.store.messages.len();
+                    let again = self.save_ai_draft(&crate::share::Draft { replace: Some(did), ..crate::share::Draft::reply(id, "**Rewritten** text".into()) });
+                    let m = self.msg(did);
+                    let html = m.map(|m| std::fs::read_to_string(&m.html_path).unwrap_or_default()).unwrap_or_default();
+                    let new_text = html.contains("<strong>Rewritten</strong>") && m.is_some_and(|m| m.body.starts_with("**Rewritten** text"));
+                    let refused = self.save_ai_draft(&crate::share::Draft { replace: Some(id), ..crate::share::Draft::reply(id, "x".into()) }).is_err();
+                    // (the writing window is only listed, never drawn: it is taken away at once)
+                    self.open_composer(String::new(), String::new(), String::new(), String::new(), Some(did), None);
+                    let open_refused = self.save_ai_draft(&crate::share::Draft { replace: Some(did), ..crate::share::Draft::reply(id, "x".into()) }).is_err();
+                    self.composers.pop();
+                    if let Some(m) = self.msg_mut(did) {
+                        m.ai_editable = false;
+                    }
+                    let changed_refused = self.save_ai_draft(&crate::share::Draft { replace: Some(did), ..crate::share::Draft::reply(id, "x".into()) }).is_err();
+                    crate::diag::log(format!(
+                        "aidraft replace: ok {}, same count {}, new text {new_text}, old text gone {}, quote {}, non-draft refused {refused}, open refused {open_refused}, changed by person refused {changed_refused}",
+                        again.is_ok(),
+                        self.store.messages.len() == count,
+                        !html.contains("<h2>Heading</h2>"),
+                        html.contains("pz-quote-head"),
+                    ));
+                }
             }
         }
         self.start_agents();
@@ -213,6 +238,20 @@ specjalista ds. Informatyki".into();
         // (this window only reads the mailbox another window has open: a draft would be lost)
         if self.read_only {
             return Err("Poczta is open in another window; this one can't save drafts.".into());
+        }
+        // a draft rewritten in place: only one an agent wrote and the person has not changed, still
+        // a draft, not being sent or edited (the writing window would save its own copy over it)
+        if let Some(rid) = d.replace {
+            match self.msg(rid).filter(|m| m.id < reading::FILE_IDS) {
+                None => return Err(format!("There is no draft {rid}.")),
+                Some(m) if m.folder != Folder::Drafts || !m.ai_editable || self.sending.contains(&rid) => {
+                    return Err(format!("Message {rid} is not a draft written by AI and left unchanged by the person; only those can be replaced. Create a new draft instead."))
+                }
+                Some(_) if self.composers.iter().any(|c| c.draft_id == Some(rid)) => {
+                    return Err(format!("Draft {rid} is open in Poczta's writing window; ask the person to close it first."))
+                }
+                Some(_) => {}
+            }
         }
         let (account, to, cc, subject, body, orig) = match d.reply_to {
             Some(oid) => {
@@ -241,12 +280,43 @@ specjalista ds. Informatyki".into();
         let text = crate::rich::agent_to_html(&d.body);
         let html_path = crate::model::cache_put(self.start_content(account, &text, orig.as_ref()).as_bytes(), "html");
         let acc = self.account_for(account);
-        let id = self.store.new_id();
+        let id = d.replace.unwrap_or_else(|| self.store.new_id());
         let said = format!(
-            "Draft {id} saved in Drafts ({}): to {to}{}, subject \"{subject}\". Nothing was sent; the person checks and sends it in Poczta (show_in_poczta opens it).",
+            "Draft {id} {} in Drafts ({}): to {to}{}, subject \"{subject}\". Nothing was sent; the person checks and sends it in Poczta (show_in_poczta opens it).",
+            if d.replace.is_some() { "rewritten" } else { "saved" },
             acc.email,
             if cc.is_empty() { String::new() } else { format!(", cc {cc}") }
         );
+        if d.replace.is_some() {
+            let from_name = acc.display_name.clone();
+            let from_addr = acc.email.clone();
+            if let Some(m) = self.msg_mut(id) {
+                m.account = account;
+                m.from_name = from_name;
+                m.from_addr = from_addr;
+                m.to = to;
+                m.cc = cc;
+                m.subject = subject;
+                m.body = body;
+                m.body_path.clear();
+                m.on_disk = false;
+                m.html_path = html_path;
+                m.date = Local::now().naive_local();
+            }
+            // (the reading pane keeps a shown message by its number, also while hidden: the new
+            // text is loaded again; a translation of the old one is dropped, also one on its way)
+            self.mail_view.forget(id);
+            if self.html_cache.as_ref().map(|c| c.0) == Some(id) {
+                self.html_cache = None;
+            }
+            self.translations.remove(&id);
+            self.show_translated.remove(&id);
+            self.translating.remove(&id);
+            self.save_now = true;
+            self.set_status(t!("core.sync.ai_draft"));
+            self.touched = true;
+            return Ok(said);
+        }
         self.store.messages.push(Message {
             id,
             folder: Folder::Drafts,
@@ -272,6 +342,7 @@ specjalista ds. Informatyki".into();
             snippet: String::new(),
             on_disk: false,
             ai: true,
+            ai_editable: true,
             auth: String::new(),
         });
         self.save_now = true;
