@@ -26,7 +26,10 @@ impl MailApp {
                 .book
                 .groups()
                 .iter()
-                .map(|g| crate::contacts::Contact::group(&g.name, self.book.group_addresses(&g.id)))
+                .map(|g| {
+                    let emails = self.book.members(&g.id).iter().filter_map(|p| p.emails.first().cloned()).collect();
+                    crate::contacts::Contact::group(&g.name, self.book.group_addresses(&g.id), emails)
+                })
                 .filter(|c| !c.members.is_empty())
                 .collect();
             let mut mail = crate::contacts::collect(&self.store.messages, &self.store.account.email);
