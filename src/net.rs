@@ -1531,6 +1531,7 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         snippet: String::new(),
         on_disk: false,
         ai: false,
+        ai_editable: false,
         auth: crate::phish::auth_results(raw),
     })
 }

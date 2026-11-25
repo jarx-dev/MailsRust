@@ -1148,6 +1148,7 @@ impl MailApp {
             snippet: String::new(),
             on_disk: false,
             ai: false,
+            ai_editable: false,
             auth: String::new(),
         };
         let out = Outgoing { id, to: sent.to.clone(), cc: String::new(), subject: sent.subject.clone(), body: sent.body.clone(), html: None, inline: vec![], files: vec![reply_file] };

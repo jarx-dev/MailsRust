@@ -205,7 +205,7 @@ specjalista ds. Informatyki".into();
                     let open_refused = self.save_ai_draft(&crate::share::Draft { replace: Some(did), ..crate::share::Draft::reply(id, "x".into()) }).is_err();
                     self.composers.pop();
                     if let Some(m) = self.msg_mut(did) {
-                        m.ai = false;
+                        m.ai_editable = false;
                     }
                     let changed_refused = self.save_ai_draft(&crate::share::Draft { replace: Some(did), ..crate::share::Draft::reply(id, "x".into()) }).is_err();
                     crate::diag::log(format!(
@@ -244,7 +244,7 @@ specjalista ds. Informatyki".into();
         if let Some(rid) = d.replace {
             match self.msg(rid).filter(|m| m.id < reading::FILE_IDS) {
                 None => return Err(format!("There is no draft {rid}.")),
-                Some(m) if m.folder != Folder::Drafts || !m.ai || self.sending.contains(&rid) => {
+                Some(m) if m.folder != Folder::Drafts || !m.ai_editable || self.sending.contains(&rid) => {
                     return Err(format!("Message {rid} is not a draft written by AI and left unchanged by the person; only those can be replaced. Create a new draft instead."))
                 }
                 Some(_) if self.composers.iter().any(|c| c.draft_id == Some(rid)) => {
@@ -303,13 +303,14 @@ specjalista ds. Informatyki".into();
                 m.html_path = html_path;
                 m.date = Local::now().naive_local();
             }
-            // (the reading pane keeps a shown message by its number: the new text is loaded again)
-            if self.selected == Some(id) {
-                self.mail_view.reload();
-            }
+            // (the reading pane keeps a shown message by its number, also while hidden: the new
+            // text is loaded again; a translation of the old one is dropped)
+            self.mail_view.reload();
             if self.html_cache.as_ref().map(|c| c.0) == Some(id) {
                 self.html_cache = None;
             }
+            self.translations.remove(&id);
+            self.show_translated.remove(&id);
             self.save_now = true;
             self.set_status(t!("core.sync.ai_draft"));
             self.touched = true;
@@ -340,6 +341,7 @@ specjalista ds. Informatyki".into();
             snippet: String::new(),
             on_disk: false,
             ai: true,
+            ai_editable: true,
             auth: String::new(),
         });
         self.save_now = true;

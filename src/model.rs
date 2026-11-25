@@ -111,6 +111,10 @@ pub struct Message {
     /// A draft an AI agent wrote: the writing window warns to check it before sending.
     #[serde(default, skip_serializing_if = "is_false")]
     pub ai: bool,
+    /// An AI draft the person has not saved changes to: agents may rewrite it (`create_draft`
+    /// with `replace`). Off for drafts from before it existed, which may hold the person's edits.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ai_editable: bool,
     /// What the receiving server found of the sender's SPF, DKIM and DMARC ("spf=pass dkim=none
     /// dmarc=fail", see `phish::auth_results`); empty for older mail and mail without the header.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -149,6 +153,7 @@ impl Message {
             snippet: String::new(),
             on_disk: false,
             ai: false,
+            ai_editable: false,
             auth: String::new(),
         }
     }
@@ -567,6 +572,7 @@ impl Store {
                 snippet: String::new(),
                 on_disk: false,
                 ai: false,
+                ai_editable: false,
                 auth: String::new(),
             });
         }

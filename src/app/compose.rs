@@ -1384,6 +1384,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                         snippet: String::new(),
                         on_disk: false,
                         ai: false,
+                        ai_editable: false,
                         auth: String::new(),
                     });
                     id
@@ -1409,7 +1410,7 @@ Wpisy są **gotowe** i *sprawdzone*:
                 m.attachment_files = c.files.clone();
                 // changed by the person (an untouched window closes without saving): AI agents may
                 // no longer rewrite it
-                m.ai = false;
+                m.ai_editable = false;
             }
             if o == "send" {
                 if can_send {
