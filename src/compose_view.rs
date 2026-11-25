@@ -25,6 +25,10 @@ pub enum Msg {
     Ai { style: String, html: String },
     /// „Dodaj do DW” on a mailto: link: its address(es), separated by , or ;
     Cc { addr: String },
+    /// „@” typed in the text and what follows it: the people to suggest are asked for
+    At { q: String },
+    /// a person chosen after „@”: their address(es), separated by commas, go to "Do"
+    To { addr: String },
     /// the title of a pasted link's page (empty: none), for link `n`
     Title { n: u64, title: String },
     /// files dropped on the field (pictures go into the text, other files are attached)
@@ -167,13 +171,16 @@ pub fn file_url(path: &str) -> String {
 }
 
 fn url_to_path(url: &str) -> String {
-    let raw = url.trim_start_matches("file:///");
+    String::from_utf8_lossy(&pct_decode(url.trim_start_matches("file:///"))).replace('/', "\\")
+}
+
+fn pct_decode(raw: &str) -> Vec<u8> {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&raw[i + 1..i + 3], 16) {
+            if let Some(v) = raw.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 out.push(v);
                 i += 3;
                 continue;
@@ -182,7 +189,7 @@ fn url_to_path(url: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&out).replace('/', "\\")
+    out
 }
 
 impl ComposeView {
@@ -223,6 +230,12 @@ impl ComposeView {
                 // a click inside the page (see its script): only a note, the page stays
                 if url.starts_with("pzfocus:") {
                     let _ = nav_tx.send(if url.contains("away") { Msg::Away } else { Msg::Clicked });
+                    nav_ctx.request_repaint();
+                    return false;
+                }
+                // typed after „@” (at once, not with the next question: the list follows each key)
+                if let Some(q) = url.strip_prefix("pzat://q/x") {
+                    let _ = nav_tx.send(Msg::At { q: String::from_utf8_lossy(&pct_decode(q)).into_owned() });
                     nav_ctx.request_repaint();
                     return false;
                 }
@@ -292,6 +305,7 @@ impl ComposeView {
                     Some("md") => Msg::Md { text: s("text") },
                     Some("ai") => Msg::Ai { style: s("style"), html: s("html") },
                     Some("cc") => Msg::Cc { addr: s("addr") },
+                    Some("to") => Msg::To { addr: s("addr") },
                     // a pasted link: its page's title is fetched meanwhile
                     Some("link") => {
                         let (url, n, tx, ctx) = (s("url"), v["n"].as_u64().unwrap_or(0), tx.clone(), ctx.clone());
@@ -375,6 +389,20 @@ impl ComposeView {
     /// A pasted link gets its page's title (or keeps the short address when `title` is empty).
     pub fn link_title(&self, n: u64, title: &str) {
         let _ = self.view.evaluate_script(&format!("window.pzTitle({n},{})", serde_json::to_string(title).unwrap_or_default()));
+    }
+
+    /// The people to suggest after „@” for what was typed `q` (an older answer is ignored), each
+    /// with the address(es) choosing it adds.
+    pub fn at_list(&self, q: &str, found: &[(&crate::contacts::Contact, String)]) {
+        let list: Vec<serde_json::Value> = found
+            .iter()
+            .map(|(c, h)| {
+                let (n, s) = c.label();
+                serde_json::json!({ "n": n, "s": s, "h": h })
+            })
+            .collect();
+        let js = format!("window.pzAt&&window.pzAt({},{})", serde_json::to_string(q).unwrap_or_default(), serde_json::Value::Array(list));
+        let _ = self.view.evaluate_script(&js);
     }
 
     /// A picture of the writing field (PNG) into `out` (shown under a question asked over it).
@@ -598,6 +626,7 @@ html,body{{margin:0;background:#fff;font-family:'Segoe UI',Arial,sans-serif;font
 #pz-toast{{position:fixed;display:none;left:12px;right:12px;bottom:12px;z-index:50;background:#fdecea;color:#8a1c12;border:1px solid #f3c2bc;border-radius:7px;padding:8px 12px;font-size:12.5px;font-family:'Segoe UI',Arial,sans-serif}}
 #pz-ed[contenteditable=false]{{opacity:.55;cursor:wait}}
 #pz-handle{{position:absolute;display:none;z-index:26;width:12px;height:12px;background:#1e6fd9;border:2px solid #fff;border-radius:3px;cursor:nwse-resize;box-shadow:0 0 0 1px #1e6fd9}}
+#pz-at{{position:fixed;display:none;z-index:45;min-width:240px;max-width:min(420px,calc(100vw - 16px));background:#fff;border:1px solid #d9dce0;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.14);padding:4px;font-family:'Segoe UI',Arial,sans-serif;user-select:none;box-sizing:border-box;overflow-y:auto}}
 {dark}
 ::-webkit-scrollbar{{width:10px;height:10px}}::-webkit-scrollbar-thumb{{background:#cfd3d8;border-radius:5px;border:2px solid #fff}}::-webkit-scrollbar-thumb:hover{{background:#aeb4bb}}::-webkit-scrollbar-button{{display:none}}
 </style></head><body>
@@ -696,6 +725,8 @@ function shortUrl(u){{try{{const x=new URL(u);let p=x.pathname.replace(/\/$/,'')
 window.pzTitle=function(n,t){{const a=ed.querySelector('a[data-pz-t="'+n+'"]');if(!a)return;a.removeAttribute('data-pz-t');
  if(t&&a.textContent===shortUrl(a.getAttribute('href')))a.textContent=t;sync();}};
 ed.addEventListener('paste',e=>{{
+ // (pasting anything closes the list of people after „@”)
+ if(atQ!==null)atClose();
  const cd=e.clipboardData;if(!cd)return;saveSel();
  const imgs=[...cd.items].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
  if(imgs.length){{e.preventDefault();imgs.forEach(i=>readImg(i.getAsFile()));return;}}
@@ -709,7 +740,7 @@ ed.addEventListener('paste',e=>{{
   const n=++linkN,a=document.createElement('a');a.href=u;a.dataset.pzT=n;a.textContent=shortUrl(u);
   document.execCommand('insertHTML',false,a.outerHTML+'&nbsp;');post({{t:'link',url:u,n:n}});return;}}
  if(t&&looksMd(t)){{e.preventDefault();post({{t:'md',text:t}});return;}}
- if(t){{e.preventDefault();document.execCommand('insertText',false,t);}}
+ if(t){{e.preventDefault();atPaste=true;try{{document.execCommand('insertText',false,t);}}finally{{atPaste=false;}}}}
 }});
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',e=>{{
@@ -768,6 +799,82 @@ abox.addEventListener('click',e=>{{const b=e.target.closest('button');if(!b||!li
  if(b.dataset.a==='cc'){{const h=link.getAttribute('href')||'';let a='';try{{if(/^mailto:/i.test(h))a=decodeURIComponent(h.slice(7).split('?')[0]);}}catch(x){{}}if(a)post({{t:'cc',addr:a}});abox.style.display='none';return;}}
  if(b.dataset.a==='edit'){{const u=prompt('{t_link_prompt}',link.getAttribute('href')||'');if(u!==null)setLink(link,u.trim());}}
  else setLink(link,'');}});
+// ---- „@” and the start of a name: people from the address book and the mailbox, the list
+// narrowing with each key; the one chosen goes into the text (a mailto: link) and to "Do". The rows
+// are in a closed shadow tree: the styles of a quoted mail (same page) cannot change what they say
+const at=document.createElement('div');at.id='pz-at';document.body.appendChild(at);const atS=at.attachShadow({{mode:'closed'}});
+const AT_CSS=".it{{all:initial;display:block;padding:4px 8px;border-radius:6px;cursor:pointer}}.it:hover{{background:#f3f5f8}}.it.on{{background:#e3ebf7;box-shadow:inset 3px 0 #1e6fd9}}.n,.s{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:system-ui,sans-serif}}.n{{font-size:13px;color:#222}}.s{{font-size:11.5px;color:#777}}";
+// (atLQ: what the list shown was found for; a list for an older query picks nothing. atOff: the
+// „@” whose list was closed by hand, it stays closed. atPaste: text being pasted, which never
+// opens the list. The rows inherit nothing (all:initial) and use a generic font: a quoted mail's
+// styles and @font-face cannot redraw the names)
+let atQ=null,atR=null,atL=[],atLQ=null,atI=0,atOff=null,atPaste=false;
+// (the person chosen in the list, said to a screen reader)
+const atLive=document.createElement('div');atLive.setAttribute('aria-live','polite');atLive.style.cssText='position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden';document.body.appendChild(atLive);
+// the „@…” just before the cursor (not inside a word, a link, the signature or the quoted mail)
+function atFind(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return null;const n=s.anchorNode;
+ if(!n||n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('a,.pz-sig,.pz-quote'))return null;
+ const m=/(^|[\s(])@([^\s@<>,;]{{0,40}})$/.exec(n.data.slice(0,s.anchorOffset));if(!m)return null;
+ // (not with the cursor inside the word after „@”: what follows it would be left over; a full stop
+ // or a bracket after it is fine)
+ // shortcut: only this piece of text is looked at; a word going on in the next formatted piece
+ // ("@e|<b>va</b>") is left over after the link, look across pieces if that turns up
+ if(/^[\p{{L}}\p{{N}}_@-]/u.test(n.data.slice(s.anchorOffset)))return null;
+ // (at the start of this piece of text: what comes just before it in the line, e.g. „user<b>@firma”,
+ // must not be a word; a new line, a block or a picture before it is fine; empty pieces are skipped)
+ if(!m[1]){{const blk=x=>x.nodeType===1&&/^(DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|TABLE|TR|TD|TH|BR)$/.test(x.nodeName);let x=n;
+  for(;;){{while(x!==ed&&!x.previousSibling&&!blk(x.parentNode))x=x.parentNode;x=x===ed?null:x.previousSibling;
+   while(x&&!blk(x)&&x.lastChild)x=x.lastChild;if(!x||!(x.nodeType===3?!x.data:!blk(x)&&x.nodeName!=='IMG'))break;}}
+  if(x&&x.nodeType===3&&/[^\s(]$/.test(x.data))return null;}}
+ const r=document.createRange();r.setStart(n,s.anchorOffset-m[2].length-1);r.setEnd(n,s.anchorOffset);return {{q:m[2],r:r}};}}
+function atClose(off){{if(off&&atR)atOff={{n:atR.startContainer,o:atR.startOffset}};at.style.display='none';atLive.textContent='';atQ=null;atR=null;atL=[];atLQ=null;}}
+// the cursor is still at this „@” with this query (whatever events are still on their way)
+function atHere(){{const f=atFind();return !!f&&!!atR&&f.q===atQ&&f.r.startContainer===atR.startContainer&&f.r.startOffset===atR.startOffset;}}
+// typing opens the list (any other change of the text, e.g. pasting, closes it); moving the cursor
+// only follows the same „@” or closes it (never takes it to another „@” already in the text);
+// deleting follows an open one at the same „@”
+function atCheck(e){{if(aiBusy)return;if(atPaste){{if(atQ!==null)atClose();return;}}const f=atFind();if(!f){{atOff=null;if(atQ!==null)atClose();return;}}
+ const here=x=>!!x&&x.n===f.r.startContainer&&x.o===f.r.startOffset,same=here(atR&&{{n:atR.startContainer,o:atR.startOffset}});
+ const kind=e&&e.type==='input'?e.inputType||'':'',typed=kind==='insertText'||kind==='insertCompositionText'||(same&&kind.startsWith('delete'));
+ if(here(atOff)||(!typed&&(atQ===null||!same||kind!==''))){{if(atQ!==null)atClose();return;}}
+ atR=f.r;
+ // (the query behind a fixed letter: a path piece "." or ".." would be cut out of the address)
+ if(f.q!==atQ){{atQ=f.q;atLive.textContent='';try{{location.href='pzat://q/x'+encodeURIComponent(f.q)}}catch(e){{}}}}}}
+function atDraw(){{atS.textContent='';const st=document.createElement('style');st.textContent=AT_CSS;atS.appendChild(st);atL.forEach((c,i)=>{{const d=document.createElement('div');d.className='it'+(i===atI?' on':'');
+  const a=document.createElement('div');a.className='n';a.textContent=c.n;const b=document.createElement('div');b.className='s';b.textContent=c.s;d.append(a,b);
+  // (chosen when the button comes up over the row: moving away first lets go)
+  d.addEventListener('mousedown',e=>e.preventDefault());d.addEventListener('click',e=>{{if(e.button===0)atPick(i);}});atS.appendChild(d);}});
+ // under the cursor, or over it when there is more room there; never taller than the room (it scrolls)
+ at.style.display='block';at.style.maxHeight='';const r=atR.getBoundingClientRect(),below=innerHeight-r.bottom-8,above=r.top-8,up=at.offsetHeight>below&&above>below;
+ at.style.maxHeight=Math.max(60,up?above:below)+'px';const h=at.offsetHeight,w=at.offsetWidth;
+ at.style.left=Math.max(4,Math.min(r.left,innerWidth-w-8))+'px';at.style.top=(up?r.top-h-4:r.bottom+4)+'px';const on=atS.querySelectorAll('.it')[atI];if(on)on.scrollIntoView({{block:'nearest'}});
+ const c=atLQ===atQ&&atL[atI],t=c?c.n+', '+c.s:'';if(atLive.textContent!==t)atLive.textContent=t;}}
+// the list is really there to be seen (a quoted mail's styles could hide it, move it away, shrink
+// it or draw over it from its own ::before / ::after)
+// shortcut: these checks catch the ways found so far; a quoted mail's styles still reach the whole
+// editor page (also its toolbar); scoping them to the quote is the real fix if more turn up
+function atShown(){{if(at.style.display!=='block'||!at.checkVisibility({{opacityProperty:true,visibilityProperty:true}}))return false;
+ const cs=getComputedStyle(at);if(cs.filter!=='none'||cs.transform!=='none'||cs.zoom!=='1'||cs.clipPath!=='none')return false;
+ if(['::before','::after'].some(p=>getComputedStyle(at,p).content!=='none'))return false;const r=at.getBoundingClientRect();return r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight;}}
+// (just „@”: nothing is chosen yet, so Enter still starts a new line; a new answer for the query
+// already shown keeps the person chosen there, or chooses nobody when they are gone)
+window.pzAt=function(q,list){{if(q!==atQ||!atR)return;const was=q===atLQ&&atL[atI];atI=q===''?-1:q!==atLQ?0:was?list.findIndex(c=>c.h===was.h&&c.n===was.n):-1;
+ atL=list;atLQ=q;if(list.length)atDraw();else{{at.style.display='none';atLive.textContent='';}}}};
+function atPick(i){{const c=atL[i];if(!c||!atR||atLQ!==atQ||!ed.contains(atR.startContainer))return;if(!atHere()){{atClose();return;}}const s=getSelection();s.removeAllRanges();s.addRange(atR);
+ const a=document.createElement('a');a.href='mailto:'+c.h.split(',').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(',');a.textContent='@'+c.n;document.execCommand('insertHTML',false,a.outerHTML+'&nbsp;');
+ post({{t:'to',addr:c.h}});atClose();sync();}}
+ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
+ // (Esc also before the first list came: it does not open afterwards)
+ if(e.key==='Escape'&&atQ!==null){{e.preventDefault();atClose(true);return;}}
+ if(!atShown())return;const n=atL.length;
+ // (a list not yet for what is typed now picks nothing: a key on it is used up, Enter only passes
+ // through when just „@” is left; press it again once the list came)
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){{e.preventDefault();if(atLQ!==atQ)return;atI=e.key==='ArrowDown'?(atI+1)%n:(atI<=0?n-1:atI-1);atDraw();}}
+ else if(e.key==='Enter'||e.key==='Tab'){{
+  if(!atHere()){{atClose();return;}}
+  const fresh=atLQ===atQ;if(fresh?atI<0:atQ===''){{atClose(true);return;}}e.preventDefault();if(fresh)atPick(atI);}}}},true);
+ed.addEventListener('input',atCheck);document.addEventListener('selectionchange',atCheck);ed.addEventListener('blur',()=>atClose());
+window.addEventListener('scroll',()=>{{if(at.style.display==='block')atDraw();}});window.addEventListener('resize',()=>{{if(at.style.display==='block')atDraw();}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();
 </script></body></html>"##,

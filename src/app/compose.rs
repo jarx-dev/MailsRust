@@ -736,6 +736,18 @@ impl MailApp {
                                                 crate::diag::log(format!("linktest: {}", html[i..].chars().take(160).collect::<String>()));
                                             }
                                         }
+                                        if std::env::var("POCZTA_AT_TEST").is_ok() {
+                                            use std::sync::atomic::{AtomicBool, Ordering};
+                                            static TYPED: AtomicBool = AtomicBool::new(false);
+                                            if !TYPED.swap(true, Ordering::Relaxed) {
+                                                // test: „user” + bold „@ev” opens nothing, nor does pasted „ x @ev”; „@” and Enter
+                                                // picks nobody; „@e” open, the cursor back after the first „@” and Enter picks
+                                                // nobody; a new „@e”, then „v” and Enter at once (before the narrowed list came)
+                                                // picks nobody, Enter once it came picks from it
+                                                v.run_js("(()=>{const ed=document.getElementById('pz-ed');ed.focus();const k=x=>ed.dispatchEvent(new KeyboardEvent('keydown',{key:x,bubbles:true,cancelable:true}));const ins=s=>document.execCommand('insertText',false,s);const w=f=>setTimeout(f,400);ins('user');document.execCommand('bold');ins('@ev');w(()=>{document.execCommand('bold');const dt=new DataTransfer();dt.setData('text/plain',' x @ev');ed.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));w(()=>{ins(' Hej @');w(()=>{k('Enter');ins(' @e');w(()=>{const s=getSelection(),n=s.anchorNode,o=n.data.indexOf('Hej @')+5;s.collapse(n,o);w(()=>{k('Enter');s.collapse(n,n.data.length);ins(' @e');w(()=>{ins('v');k('Enter');w(()=>k('Enter'));});});});});});});})()");
+                                            }
+                                            crate::diag::log(format!("attest: mention link in text {}", html.contains("\">@")));
+                                        }
                                         if std::env::var("POCZTA_START").as_deref() == Ok("webreply") {
                                             use std::sync::atomic::{AtomicBool, Ordering};
                                             static FILLED: AtomicBool = AtomicBool::new(false);
@@ -785,6 +797,27 @@ Wpisy są **gotowe** i *sprawdzone*:
                                         c.show_cc |= !c.cc.is_empty();
                                         if std::env::var("POCZTA_CC_TEST").is_ok() {
                                             crate::diag::log(format!("cctest: in Cc {}", c.cc.contains("cc.test@example.com")));
+                                        }
+                                    }
+                                    crate::compose_view::Msg::At { q } => {
+                                        // just „@”: the first ones (the address book's groups, then the people written to most);
+                                        // only ones with an address that can be added count towards the six (the search
+                                        // stops at the sixth)
+                                        let all: Box<dyn Iterator<Item = &crate::contacts::Contact>> =
+                                            if q.trim().is_empty() { Box::new(contacts.iter()) } else { Box::new(crate::contacts::matches(&contacts, &q, "")) };
+                                        let found: Vec<(&crate::contacts::Contact, String)> =
+                                            all.map(|c| (c, c.addrs())).filter(|(_, h)| !h.is_empty()).take(6).collect();
+                                        if std::env::var("POCZTA_AT_TEST").is_ok() {
+                                            crate::diag::log(format!("attest: @{q:?} of {} -> {} found", contacts.len(), found.len()));
+                                        }
+                                        v.at_list(&q, &found);
+                                    }
+                                    crate::compose_view::Msg::To { addr } => {
+                                        let test = std::env::var("POCZTA_AT_TEST").is_ok().then(|| c.to.clone());
+                                        add_cc(&c.cc, &mut c.to, &addr, &contacts);
+                                        if let Some(before) = test {
+                                            let n = |to: &str| to.split(',').filter(|p| p.contains('@')).count();
+                                            crate::diag::log(format!("attest: Do had {} recipients, has {}", n(&before), n(&c.to)));
                                         }
                                     }
                                     crate::compose_view::Msg::Clicked => {
@@ -1464,8 +1497,8 @@ pub(super) fn add_files(list: &mut Vec<String>, new: Vec<String>) {
 }
 
 /// „Dodaj do DW” on a mailto: link in the text: its addresses (separated by , or ;, taken from a
-/// mail, so only ones the sending side reads back unchanged) go to Cc, with the name from the
-/// contacts, each once in To and Cc.
+/// mail, so only ones the sending side reads back unchanged) go to `cc`, with the name from the
+/// contacts, each once in `to` and `cc` (a person picked after „@” goes to "Do": the two swapped).
 fn add_cc(to: &str, cc: &mut String, addrs: &str, contacts: &[crate::contacts::Contact]) {
     // a quoted address could hide a separator, and splitting it would make another one
     if addrs.contains('"') {
@@ -1479,7 +1512,8 @@ fn add_cc(to: &str, cc: &mut String, addrs: &str, contacts: &[crate::contacts::C
         if has(to) || has(cc) {
             continue;
         }
-        let who = contacts.iter().find(|k| k.addr.eq_ignore_ascii_case(a)).map(|k| k.text()).unwrap_or_else(|| a.to_string());
+        // (the name from the contacts, the address exactly as given)
+        let who = contacts.iter().find(|k| k.addr.eq_ignore_ascii_case(a)).map(|k| crate::contacts::Contact::person(&k.name, a).text()).unwrap_or_else(|| a.to_string());
         let kept = cc.trim_end().trim_end_matches([',', ';']).trim_end().len();
         cc.truncate(kept);
         if !cc.is_empty() {
@@ -1496,7 +1530,8 @@ mod tests {
         let contacts = [crate::contacts::Contact::person("Laura K", "laura@x.pl")];
         let mut cc = "Ola <ola@x.pl>, ".to_string();
         super::add_cc("ewa@x.pl", &mut cc, "LAURA@x.pl,ewa@x.pl,ola@x.pl,a b@x.pl,anna@;new@x.pl", &contacts);
-        assert_eq!(cc, "Ola <ola@x.pl>, Laura K <laura@x.pl>, new@x.pl");
+        // (the name from the contacts, the address as the link gave it)
+        assert_eq!(cc, "Ola <ola@x.pl>, Laura K <LAURA@x.pl>, new@x.pl");
         let mut named = String::new();
         super::add_cc("", &mut named, "jan@x.pl", &[crate::contacts::Contact::person("Kowalski, Jan", "jan@x.pl")]);
         assert_eq!(named, "jan@x.pl");
@@ -1506,5 +1541,15 @@ mod tests {
         let mut empty = String::new();
         super::add_cc("", &mut empty, "z@x.pl", &[]);
         assert_eq!(empty, "z@x.pl");
+    }
+
+    #[test]
+    fn group_addresses_for_at() {
+        // the addresses as saved in the book: good ones, a quoted one, a broken one and lines
+        // carrying a second address after a „<”
+        let emails = ["ala@x.pl", " bob@x.pl ", "\"a b\"@x.pl", "zle@", "anna@x.pl> <obcy@x.pl", "błędny <obcy@x.pl"];
+        let g = crate::contacts::Contact::group("G", vec!["Ala <3 <ala@x.pl>".into()], emails.iter().map(|e| e.to_string()).collect());
+        assert_eq!(g.addrs(), "ala@x.pl,bob@x.pl");
+        assert_eq!(crate::contacts::Contact::person("Ewa", "ewa@x.pl").addrs(), "ewa@x.pl");
     }
 }
