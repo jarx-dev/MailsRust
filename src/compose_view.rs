@@ -675,7 +675,9 @@ window.pzTake=function(){{const q=Q;Q=[];return JSON.stringify(q);}};
 // (the invisible space that keeps typing out of a formatted word, see mdType, is not sent: taken out
 // of the written part (the start of the html), not of the signature or the quoted mail)
 const ZW=String.fromCharCode(8203),noZw=x=>x.split(ZW).join('');
-function sync(){{let h=ed.innerHTML;if(ownNodes().some(x=>x.textContent.includes(ZW))){{const o=ownHtml().innerHTML;if(h.startsWith(o))h=noZw(o)+h.slice(o.length);}}post({{t:'html',html:h,text:noZw(ed.innerText)}});}}
+function sync(){{let h=ed.innerHTML;if(ownNodes().some(x=>x.textContent.includes(ZW))){{const d=ownHtml(),o=d.innerHTML;
+ if(h.startsWith(o)){{const w=document.createTreeWalker(d,NodeFilter.SHOW_TEXT);for(let x;(x=w.nextNode());)x.data=noZw(x.data);h=d.innerHTML+h.slice(o.length);}}}}
+ post({{t:'html',html:h,text:noZw(ed.innerText)}});}}
 let saved=null;
 function saveSel(){{const s=getSelection();if(s.rangeCount&&ed.contains(s.anchorNode))saved=s.getRangeAt(0).cloneRange();}}
 function restore(){{ed.focus();if(saved){{const s=getSelection();s.removeAllRanges();s.addRange(saved);}}}}
@@ -880,9 +882,9 @@ ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey
 ed.addEventListener('input',atCheck);document.addEventListener('selectionchange',atCheck);ed.addEventListener('blur',()=>atClose());
 // ---- Markdown as it is typed: **bold** (or __bold__), *italic* (or _italic_), ~~struck~~ and `code`
 // once the closing mark is typed; the opening mark only at a line's start, after a space or an opening
-// bracket or quote, and not inside an address or an unclosed `code` (so snake_case, file names and
-// links stay). „# ”, „## ”, „### ”, „- ”, „* ”, „1. ” and „> ” at a line's start make a heading, a
-// list or a quote. Ctrl+Z gives the marks back (on a line: before its format).
+// bracket or quote, not in a word with : / . or @ (an address, a path) and not in an unclosed `code`
+// (so snake_case, file names and links stay). „# ”, „## ”, „### ”, „- ”, „* ”, „1. ” and „> ” at a
+// line's start make a heading, a list or a quote. Ctrl+Z gives the marks back (on a line: before its format).
 const MD=[[/(^|[\s(\[{{"'„«])`([^`\s](?:[^`]*[^`\s])?)`$/u,'code'],[/(^|[\s(\[{{"'„«])\*\*([^*\s](?:[^*]*[^*\s\\])?)\*\*$/u,'strong'],[/(^|[\s(\[{{"'„«])__([^_\s](?:[^_]*[^_\s\\])?)__$/u,'strong'],
  [/(^|[\s(\[{{"'„«])~~([^~\s](?:[^~]*[^~\s\\])?)~~$/u,'s'],[/(^|[\s(\[{{"'„«])\*([^*\s](?:[^*]*[^*\s\\])?)\*$/u,'em'],[/(^|[\s(\[{{"'„«])_([^_\s](?:[^_]*[^_\s\\])?)_$/u,'em']];
 const MDB=[[/^#\s$/,'formatBlock','h1'],[/^##\s$/,'formatBlock','h2'],[/^###\s$/,'formatBlock','h3'],[/^[-*]\s$/,'insertUnorderedList'],[/^1\.\s$/,'insertOrderedList'],[/^>\s$/,'formatBlock','blockquote']];
@@ -898,7 +900,7 @@ function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)retur
  if(!/^[\p{{L}}\p{{N}}\p{{M}}]/u.test(n.data.slice(o)||near(n,false)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
   // (no letter inside, as in *.* or *_*, is no formatting; a node's start is a word's start only after a space)
   if(tag!=='code'&&!/[\p{{L}}\p{{N}}]/u.test(m[2]))return;if(!a&&/[^\s(\[{{"'„«]$/u.test(near(n,true)))return;
-  if(/(^|\s)(\S*:\/\/|www\.)\S*$/i.test(pre)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
+  if(/(^|\s)\S*[:\/.@]\S*$/.test(pre)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
   r.setStart(n,a);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);mdLast=t.slice(a);
   // (the invisible space after it: the editor would carry on typing inside the formatted word)
   const x=document.createElement(tag);x.textContent=m[2];document.execCommand('insertHTML',false,x.outerHTML+ZW);
