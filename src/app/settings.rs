@@ -143,7 +143,14 @@ impl MailApp {
     pub(super) fn restore_ai_shares(&mut self) {
         let now = Local::now().timestamp();
         let ids: std::collections::HashSet<u64> = self.store.messages.iter().map(|m| m.id).collect();
-        self.prefs.ai_shares.retain(|s| now - s.2 < crate::share::DAYS * 86400 && ids.contains(&s.1));
+        // (a message whose attachment list just lost pictures: its old links would give other files)
+        let changed = self.db.as_ref().map(|d| &d.pictures_hidden);
+        let before = self.prefs.ai_shares.len();
+        self.prefs.ai_shares.retain(|s| now - s.2 < crate::share::DAYS * 86400 && ids.contains(&s.1) && !changed.is_some_and(|c| c.contains(&s.1)));
+        // (written at once: the next start no longer knows which lists changed)
+        if changed.is_some_and(|c| !c.is_empty()) && self.prefs.ai_shares.len() != before {
+            self.save_now = true;
+        }
         if self.prefs.ai_shares.is_empty() || self.shot.is_some() {
             return;
         }
