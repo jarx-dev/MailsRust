@@ -895,12 +895,12 @@ const BLK=/^(BR|DIV|P|UL|OL|LI|H[1-6]|BLOCKQUOTE|PRE|TABLE|TR|TD|TH|IMG)$/;
 function near(n,back){{for(;;){{const p=back?n.previousSibling:n.nextSibling;
  if(p){{if(BLK.test(p.nodeName))return '';if(p.textContent)return p.textContent;n=p;continue;}}n=n.parentNode;if(n===ed||BLK.test(n.nodeName))return '';}}}}
 function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return;const n=s.anchorNode,o=s.anchorOffset;
- if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote'))return;
+ if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote')||!ownNodes().some(x=>x===n||x.contains(n)))return;
  const t=n.data.slice(0,o),r=document.createRange();
  if(!/^[\p{{L}}\p{{N}}\p{{M}}]/u.test(n.data.slice(o)||near(n,false)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
   // (no letter inside, as in *.* or *_*, is no formatting; a node's start is a word's start only after a space)
   if(tag!=='code'&&!/[\p{{L}}\p{{N}}]/u.test(m[2]))return;if(!a&&/[^\s(\[{{"'„«]$/u.test(near(n,true)))return;
-  if(/(^|\s)\S*[:\/.@]\S*$/.test(pre)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
+  const tok=(/\s/.test(pre)?pre:near(n,true)+pre).match(/\S*$/)[0];if(/[:\/.@]/.test(tok)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
   r.setStart(n,a);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);mdLast=t.slice(a);
   // (the invisible space after it: the editor would carry on typing inside the formatted word)
   const x=document.createElement(tag);x.textContent=m[2];document.execCommand('insertHTML',false,x.outerHTML+ZW);
@@ -918,9 +918,10 @@ ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBus
 ed.addEventListener('compositionend',e=>{{if(!aiBusy&&/[*_~`]$/.test(e.data||''))queueMicrotask(mdType);}});
 // (Ctrl+Z on a conversion selects the marks it gives back, and the next key would replace them)
 ed.addEventListener('input',e=>{{if(e.inputType!=='historyUndo')return;const s=getSelection();if(!s.isCollapsed&&s.toString()===mdLast)s.collapseToEnd();}});
-// (Backspace right after an invisible space put in by a conversion takes the letter before it)
-ed.addEventListener('keydown',e=>{{if(e.key!=='Backspace'||e.ctrlKey||e.altKey||e.metaKey)return;const s=getSelection(),n=s.anchorNode,o=s.anchorOffset;
- if(s.isCollapsed&&zws.has(n)&&o>0&&n.data[o-1]===ZW)s.collapse(n,o-1);}});
+// (Backspace right after an invisible space put in by a conversion takes the letter before it, Delete
+// right before it the letter after it)
+ed.addEventListener('keydown',e=>{{if(e.ctrlKey||e.altKey||e.metaKey)return;const s=getSelection(),n=s.anchorNode,o=s.anchorOffset;if(!s.isCollapsed||!zws.has(n))return;
+ if(e.key==='Backspace'&&o>0&&n.data[o-1]===ZW)s.collapse(n,o-1);else if(e.key==='Delete'&&n.data[o]===ZW)s.collapse(n,o+1);}});
 window.addEventListener('scroll',()=>{{if(at.style.display==='block')atDraw();}});window.addEventListener('resize',()=>{{if(at.style.display==='block')atDraw();}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();
