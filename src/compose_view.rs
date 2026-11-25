@@ -5,7 +5,8 @@
 //! - Formatting buttons above the text; Ctrl+B / I / U work as usual.
 //! - A pasted (Ctrl+V) or dropped picture goes into the text, scaled to the message width;
 //!   clicking a picture shows −/+/fit/remove and a corner to drag for any size.
-//! - Text in Markdown (e.g. from an AI agent) is turned into formatting when pasted.
+//! - Text in Markdown (e.g. from an AI agent) is turned into formatting when pasted, and as it is
+//!   typed: **bold**, *italic*, `code`, ~~struck~~, and „# ”, „- ”, „1. ”, „> ” at a line's start.
 //! - The page tells the app its content after every change; pictures are files on disk
 //!   (file:// addresses) until sending, when they are put inside the email.
 
@@ -671,7 +672,9 @@ let Q=[];
 function post(o){{if(o.t==='html')Q=Q.filter(x=>x.t!=='html');Q.push(o);}}
 window.pzDrag=function(on){{document.getElementById('pz-drop').style.display=on?'flex':'none';}};
 window.pzTake=function(){{const q=Q;Q=[];return JSON.stringify(q);}};
-function sync(){{post({{t:'html',html:ed.innerHTML,text:ed.innerText}});}}
+// (the invisible space that keeps typing out of a formatted word, see mdType: not sent)
+const ZW=String.fromCharCode(8203),noZw=x=>x.split(ZW).join('');
+function sync(){{post({{t:'html',html:noZw(ed.innerHTML),text:noZw(ed.innerText)}});}}
 let saved=null;
 function saveSel(){{const s=getSelection();if(s.rangeCount&&ed.contains(s.anchorNode))saved=s.getRangeAt(0).cloneRange();}}
 function restore(){{ed.focus();if(saved){{const s=getSelection();s.removeAllRanges();s.addRange(saved);}}}}
@@ -874,6 +877,27 @@ ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey
   if(!atHere()){{atClose();return;}}
   const fresh=atLQ===atQ;if(fresh?atI<0:atQ===''){{atClose(true);return;}}e.preventDefault();if(fresh)atPick(atI);}}}},true);
 ed.addEventListener('input',atCheck);document.addEventListener('selectionchange',atCheck);ed.addEventListener('blur',()=>atClose());
+// ---- Markdown as it is typed: **bold** (or __bold__), *italic* (or _italic_), ~~struck~~ and `code`
+// once the closing mark is typed (not inside a word, so snake_case stays); „# ”, „## ”, „### ”, „- ”,
+// „* ”, „1. ” and „> ” at a line's start make a heading, a list or a quote. Each is one undo step
+// after the typed mark, so Ctrl+Z gives the marks back.
+const MD=[[/(^|[^`])`([^`\s](?:[^`]*[^`\s])?)`$/,'code'],[/(^|[^*\p{{L}}\p{{N}}])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/u,'strong'],[/(^|[^_\p{{L}}\p{{N}}])__([^_\s](?:[^_]*[^_\s])?)__$/u,'strong'],
+ [/(^|[^~\p{{L}}\p{{N}}])~~([^~\s](?:[^~]*[^~\s])?)~~$/u,'s'],[/(^|[^*\p{{L}}\p{{N}}])\*([^*\s](?:[^*]*[^*\s])?)\*$/u,'em'],[/(^|[^_\p{{L}}\p{{N}}])_([^_\s](?:[^_]*[^_\s])?)_$/u,'em']];
+const MDB=[[/^#\s$/,'formatBlock','h1'],[/^##\s$/,'formatBlock','h2'],[/^###\s$/,'formatBlock','h3'],[/^[-*]\s$/,'insertUnorderedList'],[/^1\.\s$/,'insertOrderedList'],[/^>\s$/,'formatBlock','blockquote']];
+function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return;const n=s.anchorNode,o=s.anchorOffset;
+ if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote'))return;
+ const t=n.data.slice(0,o),r=document.createRange();
+ for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;
+  r.setStart(n,m.index+m[1].length);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);
+  // (the invisible space after it: the editor would carry on typing inside the formatted word)
+  const x=document.createElement(tag);x.textContent=m[2];document.execCommand('insertHTML',false,x.outerHTML+ZW);return;}}
+ const p=n.previousSibling,b=n.parentNode;
+ if((p&&!/^(BR|DIV|P)$/.test(p.nodeName))||!(b===ed||/^(DIV|P)$/.test(b.nodeName))||b.closest('li,h1,h2,h3,h4,h5,h6,blockquote'))return;
+ for(const [re,cmd,v] of MDB){{if(!re.test(t))continue;
+  r.setStart(n,0);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);document.execCommand('delete');document.execCommand(cmd,false,v||null);return;}}}}
+// (after the typing is done: the editor runs no command from inside another one, as when typing
+// is done by execCommand)
+ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBusy&&!e.isComposing)queueMicrotask(mdType);}});
 window.addEventListener('scroll',()=>{{if(at.style.display==='block')atDraw();}});window.addEventListener('resize',()=>{{if(at.style.display==='block')atDraw();}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();

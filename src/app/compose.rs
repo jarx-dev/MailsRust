@@ -748,6 +748,27 @@ impl MailApp {
                                             }
                                             crate::diag::log(format!("attest: mention link in text {}", html.contains("\">@")));
                                         }
+                                        if std::env::var("POCZTA_MD_TEST").is_ok() {
+                                            use std::sync::atomic::{AtomicBool, Ordering};
+                                            static TYPED: AtomicBool = AtomicBool::new(false);
+                                            if !TYPED.swap(true, Ordering::Relaxed) {
+                                                // test: Markdown typed one character at a time (¶ = Enter), then the text after
+                                                // each formatted word must be plain again
+                                                v.run_js("(()=>{const ed=document.getElementById('pz-ed');ed.focus();const q=[...'a **b** *c* `d` ~~e~~ x_y_z ¶- f¶¶# g'];const step=()=>{const c=q.shift();if(c===undefined)return;if(c==='¶')document.execCommand('insertParagraph');else document.execCommand('insertText',false,c);setTimeout(step,40);};step();})()");
+                                            }
+                                            crate::diag::log(format!(
+                                                "mdtest: bold {} italic {} code {} struck {} snake_case {} list {} heading {} marks left {} invisible space sent {}",
+                                                html.contains("<strong>b</strong>"),
+                                                html.contains("<em>c</em>"),
+                                                html.contains("<code>d</code>"),
+                                                html.contains("<s>e</s>"),
+                                                html.contains("x_y_z"),
+                                                html.contains("<li>f"),
+                                                html.contains("<h1>g"),
+                                                html.contains("**") || html.contains('`') || html.contains("~~"),
+                                                html.contains('\u{200b}') || text.contains('\u{200b}')
+                                            ));
+                                        }
                                         if std::env::var("POCZTA_START").as_deref() == Ok("webreply") {
                                             use std::sync::atomic::{AtomicBool, Ordering};
                                             static FILLED: AtomicBool = AtomicBool::new(false);
