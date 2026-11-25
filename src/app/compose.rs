@@ -755,6 +755,30 @@ impl MailApp {
                                                 tag.is_some_and(|t| t.contains("background: rgb(230, 230, 230)"))
                                             ));
                                         }
+                                        if std::env::var("POCZTA_MD_TEST").is_ok() {
+                                            use std::sync::atomic::{AtomicBool, Ordering};
+                                            static TYPED: AtomicBool = AtomicBool::new(false);
+                                            if !TYPED.swap(true, Ordering::Relaxed) {
+                                                // test: Markdown typed one character at a time (¶ = Enter, ↶ = Ctrl+Z): the text after
+                                                // each formatted word plain again; addresses, „it`s … let`” and „\*n*” left as they
+                                                // are; Ctrl+Z gives „**u**” back and the next letter goes after it
+                                                v.run_js("(()=>{const ed=document.getElementById('pz-ed');ed.focus();const q=[...'a **b** *c* `d` ~~e~~ x_y_z https://x.pl/_ab_ example.org/(_cd_) it`s ok, let` \\\\*n* **u**↶Z¶- f¶¶# g'];const step=()=>{const c=q.shift();if(c===undefined)return;if(c==='¶')document.execCommand('insertParagraph');else if(c==='↶')document.execCommand('undo');else document.execCommand('insertText',false,c);setTimeout(step,40);};step();})()");
+                                            }
+                                            crate::diag::log(format!(
+                                                "mdtest: bold {} italic {} code {} struck {} snake_case {} list {} heading {} marks left {} invisible space sent {} left alone {} undo {}",
+                                                html.contains("<strong>b</strong>"),
+                                                html.contains("<em>c</em>"),
+                                                html.contains("<code>d</code>"),
+                                                html.contains("<s>e</s>"),
+                                                html.contains("x_y_z"),
+                                                html.contains("<li>f"),
+                                                html.contains("<h1>g"),
+                                                html.replace("**u**Z", "").contains("**") || html.contains("~~"),
+                                                html.contains('\u{200b}') || text.contains('\u{200b}'),
+                                                html.contains("/_ab_") && html.contains("(_cd_)") && html.contains("let`") && !html.contains("<code>s") && html.contains("\\*n*"),
+                                                html.contains("**u**Z")
+                                            ));
+                                        }
                                         if std::env::var("POCZTA_START").as_deref() == Ok("webreply") {
                                             use std::sync::atomic::{AtomicBool, Ordering};
                                             static FILLED: AtomicBool = AtomicBool::new(false);

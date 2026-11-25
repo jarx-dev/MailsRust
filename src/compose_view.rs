@@ -5,7 +5,8 @@
 //! - Formatting buttons above the text; Ctrl+B / I / U work as usual.
 //! - A pasted (Ctrl+V) or dropped picture goes into the text, scaled to the message width;
 //!   clicking a picture shows −/+/fit/remove and a corner to drag for any size.
-//! - Text in Markdown (e.g. from an AI agent) is turned into formatting when pasted.
+//! - Text in Markdown (e.g. from an AI agent) is turned into formatting when pasted, and as it is
+//!   typed: **bold**, *italic*, `code`, ~~struck~~, and „# ”, „- ”, „1. ”, „> ” at a line's start.
 //! - The page tells the app its content after every change; pictures are files on disk
 //!   (file:// addresses) until sending, when they are put inside the email.
 
@@ -671,7 +672,12 @@ let Q=[];
 function post(o){{if(o.t==='html')Q=Q.filter(x=>x.t!=='html');Q.push(o);}}
 window.pzDrag=function(on){{document.getElementById('pz-drop').style.display=on?'flex':'none';}};
 window.pzTake=function(){{const q=Q;Q=[];return JSON.stringify(q);}};
-function sync(){{post({{t:'html',html:ed.innerHTML,text:ed.innerText}});}}
+// (the invisible space that keeps typing out of a formatted word, see mdType, is not sent: taken out
+// of the written part (the start of the html), not of the signature or the quoted mail)
+const ZW=String.fromCharCode(8203),noZw=x=>x.split(ZW).join('');
+function sync(){{let h=ed.innerHTML;if(ownNodes().some(x=>x.textContent.includes(ZW))){{const d=ownHtml(),o=d.innerHTML;
+ if(h.startsWith(o)){{const w=document.createTreeWalker(d,NodeFilter.SHOW_TEXT);for(let x;(x=w.nextNode());)x.data=noZw(x.data);h=d.innerHTML+h.slice(o.length);}}}}
+ post({{t:'html',html:h,text:noZw(ed.innerText)}});}}
 let saved=null;
 function saveSel(){{const s=getSelection();if(s.rangeCount&&ed.contains(s.anchorNode))saved=s.getRangeAt(0).cloneRange();}}
 function restore(){{ed.focus();if(saved){{const s=getSelection();s.removeAllRanges();s.addRange(saved);}}}}
@@ -884,6 +890,48 @@ ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey
   if(!atHere()){{atClose();return;}}
   const fresh=atLQ===atQ;if(fresh?atI<0:atQ===''){{atClose(true);return;}}e.preventDefault();if(fresh)atPick(atI);}}}},true);
 ed.addEventListener('input',atCheck);document.addEventListener('selectionchange',atCheck);ed.addEventListener('blur',()=>atClose());
+// ---- Markdown as it is typed: **bold** (or __bold__), *italic* (or _italic_), ~~struck~~ and `code`
+// once the closing mark is typed; the opening mark only at a line's start, after a space or an opening
+// bracket or quote, not in a word with : / . or @ (an address, a path) and not in an unclosed `code`
+// (so snake_case, file names and links stay). „# ”, „## ”, „### ”, „- ”, „* ”, „1. ” and „> ” at a
+// line's start make a heading, a list or a quote. Ctrl+Z gives the marks back (on a line: before its format).
+const MD=[[/(^|[\s(\[{{"'„«])`([^`\s](?:[^`]*[^`\s])?)`$/u,'code'],[/(^|[\s(\[{{"'„«])\*\*([^*\s](?:[^*]*[^*\s\\])?)\*\*$/u,'strong'],[/(^|[\s(\[{{"'„«])__([^_\s](?:[^_]*[^_\s\\])?)__$/u,'strong'],
+ [/(^|[\s(\[{{"'„«])~~([^~\s](?:[^~]*[^~\s\\])?)~~$/u,'s'],[/(^|[\s(\[{{"'„«])\*([^*\s](?:[^*]*[^*\s\\])?)\*$/u,'em'],[/(^|[\s(\[{{"'„«])_([^_\s](?:[^_]*[^_\s\\])?)_$/u,'em']];
+const MDB=[[/^#\s$/,'formatBlock','h1'],[/^##\s$/,'formatBlock','h2'],[/^###\s$/,'formatBlock','h3'],[/^[-*]\s$/,'insertUnorderedList'],[/^1\.\s$/,'insertOrderedList'],[/^>\s$/,'formatBlock','blockquote']];
+// (the marks the last conversion took off, and the invisible spaces conversions put in)
+let mdLast=null;const zws=new WeakSet();
+// (the text next to node n on its line, before it or after it; '' at the line's edge)
+const BLK=/^(BR|DIV|P|UL|OL|LI|H[1-6]|BLOCKQUOTE|PRE|TABLE|TR|TD|TH|IMG)$/;
+function near(n,back){{for(;;){{const p=back?n.previousSibling:n.nextSibling;
+ if(p){{if(BLK.test(p.nodeName))return '';if(p.textContent)return p.textContent;n=p;continue;}}n=n.parentNode;if(n===ed||BLK.test(n.nodeName))return '';}}}}
+function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return;const n=s.anchorNode,o=s.anchorOffset;
+ if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote')||!ownNodes().some(x=>x===n||x.contains(n)))return;
+ const t=n.data.slice(0,o),r=document.createRange();
+ if(!/^[\p{{L}}\p{{N}}\p{{M}}]/u.test(n.data.slice(o)||near(n,false)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
+  // (no letter inside, as in *.* or *_*, is no formatting; a node's start is a word's start only after a space)
+  if(tag!=='code'&&!/[\p{{L}}\p{{N}}]/u.test(m[2]))return;if(!a&&/[^\s(\[{{"'„«]$/u.test(near(n,true)))return;
+  const tok=(/\s/.test(pre)?pre:near(n,true)+pre).match(/\S*$/)[0];if(/[:\/.@]/.test(tok)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
+  r.setStart(n,a);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);mdLast=t.slice(a);
+  // (the invisible space after it: the editor would carry on typing inside the formatted word)
+  const x=document.createElement(tag);x.textContent=m[2];document.execCommand('insertHTML',false,x.outerHTML+ZW);
+  const z=getSelection().anchorNode;if(z&&z.nodeType===3)zws.add(z);return;}}
+ const p=n.previousSibling,b=n.parentNode;
+ if((p&&!/^(BR|DIV|P)$/.test(p.nodeName))||!(b===ed||/^(DIV|P)$/.test(b.nodeName))||b.closest('li,h1,h2,h3,h4,h5,h6,blockquote'))return;
+ for(const [re,cmd,v] of MDB){{if(!re.test(t))continue;
+  // (the line's format first, then the marks taken off, so Ctrl+Z brings the marks back first; the
+  // cursor may move meanwhile, so the marks are looked for at the start of the new block)
+  document.execCommand(cmd,false,v||null);const c=s.anchorNode,w=c&&(c.nodeType===3?c.parentNode:c).closest('li,h1,h2,h3,blockquote'),f=w&&ed.contains(w)?document.createTreeWalker(w,NodeFilter.SHOW_TEXT).nextNode():null;
+  if(f&&re.test(f.data.slice(0,t.length))){{r.setStart(f,0);r.setEnd(f,t.length);s.removeAllRanges();s.addRange(r);mdLast=r.toString();document.execCommand('delete');}}return;}}}}
+// (after the typing is done: the editor runs no command from inside another one, as when typing
+// is done by execCommand; a dead key such as ~ ends a composition instead)
+ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBusy&&!e.isComposing&&(!e.data||/[*_~`\s]$/.test(e.data)))queueMicrotask(mdType);}});
+ed.addEventListener('compositionend',e=>{{if(!aiBusy&&/[*_~`]$/.test(e.data||''))queueMicrotask(mdType);}});
+// (Ctrl+Z on a conversion selects the marks it gives back, and the next key would replace them)
+ed.addEventListener('input',e=>{{if(e.inputType!=='historyUndo')return;const s=getSelection();if(!s.isCollapsed&&s.toString()===mdLast)s.collapseToEnd();}});
+// (Backspace right after an invisible space put in by a conversion takes the letter before it, Delete
+// right before it the letter after it)
+ed.addEventListener('keydown',e=>{{if(e.ctrlKey||e.altKey||e.metaKey)return;const s=getSelection(),n=s.anchorNode,o=s.anchorOffset;if(!s.isCollapsed||!zws.has(n))return;
+ if(e.key==='Backspace'&&o>0&&n.data[o-1]===ZW)s.collapse(n,o-1);else if(e.key==='Delete'&&n.data[o]===ZW)s.collapse(n,o+1);}});
 window.addEventListener('scroll',()=>{{if(at.style.display==='block')atDraw();}});window.addEventListener('resize',()=>{{if(at.style.display==='block')atDraw();}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();
