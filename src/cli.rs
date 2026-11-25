@@ -1092,6 +1092,29 @@ koniec", rich::image_tag("a@x", 600), rich::image_tag("b@x", 320));
             }
             None => println!("could not read the test email"),
         }
+        // Outlook: a named logo the text shows (hidden), a named picture whose id only starts the
+        // same and which the text only links to (kept).
+        let raw = "From: Test <t@example.com>\r\nSubject: Stopka\r\nMIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"r1\"\r\n\r\n--r1\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Hi</p><img src=\"cid:image001.png@01DC\"><a href=\"cid:image001.png@01\">photo</a><img src=\"x.png\" data-src=\"cid:image001.png@01\">\r\n--r1\r\nContent-Type: image/png; name=\"image001.png\"\r\nContent-ID: <image001.png@01DC>\r\nContent-Disposition: inline; filename=\"image001.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--r1\r\nContent-Type: image/png; name=\"zdjecie.png\"\r\nContent-ID: <image001.png@01>\r\nContent-Disposition: attachment; filename=\"zdjecie.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgoAAAAN\r\n--r1--\r\n";
+        match net::parse(raw.as_bytes(), false, false) {
+            Some(m) => {
+                println!("signature logo hidden, photo kept: {} ({:?}, inline {})", m.attachments == ["zdjecie.png"] && m.inline.len() == 2, m.attachments, m.inline.len());
+                // the same message as saved before: the logo listed, and the same file attached
+                // once more on its own; only the logo's entry goes, once
+                let mut old = m.clone();
+                for (k, name) in ["image001.png", "kopia.png"].into_iter().enumerate() {
+                    old.attachments.insert(k, name.into());
+                    old.attachment_files.insert(k, m.inline[0].1.clone());
+                }
+                let first = net::hide_shown_pictures(&old.html_path, &old.inline, &mut old.attachments, &mut old.attachment_files);
+                println!("saved message fixed: {} ({:?})", first && old.attachments == ["kopia.png", "zdjecie.png"] && old.attachment_files.len() == 2, old.attachments);
+            }
+            None => println!("could not read the test email"),
+        }
+        // a hostile text of 1 MB of picture sources without an end: read in a moment, not in minutes
+        let raw = format!("From: t@example.com\r\nMIME-Version: 1.0\r\nContent-Type: text/html\r\n\r\n<p>{}\r\n", "<img src=cid:".repeat(80_000));
+        let t = std::time::Instant::now();
+        let ok = net::parse(raw.as_bytes(), false, false).is_some();
+        println!("hostile cid text read: {} in {} ms", ok, t.elapsed().as_millis());
         return true;
     }
     if args.iter().any(|a| a == "--secret-selftest") {

@@ -11,6 +11,8 @@ use std::hash::{Hash, Hasher};
 const MESSAGES: TableDefinition<u64, &[u8]> = TableDefinition::new("messages");
 const TEXTS: TableDefinition<u64, &str> = TableDefinition::new("texts");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
+/// Set in META once the saved attachment lists no longer list the pictures shown in the text.
+const PICTURES_HIDDEN: &str = "pictures_hidden";
 
 /// Reads message texts from the database, from any thread (the texts stay on disk until
 /// a message is opened, and the search reads them from here in the background). It doesn't keep
@@ -40,6 +42,9 @@ pub struct Db {
     saved_rows: HashMap<u64, u64>,
     saved_texts: HashMap<u64, u64>,
     saved_meta: u64,
+    /// Messages whose attachment list lost pictures in `load` just now (their old links to
+    /// attachments by number point elsewhere).
+    pub pictures_hidden: std::collections::HashSet<u64>,
 }
 
 /// A quick fingerprint maker (8 bytes at a time): fast enough to look through tens of thousands
@@ -120,7 +125,29 @@ impl Db {
             }
             w.commit().map_err(|e| e.to_string())?;
         }
-        Ok(Db { db: std::sync::Arc::new(db), saved_rows: HashMap::new(), saved_texts: HashMap::new(), saved_meta: 0 })
+        // a mailbox without mail holds none listed by older versions: `load`'s one-time fix is
+        // marked done, so it never runs over mail read by this version
+        let unmarked_empty = db.begin_read().ok().and_then(|r| {
+            let (rows, meta) = (r.open_table(MESSAGES).ok()?, r.open_table(META).ok()?);
+            Some(rows.first().ok()?.is_none() && meta.get(PICTURES_HIDDEN).ok()?.is_none())
+        });
+        if unmarked_empty == Some(true) {
+            let w = db.begin_write().map_err(|e| e.to_string())?;
+            w.open_table(META).map_err(|e| e.to_string())?.insert(PICTURES_HIDDEN, &[1u8][..]).map_err(|e| e.to_string())?;
+            w.commit().map_err(|e| e.to_string())?;
+        }
+        Ok(Db { db: std::sync::Arc::new(db), saved_rows: HashMap::new(), saved_texts: HashMap::new(), saved_meta: 0, pictures_hidden: Default::default() })
+    }
+
+    /// Mail moved over from the older single-file storage was read by the older rule: `load`'s
+    /// one-time fix runs for it at the next start.
+    pub fn forget_pictures_mark(&self) {
+        if let Ok(w) = self.db.begin_write() {
+            if let Ok(mut meta) = w.open_table(META) {
+                let _ = meta.remove(PICTURES_HIDDEN);
+            }
+            let _ = w.commit();
+        }
     }
 
     /// The account and only the `n` newest messages (by number): a few pages of the file, read
@@ -144,6 +171,9 @@ impl Db {
         let store_bytes = meta.get("store").ok()??.value().to_vec();
         let mut store: Store = serde_json::from_slice(&store_bytes).ok()?;
         self.saved_meta = fingerprint(&store_bytes);
+        // once: pictures shown in the text come off the attachment lists of mail saved before
+        // (here, before the app has the mailbox, so nothing it shows or holds changes under it)
+        let hide_pictures = !matches!(meta.get(PICTURES_HIDDEN), Ok(Some(_)));
         let rows = r.open_table(MESSAGES).ok()?;
         // The messages are read in slices (by number), one slice per processor core; each core
         // reads its slice's details and texts and pairs them up, so nothing waits for anything.
@@ -184,9 +214,16 @@ impl Db {
                                             fresh = true;
                                         }
                                     }
+                                    // (only mail from the server: drafts, outgoing and mail made here
+                                    // list exactly the files that get sent)
+                                    let hidden = hide_pictures
+                                        && m.uid.is_some()
+                                        && !matches!(m.folder, crate::model::Folder::Drafts | crate::model::Folder::Outbox)
+                                        && crate::net::hide_shown_pictures(&m.html_path, &m.inline, &mut m.attachments, &mut m.attachment_files);
+                                    fresh |= hidden;
                                     m.on_disk = true;
                                     let rk = if fresh { 0 } else { row_key(&m) };
-                                    out.push((id, m, rk, 0));
+                                    out.push((id, m, rk, hidden as u64));
                                 }
                             }
                             out
@@ -203,16 +240,20 @@ impl Db {
             self.saved_texts.reserve(n);
             let mut fresh: Vec<usize> = Vec::new();
             for slice in slices {
-                for (id, m, rk, _) in slice {
+                for (id, m, rk, hidden) in slice {
                     if rk == 0 {
                         fresh.push(messages.len());
+                    }
+                    if hidden == 1 {
+                        self.pictures_hidden.insert(id);
                     }
                     self.saved_rows.insert(id, rk);
                     messages.push(m);
                 }
             }
-            // excerpts made just now: written back once, here in the background
-            if !fresh.is_empty() {
+            // excerpts made and pictures taken off just now: written back once, here in the
+            // background, with the mark that the pictures are done (in the same transaction)
+            if !fresh.is_empty() || hide_pictures {
                 let t = std::time::Instant::now();
                 if let Ok(w) = self.db.begin_write() {
                     if let Ok(mut rows) = w.open_table(MESSAGES) {
@@ -225,9 +266,14 @@ impl Db {
                             }
                         }
                     }
+                    if hide_pictures {
+                        if let Ok(mut meta) = w.open_table(META) {
+                            let _ = meta.insert(PICTURES_HIDDEN, &[1u8][..]);
+                        }
+                    }
                     let _ = w.commit();
                 }
-                crate::diag::took("  database: excerpts made for the message list", t, format!("{}", fresh.len()));
+                crate::diag::took("  database: excerpts and attachment lists written back", t, format!("{}", fresh.len()));
             }
         }
         store.messages = messages;

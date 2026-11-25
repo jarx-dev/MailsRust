@@ -115,6 +115,9 @@ impl MailApp {
             self.set_status(t!("core.sync.already_open"));
         }
         if migrating {
+            if let Some(d) = self.db.as_ref() {
+                d.forget_pictures_mark();
+            }
             self.save_now = true;
         }
         self.refresh_caches();

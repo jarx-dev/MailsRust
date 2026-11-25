@@ -1445,6 +1445,58 @@ pub fn fill_copies(account: Account, acct: u32, tx: Sender<NetResult>, ctx: efra
     });
 }
 
+/// The pictures an email's HTML shows ("cid:…" as a picture's src, not a link, a data- attribute
+/// or a style, which are left listed), each id whole and as written, with the prefixes
+/// htmlview::prepare replaces exactly (the app's own drawing is laxer, so a picture this misses
+/// only stays listed).
+fn shown_cids(html: &str) -> std::collections::HashSet<&str> {
+    let mut ids = std::collections::HashSet::new();
+    for prefix in ["cid:", "CID:", "Cid:"] {
+        for (i, _) in html.match_indices(prefix) {
+            let before = html[..i].trim_end_matches(|c: char| c == '"' || c == '\'' || c.is_ascii_whitespace()).as_bytes();
+            let n = before.len();
+            let src = n >= 4 && before[n - 4..].eq_ignore_ascii_case(b"src=") && (n == 4 || before[n - 5].is_ascii_whitespace());
+            if !src {
+                continue;
+            }
+            let rest = &html[i + 4..];
+            // (an id runs to a quote, bracket or space within a few hundred bytes: a longer run is
+            // no picture, and stopping there keeps a hostile email from costing time or memory)
+            if let Some(end) = rest.bytes().take(300).position(|b| matches!(b, b'"' | b'\'' | b')' | b'>' | b'<') || b.is_ascii_whitespace()).filter(|&e| e > 0) {
+                ids.insert(&rest[..end]);
+            }
+        }
+    }
+    ids
+}
+
+/// Takes off a saved message's attachment lists the pictures its text shows, as `parse` now does
+/// (messages saved before it listed them); true if any went.
+pub fn hide_shown_pictures(html_path: &str, inline: &[(String, String)], names: &mut Vec<String>, files: &mut Vec<String>) -> bool {
+    // an inline picture and an attachment with the same bytes share the file name (cache_put)
+    let stem = |f: &str| std::path::Path::new(f).file_stem().map(|s| s.to_os_string());
+    if html_path.is_empty() || !files.iter().any(|f| inline.iter().any(|(_, p)| stem(p) == stem(f))) {
+        return false;
+    }
+    let Ok(html) = std::fs::read_to_string(html_path) else { return false };
+    let cids = shown_cids(&html);
+    let mut shown: Vec<_> = inline.iter().filter(|(cid, _)| cids.contains(cid.as_str())).filter_map(|(_, p)| stem(p)).collect();
+    let before = names.len();
+    let mut i = 0;
+    while i < files.len().min(names.len()) {
+        // each picture shown takes off one entry: a second file with the same bytes was attached on its own
+        match stem(&files[i]).and_then(|s| shown.iter().position(|x| *x == s)) {
+            Some(k) => {
+                shown.swap_remove(k);
+                names.remove(i);
+                files.remove(i);
+            }
+            None => i += 1,
+        }
+    }
+    names.len() != before
+}
+
 pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
     let msg = mail_parser::MessageParser::default().parse(raw)?;
     let (from_name, from_addr) = msg
@@ -1478,18 +1530,20 @@ pub fn parse(raw: &[u8], seen: bool, flagged: bool) -> Option<Message> {
         let path = crate::model::cache_put(&part.decoded(), &ext);
         inline.push((cid.trim_matches(['<', '>']).to_string(), path));
     }
-    let html_path = msg
-        .body_html(0)
-        .filter(|h| h.to_lowercase().contains('<'))
-        .map(|h| crate::model::cache_put(h.as_bytes(), "html"))
-        .unwrap_or_default();
+    let html = msg.body_html(0).filter(|h| h.contains('<'));
+    let shown = html.as_deref().map(shown_cids).unwrap_or_default();
+    let html_path = html.as_deref().map(|h| crate::model::cache_put(h.as_bytes(), "html")).unwrap_or_default();
     // Attachments: the name for the list, and the file itself in the cache so it can be opened or saved.
     let mut attachments = Vec::new();
     let mut attachment_files = Vec::new();
     for p in msg.attachments() {
-        // leave out the pictures that are shown inside the email
-        if p.content_id().is_some() && p.attachment_name().is_none() {
-            continue;
+        // leave out the pictures that are shown inside the email: unnamed ones, and named ones the
+        // text points at (Outlook names its logos and signature icons image001.png …)
+        if let Some(cid) = p.content_id() {
+            let image = p.content_type().is_some_and(|ct| ct.ctype().eq_ignore_ascii_case("image"));
+            if p.attachment_name().is_none() || (image && shown.contains(cid.trim_matches(['<', '>']))) {
+                continue;
+            }
         }
         // an invitation's calendar file often comes without a name (as another form of the text)
         let calendar = p.content_type().is_some_and(|ct| matches!((ct.ctype().to_ascii_lowercase().as_str(), ct.subtype().unwrap_or("").to_ascii_lowercase().as_str()), ("text", "calendar") | ("application", "ics")));
