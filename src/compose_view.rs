@@ -398,7 +398,7 @@ impl ComposeView {
             .iter()
             .map(|(c, h)| {
                 let (n, s) = c.label();
-                serde_json::json!({ "n": n, "s": s, "h": h })
+                serde_json::json!({ "n": n, "s": s, "h": h, "g": !c.members.is_empty() })
             })
             .collect();
         let js = format!("window.pzAt&&window.pzAt({},{})", serde_json::to_string(q).unwrap_or_default(), serde_json::Value::Array(list));
@@ -861,7 +861,17 @@ function atShown(){{if(at.style.display!=='block'||!at.checkVisibility({{opacity
 window.pzAt=function(q,list){{if(q!==atQ||!atR)return;const was=q===atLQ&&atL[atI];atI=q===''?-1:q!==atLQ?0:was?list.findIndex(c=>c.h===was.h&&c.n===was.n):-1;
  atL=list;atLQ=q;if(list.length)atDraw();else{{at.style.display='none';atLive.textContent='';}}}};
 function atPick(i){{const c=atL[i];if(!c||!atR||atLQ!==atQ||!ed.contains(atR.startContainer))return;if(!atHere()){{atClose();return;}}const s=getSelection();s.removeAllRanges();s.addRange(atR);
- const a=document.createElement('a');a.href='mailto:'+c.h.split(',').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(',');a.textContent='@'+c.n;document.execCommand('insertHTML',false,a.outerHTML+'&nbsp;');
+ // (as in eM Client: a short „@First L.” on a grey tag, the address only in the link and in "Do";
+ // „Last, First” is read the other way round (not „Smith, Jr.”), the surname is the last word; a group
+ // by its name, someone without a name by the address)
+ const a=document.createElement('a');a.href='mailto:'+c.h.split(',').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(',');
+ // (no direction marks from the name: a cut one would turn the rest of the line round)
+ const sfx=/^(jr|sr|i{{1,3}}|iv|ph\.?d|md)\.?$/i,nf=c.n.normalize('NFC').replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g,'').trim(),cm=nf.indexOf(','),rev=cm>0&&!nf.slice(cm+1).split(',').every(x=>sfx.test(x.trim())),base=rev?nf.slice(cm+1):cm>0?nf.slice(0,cm):nf;
+ const fw=base.trim().split(/[\s,;]+/).filter(Boolean);while(fw.length>2&&sfx.test(fw[fw.length-1]))fw.pop();const ln=rev?nf.slice(0,cm).trim():fw.length>1?fw[fw.length-1]:'';
+ const ini=ln?[...new Intl.Segmenter().segment(ln)][0].segment:'';
+ // (no name: the address exactly as it is sent)
+ a.textContent='@'+(!c.n.trim()||c.n.trim().toLowerCase()===c.h.toLowerCase()?c.h:c.g||!fw.length?nf||c.h:fw[0]+(ini?' '+ini+'.':''));a.style.cssText='background:#e6e6e6!important;color:#222!important;text-decoration:none;border-radius:3px;padding:1px 3px';
+ document.execCommand('insertHTML',false,a.outerHTML+'&nbsp;');
  post({{t:'to',addr:c.h}});atClose();sync();}}
 ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
  // (Esc also before the first list came: it does not open afterwards)

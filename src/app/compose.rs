@@ -746,7 +746,14 @@ impl MailApp {
                                                 // picks nobody, Enter once it came picks from it
                                                 v.run_js("(()=>{const ed=document.getElementById('pz-ed');ed.focus();const k=x=>ed.dispatchEvent(new KeyboardEvent('keydown',{key:x,bubbles:true,cancelable:true}));const ins=s=>document.execCommand('insertText',false,s);const w=f=>setTimeout(f,400);ins('user');document.execCommand('bold');ins('@ev');w(()=>{document.execCommand('bold');const dt=new DataTransfer();dt.setData('text/plain',' x @ev');ed.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));w(()=>{ins(' Hej @');w(()=>{k('Enter');ins(' @e');w(()=>{const s=getSelection(),n=s.anchorNode,o=n.data.indexOf('Hej @')+5;s.collapse(n,o);w(()=>{k('Enter');s.collapse(n,n.data.length);ins(' @e');w(()=>{ins('v');k('Enter');w(()=>k('Enter'));});});});});});});})()");
                                             }
-                                            crate::diag::log(format!("attest: mention link in text {}", html.contains("\">@")));
+                                            // (the short form, the address and the grey background on the same link)
+                                            let tag = html.find(">@Eva L.</a>").and_then(|e| html[..e].rfind("<a ").map(|s| &html[s..e])).filter(|t| t.contains("mailto:eva@example.com"));
+                                            crate::diag::log(format!(
+                                                "attest: mention link in text {}, as „@First L.” {}, grey tag {}",
+                                                html.contains("\">@"),
+                                                tag.is_some(),
+                                                tag.is_some_and(|t| t.contains("background: rgb(230, 230, 230)"))
+                                            ));
                                         }
                                         if std::env::var("POCZTA_START").as_deref() == Ok("webreply") {
                                             use std::sync::atomic::{AtomicBool, Ordering};
