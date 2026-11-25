@@ -14,17 +14,20 @@ pub struct Contact {
     key: String,
     /// a group of the address book: everyone's address ("Name <a@b>")
     pub members: Vec<String>,
+    /// and the same addresses as saved in the book (no name), for "@"
+    emails: Vec<String>,
 }
 
 impl Contact {
     /// A group of the address book, offered while writing: choosing it writes to everyone.
-    pub fn group(name: &str, members: Vec<String>) -> Contact {
-        Contact { name: name.to_string(), addr: String::new(), score: f32::MAX, key: fold(&format!("{name} grupa group")), members }
+    /// `emails`: each member's address as saved in the book.
+    pub fn group(name: &str, members: Vec<String>, emails: Vec<String>) -> Contact {
+        Contact { name: name.to_string(), addr: String::new(), score: f32::MAX, key: fold(&format!("{name} grupa group")), members, emails }
     }
 
     /// A person from the address book.
     pub fn person(name: &str, addr: &str) -> Contact {
-        Contact { name: name.to_string(), addr: addr.to_string(), score: 0.5, key: fold(&format!("{name} {addr}")), members: vec![] }
+        Contact { name: name.to_string(), addr: addr.to_string(), score: 0.5, key: fold(&format!("{name} {addr}")), members: vec![], emails: vec![] }
     }
 
     pub fn text(&self) -> String {
@@ -38,6 +41,28 @@ impl Contact {
         } else {
             full
         }
+    }
+
+    /// How it shows in a list of suggestions: the name (or the address), then the address (or
+    /// how many people the group has).
+    pub fn label(&self) -> (String, String) {
+        if !self.members.is_empty() {
+            return (self.name.clone(), t!("contacts.group_of", people = crate::i18n::plural("people", self.members.len())).into_owned());
+        }
+        (if self.name.is_empty() { self.addr.clone() } else { self.name.clone() }, self.addr.clone())
+    }
+
+    /// The bare address(es), separated by commas (a group: everyone's, as saved in the book). Only
+    /// whole, valid addresses, each checked as it stands: a separator or a „<” inside one must not
+    /// make another address out of a piece of it. Quoted addresses are left out: "Do" never takes
+    /// them, see `add_cc`.
+    pub fn addrs(&self) -> String {
+        let all = if self.members.is_empty() { std::slice::from_ref(&self.addr) } else { &self.emails[..] };
+        all.iter()
+            .map(|a| a.trim())
+            .filter(|a| !a.contains('"') && a.parse::<lettre::message::Mailbox>().is_ok_and(|m| m.email.to_string() == *a))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
@@ -74,7 +99,7 @@ pub fn collect(msgs: &[Message], me: &str) -> Vec<Contact> {
         }
         let name = name.trim().trim_matches('"').trim();
         let name = if name.eq_ignore_ascii_case(addr) { "" } else { name };
-        let e = map.entry(low.clone()).or_insert_with(|| Contact { name: String::new(), addr: addr.to_string(), score: 0.0, key: String::new(), members: vec![] });
+        let e = map.entry(low.clone()).or_insert_with(|| Contact { name: String::new(), addr: addr.to_string(), score: 0.0, key: String::new(), members: vec![], emails: vec![] });
         e.score += weight;
         if e.name.is_empty() && !name.is_empty() {
             e.name = name.to_string();
@@ -111,19 +136,22 @@ pub fn collect(msgs: &[Message], me: &str) -> Vec<Contact> {
 
 /// Best matches for what was typed: any word of the name or the address starting with it.
 pub fn find<'a>(all: &'a [Contact], typed: &str, skip: &str, limit: usize) -> Vec<&'a Contact> {
-    let q = fold(typed.trim());
-    if q.is_empty() {
+    if typed.trim().is_empty() {
         return vec![];
     }
+    matches(all, typed, skip).take(limit).collect()
+}
+
+/// Everyone matching what was typed (as in `find`), best first, found one by one as they are
+/// taken (the caller stops when it has enough).
+pub fn matches<'a>(all: &'a [Contact], typed: &str, skip: &str) -> impl Iterator<Item = &'a Contact> + 'a {
+    let q = fold(typed.trim());
     let skip = skip.to_lowercase();
-    all.iter()
-        .filter(|c| !c.members.is_empty() || !skip.contains(&c.addr.to_lowercase()))
-        .filter(|c| {
-            c.key.starts_with(&q)
-                || c.key.split(|ch: char| ch == ' ' || ch == '.' || ch == '@' || ch == '_' || ch == '-').any(|w| w.starts_with(&q))
-        })
-        .take(limit)
-        .collect()
+    all.iter().filter(move |c| {
+        !q.is_empty()
+            && (!c.members.is_empty() || !skip.contains(&c.addr.to_lowercase()))
+            && (c.key.starts_with(&q) || c.key.split(|ch: char| ch == ' ' || ch == '.' || ch == '@' || ch == '_' || ch == '-').any(|w| w.starts_with(&q)))
+    })
 }
 
 /// Whether the list of suggestions of this recipients box is showing.
@@ -207,15 +235,8 @@ pub fn recipients_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, 
                         if i == pick || row.hovered() {
                             ui.painter().rect_filled(r, 4, crate::theme::ACCENT_SOFT());
                         }
-                        let group = !c.members.is_empty();
-                        let name = if group {
-                            format!("👥 {}", c.name)
-                        } else if c.name.is_empty() {
-                            c.addr.clone()
-                        } else {
-                            c.name.clone()
-                        };
-                        let second = if group { t!("contacts.group_of", people = crate::i18n::plural("people", c.members.len())).into_owned() } else { c.addr.clone() };
+                        let (name, second) = c.label();
+                        let name = if c.members.is_empty() { name } else { format!("👥 {name}") };
                         ui.painter().text(r.left_top() + Vec2::new(10.0, 3.0), Align2::LEFT_TOP, &name, FontId::proportional(13.5), crate::theme::TEXT());
                         ui.painter().text(
                             r.left_top() + Vec2::new(10.0, 20.0),
