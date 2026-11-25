@@ -888,13 +888,16 @@ const MD=[[/(^|[\s(\[{{"'„«])`([^`\s](?:[^`]*[^`\s])?)`$/u,'code'],[/(^|[\s(\
 const MDB=[[/^#\s$/,'formatBlock','h1'],[/^##\s$/,'formatBlock','h2'],[/^###\s$/,'formatBlock','h3'],[/^[-*]\s$/,'insertUnorderedList'],[/^1\.\s$/,'insertOrderedList'],[/^>\s$/,'formatBlock','blockquote']];
 // (the marks the last conversion took off, and the invisible spaces conversions put in)
 let mdLast=null;const zws=new WeakSet();
-function before(n){{while(n!==ed&&!n.previousSibling)n=n.parentNode;const p=n===ed?null:n.previousSibling;return !p||/^(BR|DIV|P|UL|OL|LI|H[1-6]|BLOCKQUOTE|PRE|TABLE|IMG)$/.test(p.nodeName)?'':p.textContent;}}
+// (the text next to node n on its line, before it or after it; '' at the line's edge)
+const BLK=/^(BR|DIV|P|UL|OL|LI|H[1-6]|BLOCKQUOTE|PRE|TABLE|TR|TD|TH|IMG)$/;
+function near(n,back){{for(;;){{const p=back?n.previousSibling:n.nextSibling;
+ if(p){{if(BLK.test(p.nodeName))return '';if(p.textContent)return p.textContent;n=p;continue;}}n=n.parentNode;if(n===ed||BLK.test(n.nodeName))return '';}}}}
 function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return;const n=s.anchorNode,o=s.anchorOffset;
  if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote'))return;
  const t=n.data.slice(0,o),r=document.createRange();
- if(!/^[\p{{L}}\p{{N}}\p{{M}}]/u.test(n.data.slice(o)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
+ if(!/^[\p{{L}}\p{{N}}\p{{M}}]/u.test(n.data.slice(o)||near(n,false)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
   // (no letter inside, as in *.* or *_*, is no formatting; a node's start is a word's start only after a space)
-  if(tag!=='code'&&!/[\p{{L}}\p{{N}}]/u.test(m[2]))return;if(!a&&/[^\s(\[{{"'„«]$/u.test(before(n)))return;
+  if(tag!=='code'&&!/[\p{{L}}\p{{N}}]/u.test(m[2]))return;if(!a&&/[^\s(\[{{"'„«]$/u.test(near(n,true)))return;
   if(/(^|\s)(\S*:\/\/|www\.)\S*$/i.test(pre)||(tag!=='code'&&/(^|[\s(\[{{"'„«])`[^`]*$/u.test(pre)))return;
   r.setStart(n,a);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);mdLast=t.slice(a);
   // (the invisible space after it: the editor would carry on typing inside the formatted word)
@@ -909,10 +912,10 @@ function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)retur
   if(f&&re.test(f.data.slice(0,t.length))){{r.setStart(f,0);r.setEnd(f,t.length);s.removeAllRanges();s.addRange(r);mdLast=r.toString();document.execCommand('delete');}}return;}}}}
 // (after the typing is done: the editor runs no command from inside another one, as when typing
 // is done by execCommand; a dead key such as ~ ends a composition instead)
-ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBusy&&!e.isComposing)queueMicrotask(mdType);}});
+ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBusy&&!e.isComposing&&(!e.data||/[*_~`\s]$/.test(e.data)))queueMicrotask(mdType);}});
 ed.addEventListener('compositionend',e=>{{if(!aiBusy&&/[*_~`]$/.test(e.data||''))queueMicrotask(mdType);}});
 // (Ctrl+Z on a conversion selects the marks it gives back, and the next key would replace them)
-ed.addEventListener('input',e=>{{if(e.inputType!=='historyUndo')return;const s=getSelection();if(!s.isCollapsed&&s.toString()===mdLast){{mdLast=null;s.collapseToEnd();}}}});
+ed.addEventListener('input',e=>{{if(e.inputType!=='historyUndo')return;const s=getSelection();if(!s.isCollapsed&&s.toString()===mdLast)s.collapseToEnd();}});
 // (Backspace right after an invisible space put in by a conversion takes the letter before it)
 ed.addEventListener('keydown',e=>{{if(e.key!=='Backspace'||e.ctrlKey||e.altKey||e.metaKey)return;const s=getSelection(),n=s.anchorNode,o=s.anchorOffset;
  if(s.isCollapsed&&zws.has(n)&&o>0&&n.data[o-1]===ZW)s.collapse(n,o-1);}});
