@@ -672,9 +672,10 @@ let Q=[];
 function post(o){{if(o.t==='html')Q=Q.filter(x=>x.t!=='html');Q.push(o);}}
 window.pzDrag=function(on){{document.getElementById('pz-drop').style.display=on?'flex':'none';}};
 window.pzTake=function(){{const q=Q;Q=[];return JSON.stringify(q);}};
-// (the invisible space that keeps typing out of a formatted word, see mdType: not sent)
-const ZW=String.fromCharCode(8203),noZw=x=>x.split(ZW).join('');
-function sync(){{post({{t:'html',html:noZw(ed.innerHTML),text:noZw(ed.innerText)}});}}
+// (the invisible space that keeps typing out of a formatted word, see mdType, is not sent: in the
+// formatted text only the one right after such a word, in the plain text any)
+const ZW=String.fromCharCode(8203),zwTag=new RegExp('(</(?:strong|em|s|code)>)'+ZW,'g');
+function sync(){{post({{t:'html',html:ed.innerHTML.replace(zwTag,'$1'),text:ed.innerText.split(ZW).join('')}});}}
 let saved=null;
 function saveSel(){{const s=getSelection();if(s.rangeCount&&ed.contains(s.anchorNode))saved=s.getRangeAt(0).cloneRange();}}
 function restore(){{ed.focus();if(saved){{const s=getSelection();s.removeAllRanges();s.addRange(saved);}}}}
@@ -878,26 +879,36 @@ ed.addEventListener('keydown',e=>{{if(e.shiftKey||e.ctrlKey||e.altKey||e.metaKey
   const fresh=atLQ===atQ;if(fresh?atI<0:atQ===''){{atClose(true);return;}}e.preventDefault();if(fresh)atPick(atI);}}}},true);
 ed.addEventListener('input',atCheck);document.addEventListener('selectionchange',atCheck);ed.addEventListener('blur',()=>atClose());
 // ---- Markdown as it is typed: **bold** (or __bold__), *italic* (or _italic_), ~~struck~~ and `code`
-// once the closing mark is typed (not inside a word, so snake_case stays); „# ”, „## ”, „### ”, „- ”,
-// „* ”, „1. ” and „> ” at a line's start make a heading, a list or a quote. Each is one undo step
-// after the typed mark, so Ctrl+Z gives the marks back.
-const MD=[[/(^|[^`])`([^`\s](?:[^`]*[^`\s])?)`$/,'code'],[/(^|[^*\p{{L}}\p{{N}}])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/u,'strong'],[/(^|[^_\p{{L}}\p{{N}}])__([^_\s](?:[^_]*[^_\s])?)__$/u,'strong'],
- [/(^|[^~\p{{L}}\p{{N}}])~~([^~\s](?:[^~]*[^~\s])?)~~$/u,'s'],[/(^|[^*\p{{L}}\p{{N}}])\*([^*\s](?:[^*]*[^*\s])?)\*$/u,'em'],[/(^|[^_\p{{L}}\p{{N}}])_([^_\s](?:[^_]*[^_\s])?)_$/u,'em']];
+// once the closing mark is typed, but not inside a word, an address or an unclosed `code`, nor after
+// a \ (so snake_case and links stay); „# ”, „## ”, „### ”, „- ”, „* ”, „1. ” and „> ” at a line's
+// start make a heading, a list or a quote. Ctrl+Z gives the marks back (on a line: before its format).
+const MD=[[/(^|[^`\\/\p{{L}}\p{{N}}])`([^`\s](?:[^`]*[^`\s])?)`$/u,'code'],[/(^|[^*\\/\p{{L}}\p{{N}}])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/u,'strong'],[/(^|[^_\\/\p{{L}}\p{{N}}])__([^_\s](?:[^_]*[^_\s])?)__$/u,'strong'],
+ [/(^|[^~\\/\p{{L}}\p{{N}}])~~([^~\s](?:[^~]*[^~\s])?)~~$/u,'s'],[/(^|[^*\\/\p{{L}}\p{{N}}])\*([^*\s](?:[^*]*[^*\s])?)\*$/u,'em'],[/(^|[^_\\/\p{{L}}\p{{N}}])_([^_\s](?:[^_]*[^_\s])?)_$/u,'em']];
 const MDB=[[/^#\s$/,'formatBlock','h1'],[/^##\s$/,'formatBlock','h2'],[/^###\s$/,'formatBlock','h3'],[/^[-*]\s$/,'insertUnorderedList'],[/^1\.\s$/,'insertOrderedList'],[/^>\s$/,'formatBlock','blockquote']];
 function mdType(){{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return;const n=s.anchorNode,o=s.anchorOffset;
  if(n.nodeType!==3||!ed.contains(n)||n.parentNode.closest('code,pre,a,.pz-sig,.pz-quote'))return;
  const t=n.data.slice(0,o),r=document.createRange();
- for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;
-  r.setStart(n,m.index+m[1].length);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);
+ if(!/[\p{{L}}\p{{N}}]/u.test(n.data.charAt(o)))for(const [re,tag] of MD){{const m=t.match(re);if(!m)continue;const a=m.index+m[1].length,pre=t.slice(0,a);
+  if(/(^|\s)(\S*:\/\/|www\.)\S*$/i.test(pre)||(tag!=='code'&&pre.split('`').length%2===0))return;
+  r.setStart(n,a);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);
   // (the invisible space after it: the editor would carry on typing inside the formatted word)
   const x=document.createElement(tag);x.textContent=m[2];document.execCommand('insertHTML',false,x.outerHTML+ZW);return;}}
  const p=n.previousSibling,b=n.parentNode;
  if((p&&!/^(BR|DIV|P)$/.test(p.nodeName))||!(b===ed||/^(DIV|P)$/.test(b.nodeName))||b.closest('li,h1,h2,h3,h4,h5,h6,blockquote'))return;
  for(const [re,cmd,v] of MDB){{if(!re.test(t))continue;
-  r.setStart(n,0);r.setEnd(n,o);s.removeAllRanges();s.addRange(r);document.execCommand('delete');document.execCommand(cmd,false,v||null);return;}}}}
+  // (the line's format first, then the marks taken off, so Ctrl+Z brings the marks back first)
+  // (the cursor may move meanwhile: the marks are looked for at the start of the new block)
+  document.execCommand(cmd,false,v||null);const c=s.anchorNode,w=c&&(c.nodeType===3?c.parentNode:c).closest('li,h1,h2,h3,blockquote'),f=w&&ed.contains(w)?document.createTreeWalker(w,NodeFilter.SHOW_TEXT).nextNode():null;
+  if(f&&re.test(f.data.slice(0,t.length))){{r.setStart(f,0);r.setEnd(f,t.length);s.removeAllRanges();s.addRange(r);document.execCommand('delete');}}return;}}}}
 // (after the typing is done: the editor runs no command from inside another one, as when typing
-// is done by execCommand)
+// is done by execCommand; a dead key such as ~ ends a composition instead)
 ed.addEventListener('input',e=>{{if(e.inputType==='insertText'&&!atPaste&&!aiBusy&&!e.isComposing)queueMicrotask(mdType);}});
+ed.addEventListener('compositionend',()=>{{if(!aiBusy)queueMicrotask(mdType);}});
+// (Ctrl+Z on a conversion selects the marks it gives back, and the next key would replace them)
+ed.addEventListener('input',e=>{{if(e.inputType!=='historyUndo')return;const s=getSelection();if(!s.isCollapsed&&MD.some(([re])=>re.test(s.toString())))s.collapseToEnd();}});
+// (Backspace right after the invisible space takes the letter before it)
+ed.addEventListener('keydown',e=>{{if(e.key!=='Backspace'||e.ctrlKey||e.altKey||e.metaKey)return;const s=getSelection(),n=s.anchorNode,o=s.anchorOffset;
+ if(s.isCollapsed&&n&&n.nodeType===3&&o>0&&n.data[o-1]===ZW)s.collapse(n,o-1);}});
 window.addEventListener('scroll',()=>{{if(at.style.display==='block')atDraw();}});window.addEventListener('resize',()=>{{if(at.style.display==='block')atDraw();}});
 window.addEventListener('load',()=>{{ed.querySelectorAll('.pz-sig,.pz-quote,blockquote').forEach(x=>x.setAttribute('spellcheck','false'));sync();const r=document.createRange();r.setStart(ed,0);r.collapse(true);saved=r;}});
 }})();
