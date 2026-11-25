@@ -304,13 +304,14 @@ specjalista ds. Informatyki".into();
                 m.date = Local::now().naive_local();
             }
             // (the reading pane keeps a shown message by its number, also while hidden: the new
-            // text is loaded again; a translation of the old one is dropped)
-            self.mail_view.reload();
+            // text is loaded again; a translation of the old one is dropped, also one on its way)
+            self.mail_view.forget(id);
             if self.html_cache.as_ref().map(|c| c.0) == Some(id) {
                 self.html_cache = None;
             }
             self.translations.remove(&id);
             self.show_translated.remove(&id);
+            self.translating.remove(&id);
             self.save_now = true;
             self.set_status(t!("core.sync.ai_draft"));
             self.touched = true;
