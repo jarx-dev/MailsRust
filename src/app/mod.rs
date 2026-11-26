@@ -999,7 +999,11 @@ tel.: 600-100-200".into();
         }
         if std::env::var("POCZTA_START").as_deref() == Ok("invite") {
             // test picture: the open message is an invitation to a meeting today
-            let file = crate::model::cache_put(crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string()).as_bytes(), "ics");
+            let mut ics = crate::gcal::SAMPLE_INVITE.replace("20261120", &Local::now().format("%Y%m%d").to_string());
+            if !crate::i18n::is_pl() {
+                ics = ics.replace("Przegląd wdrożenia\\, etap 2", "Rollout review\\, phase 2").replace("Sala B", "Room B");
+            }
+            let file = crate::model::cache_put(ics.as_bytes(), "ics");
             if let Some(m) = app.store.messages.iter_mut().filter(|m| m.folder == Folder::Inbox).max_by_key(|m| m.date) {
                 m.attachments.push("invite.ics".into());
                 m.attachment_files.push(file);
@@ -1152,12 +1156,14 @@ tel.: 600-100-200".into();
             // test picture: an earlier exchange about the same meeting
             if let Some(first) = app.store.messages.iter().find(|m| m.folder == Folder::Inbox).cloned() {
                 let me = (app.store.account.display_name.clone(), app.store.account.email.clone());
+                let pl = crate::i18n::is_pl();
+                let l = |p: &'static str, e: &'static str| if pl { p } else { e };
                 let lines = [
-                    (true, "Cześć Anno, czy możemy umówić spotkanie startowe projektu w tym tygodniu?"),
-                    (false, "Jasne, proponuję czwartek o 10:00. Przygotuję krótki plan."),
-                    (true, "Czwartek pasuje. Zaproszę też Piotra i Martę."),
-                    (false, "Super, dzięki. Wyślę plan dzień wcześniej."),
-                    (true, "Dodaj proszę punkt o terminach pierwszego przeglądu."),
+                    (true, l("Cześć Anno, czy możemy umówić spotkanie startowe projektu w tym tygodniu?", "Hi Emma, can we set up the project kickoff meeting this week?")),
+                    (false, l("Jasne, proponuję czwartek o 10:00. Przygotuję krótki plan.", "Sure, how about Thursday at 10:00? I'll put together a short plan.")),
+                    (true, l("Czwartek pasuje. Zaproszę też Piotra i Martę.", "Thursday works. I'll invite Paul and Martha too.")),
+                    (false, l("Super, dzięki. Wyślę plan dzień wcześniej.", "Great, thanks. I'll send the plan a day before.")),
+                    (true, l("Dodaj proszę punkt o terminach pierwszego przeglądu.", "Please add a point about the first review dates.")),
                 ];
                 for (i, (mine, text)) in lines.iter().enumerate() {
                     let mut m = first.clone();
@@ -1173,7 +1179,10 @@ tel.: 600-100-200".into();
                     if i == 4 {
                         // a formatted one, to see it unfolded with its look
                         m.html_path = crate::model::cache_put(
-                            "<p>Dodaj proszę punkt o <b>terminach pierwszego przeglądu</b>:</p><ul><li>wstępny harmonogram</li><li>kto przygotowuje dane</li></ul><p style=\"color:#1a6\">Dzięki!</p>".as_bytes(),
+                            l(
+                                "<p>Dodaj proszę punkt o <b>terminach pierwszego przeglądu</b>:</p><ul><li>wstępny harmonogram</li><li>kto przygotowuje dane</li></ul><p style=\"color:#1a6\">Dzięki!</p>",
+                                "<p>Please add a point about the <b>first review dates</b>:</p><ul><li>a draft schedule</li><li>who prepares the data</li></ul><p style=\"color:#1a6\">Thanks!</p>",
+                            ).as_bytes(),
                             "html",
                         );
                         if std::env::var("POCZTA_INVITE_CARD").is_ok() {
