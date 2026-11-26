@@ -44,11 +44,11 @@ Outlook, prowadzi do dokumentacji Microsoftu.
 | **Cena** | Za darmo, licencja MIT | Za darmo z reklamami albo subskrypcja Microsoft 365 ([Microsoft](https://support.microsoft.com/pl-pl/outlook/about-ads-in-outlook)) |
 
 Poczta nie ma jeszcze logowania przez Microsoft, którego wymagają konta Outlook.com, Microsoft 365
-i Exchange; taka skrzynka działa tylko przez IMAP, jeśli jej serwer na to pozwala. Nie ma wersji na macOS, Linuksa ani telefon.
+i Exchange; działa jedynie firmowy serwer Exchange, który przyjmuje hasło przez IMAP. Nie ma wersji na macOS, Linuksa ani telefon.
 
 ## Co dostajesz
 
-**Szybka, także z dużą skrzynką.** Skrzynka jest odczytana z dysku w ok. 60 ms, skrzynka z 78 tysiącami
+**Szybka, także z dużą skrzynką.** Lista wiadomości jest odczytana z dysku w ok. 60 ms, skrzynka z 78 tysiącami
 wiadomości jest na ekranie w niecałą sekundę, a w spoczynku zmierzone zużycie to 0,0–0,8% jednego rdzenia,
 więc program siedzi cicho w tle. Synchronizacja i indeksowanie idą w wątkach w tle, więc przewijanie
 i czytanie nie czekają na sieć ([pomiary](#wydajność)).
@@ -119,7 +119,7 @@ Twój dzień obok poczty, więc na zaproszenie odpowiadasz, wiedząc, z czym kol
 </picture>
 
 ### Bezpieczna od początku
-- Wiadomości nie uruchamiają własnych skryptów, a link, który pokazuje jeden adres, a otwiera inny, jest oznaczony.
+- Wiadomości nie uruchamiają własnych skryptów, a link, którego tekst pokazuje jeden adres, a otwiera inną stronę, jest oznaczony.
 - Nad wiadomością, która wygląda na phishing, pojawia się ostrzeżenie. Te sprawdzenia działają na Twoim
   komputerze; druga opinia AI jest o jedno kliknięcie, gdy masz ustawione AI.
 
@@ -144,7 +144,8 @@ zmiana od razu) i klasyczny układ: foldery | lista | wiadomość | dzień w kal
    „Więcej informacji” → „Uruchom mimo to”.
 4. **Dodaj konto**: Gmail z logowaniem przez Google albo skrzynka IMAP/SMTP. Pierwsze logowanie przez
    Google wymaga jednorazowej konfiguracji własnego projektu w Google Cloud (ok. 5 minut, program
-   prowadzi krok po kroku); hasło aplikacji Gmaila przez IMAP to pomija. Poczta zostaje
+   prowadzi krok po kroku); dopóki projekt jest w trybie testowym, Google prosi o ponowne logowanie co 7 dni.
+   Hasło aplikacji Gmaila przez IMAP to wszystko pomija. Poczta zostaje
    na serwerze jak dotąd; program trzyma własną kopię w `%LOCALAPPDATA%\Poczta`. Przy tym pierwszym
    uruchomieniu pobiera też raz model do wyszukiwania po znaczeniu (ok. 500 MB).
 
@@ -183,12 +184,13 @@ Poczta trafia do usługi AI tylko wtedy, gdy sam ją ustawisz i klikniesz funkcj
   - serwery, na których leżą obrazki i style w otwieranej wiadomości (Poczta otwiera najnowszą
     przy starcie), więc jak w większości programów pocztowych nadawca może poznać, że ją otwarto;
   - adresy, które sam dodasz: kalendarze iCal i link autorespondera;
+  - strona, której link wkleisz do pisanej wiadomości, żeby pobrać jej tytuł;
   - publiczna usługa ikon stron Google, żeby pokazać logo firm, które do Ciebie piszą (widzi ich domenę);
   - Hugging Face, raz, żeby pobrać model do wyszukiwania po znaczeniu;
   - GitHub, żeby sprawdzić i pobrać nowe wydania;
   - errors.jarx.pl, żeby wysłać krótki raport o awarii, który można wyłączyć ([dokładnie to, co zawiera](#raporty-o-awariach));
   - usługa AI, którą sam ustawisz, jeśli w ogóle: tylko to, czego potrzebuje kliknięta funkcja, np. tekst
-    do poprawy albo tłumaczenia, a przy sprawdzaniu phishingu nadawca, nagłówki, linki i nazwy załączników.
+    do poprawy albo tłumaczenia, a przy sprawdzaniu phishingu sama wiadomość: temat, tekst, nadawca, nagłówki, linki i nazwy załączników.
 
 ## Raporty o awariach
 
@@ -240,7 +242,7 @@ Kod jest krótki i można go sprawdzić w [src/crash_report.rs](src/crash_report
 
 ### Agenci AI (MCP)
 
-Agenci AI w Twojej prywatnej sieci Tailscale (Claude Code, Codex) mogą przeszukiwać pocztę po nagłówkach,
+Agenci AI w Twojej prywatnej sieci Tailscale (Claude Code, Codex) mogą przeszukiwać pocztę po słowach i znaczeniu (wyniki to same nagłówki),
 czytać wiadomości, o które poproszą, i zostawiać szkice odpowiedzi. Niczego nie wysyłają: każdy szkic
 sprawdzasz i wysyłasz sam. Domyślnie wyłączone (menu ☰ → „Ustawienia AI” → „Agenci AI (MCP)”).
 

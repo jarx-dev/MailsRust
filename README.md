@@ -44,11 +44,11 @@ Outlook works links to Microsoft's own documentation.
 | **Price** | Free, MIT licence | Free with ads, or a Microsoft 365 subscription ([Microsoft](https://support.microsoft.com/en-us/outlook/about-ads-in-outlook)) |
 
 Poczta does not have Microsoft's own sign-in yet, which Outlook.com, Microsoft 365 and Exchange accounts
-need; such a mailbox works only through IMAP, where its server allows that. There is no version for macOS, Linux or phones.
+need; only a company's own Exchange server that accepts a password over IMAP can work. There is no version for macOS, Linux or phones.
 
 ## What you get
 
-**Fast, even with a big mailbox.** The mailbox is read from disk in about 60 ms, a 78,000-message
+**Fast, even with a big mailbox.** The message list is read from disk in about 60 ms, a 78,000-message
 mailbox is on screen in under a second, and at rest Poczta measured 0.0–0.8% of one CPU core, so it stays
 quiet in the background. Syncing and indexing run in background threads, so scrolling and reading do not
 wait for the network ([measurements](#performance)).
@@ -120,7 +120,7 @@ Your day next to your mail, so you answer invitations knowing what clashes.
 </picture>
 
 ### Safe by default
-- Messages never run their own scripts, and a link that shows one address but opens another is marked.
+- Messages never run their own scripts, and a link whose text shows one web address but opens another site is marked.
 - A warning appears above a message that looks like phishing. These checks run on your PC; an AI second
   opinion is one click away when you have set up AI.
 
@@ -145,7 +145,8 @@ switches at once), and the classic layout: folders | list | message | calendar d
    "More info" → "Run anyway".
 4. **Add your account**: Gmail with Google sign-in, or an IMAP/SMTP mailbox. The first Google sign-in
    needs a one-time setup of your own Google Cloud project (about 5 minutes, the app walks you through
-   it); a Gmail app password over IMAP skips it. Your mail stays on the
+   it); while that project stays in test mode, Google asks you to sign in again every 7 days. A Gmail app
+   password over IMAP skips all of this. Your mail stays on the
    server as before; Poczta keeps its own copy in `%LOCALAPPDATA%\Poczta`. On this first start it also
    downloads the search-by-meaning model once (about 500 MB).
 
@@ -184,12 +185,13 @@ Mail goes to an AI service only when you set one up and click an AI feature, or 
   - the servers that host pictures and styles inside a message you open (Poczta opens the newest one
     at start), so, as in most mail apps, a sender can tell it was opened;
   - addresses you add yourself: iCal calendars and an autoresponder link;
+  - the page behind a link you paste into a message you write, to fetch its title;
   - Google's public site-icon service, for the logos of companies that write to you (it sees their domain);
   - Hugging Face, once, to download the search-by-meaning model;
   - GitHub, to check for and download new releases;
   - errors.jarx.pl, to send a short crash report you can switch off ([exactly what it contains](#crash-reports));
   - the AI service you set up yourself, if any: only what the feature you click needs, such as the text
-    to fix or translate, or for a phishing check the sender, headers, links and attachment names.
+    to fix or translate, or for a phishing check the message itself: subject, text, sender, headers, links and attachment names.
 
 ## Crash reports
 
@@ -240,7 +242,7 @@ The code is short and can be checked in [src/crash_report.rs](src/crash_report.r
 
 ### AI agents (MCP)
 
-AI agents on your private Tailscale network (Claude Code, Codex) can search your mail by its headers,
+AI agents on your private Tailscale network (Claude Code, Codex) can search your mail by words and meaning (the results are headers only),
 read the messages they ask for and leave draft replies. They never send anything: you check every draft
 and send it yourself. It is off by default (☰ menu → "AI settings" → "AI agents (MCP)").
 
