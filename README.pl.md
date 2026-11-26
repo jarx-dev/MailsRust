@@ -38,17 +38,17 @@ Outlook, prowadzi do dokumentacji Microsoftu.
 
 | | **Poczta** | **Nowy Outlook dla Windows** |
 |---|---|---|
-| **Konta** | Gmail i skrzynki IMAP/SMTP. Jeszcze nie: Outlook.com, Microsoft 365, Exchange | Outlook.com, Microsoft 365, Exchange, Gmail, Yahoo, iCloud i inne ([Microsoft](https://support.microsoft.com/pl-pl/outlook/getstarted/add-an-email-account-to-outlook-for-windows)) |
+| **Konta** | Gmail i skrzynki IMAP/SMTP. Jeszcze nie: logowanie Microsoftu do Outlook.com, Microsoft 365 i Exchange | Outlook.com, Microsoft 365, Exchange, Gmail, Yahoo, iCloud i inne ([Microsoft](https://support.microsoft.com/pl-pl/outlook/getstarted/add-an-email-account-to-outlook-for-windows)) |
 | **Dokąd trafia kopia Twojego Gmaila** | Na Twój komputer | Dla wielu funkcji także do chmury Microsoftu: poczta, kalendarz i kontakty ([Microsoft](https://support.microsoft.com/pl-pl/outlook/getstarted/sync-your-account-in-outlook-to-the-microsoft-cloud)) |
-| **Reklamy** | Żadnych i żadnych identyfikatorów reklamowych | Wersja bezpłatna pokazuje reklamy w skrzynce i przekazuje sieciom reklamowym cookie lub identyfikator urządzenia; bez reklam tylko z subskrypcją Microsoft 365 ([Microsoft](https://support.microsoft.com/pl-pl/outlook/about-ads-in-outlook)) |
+| **Reklamy** | Żadnych i żadnych identyfikatorów reklamowych | Z bezpłatnym kontem osobistym pokazuje reklamy w skrzynce i przekazuje sieciom reklamowym cookie lub identyfikator urządzenia; bez reklam tylko z subskrypcją Microsoft 365 ([Microsoft](https://support.microsoft.com/pl-pl/outlook/about-ads-in-outlook)) |
 | **Cena** | Za darmo, licencja MIT | Za darmo z reklamami albo subskrypcja Microsoft 365 ([Microsoft](https://support.microsoft.com/pl-pl/outlook/about-ads-in-outlook)) |
 
 Poczta nie ma jeszcze logowania przez Microsoft, którego wymagają konta Outlook.com, Microsoft 365
-i Exchange. Nie ma wersji na macOS, Linuksa ani telefon.
+i Exchange; taka skrzynka działa tylko przez IMAP, jeśli jej serwer na to pozwala. Nie ma wersji na macOS, Linuksa ani telefon.
 
 ## Co dostajesz
 
-**Szybka, także z dużą skrzynką.** Lista pojawia się ok. 60 ms po otwarciu okna, skrzynka z 78 tysiącami
+**Szybka, także z dużą skrzynką.** Skrzynka jest odczytana z dysku w ok. 60 ms, skrzynka z 78 tysiącami
 wiadomości jest na ekranie w niecałą sekundę, a w spoczynku zmierzone zużycie to 0,0–0,8% jednego rdzenia,
 więc program siedzi cicho w tle. Synchronizacja i indeksowanie idą w wątkach w tle, więc przewijanie
 i czytanie nie czekają na sieć ([pomiary](#wydajność)).
@@ -56,21 +56,21 @@ i czytanie nie czekają na sieć ([pomiary](#wydajność)).
 ### Rozmowy i historia
 Zawsze wiesz, kto co napisał.
 - **Rozmowy w jednym miejscu:** otwarta wiadomość rozwinięta, wcześniejsze zwinięte w karty.
-- **Historia** przy każdej wiadomości: wszystko, co Ty i ta osoba do siebie wysłaliście, jedno kliknięcie dalej.
+- **Historia** przy każdej wiadomości: poczta od tej osoby i ta, którą wysłałeś wprost do niej, jedno kliknięcie dalej.
 - **Nowa poczta, gdy tylko serwer da sygnał** (IMAP IDLE), z dźwiękiem, licznikiem na ikonie
   i powiadomieniem, także gdy Poczta siedzi w zasobniku.
-- **Porządek po Twojemu:** widoki „Nieprzeczytane”, „Oznaczone” i „Bez odpowiedzi (7 dni)”, tagi Gmaila,
-  ulubione i własne foldery; wiadomości przeciąga się na folder albo tag. Filtry Gmaila tworzy się i zmienia w programie.
-- Kilka kont naraz: Gmail z logowaniem przez Google albo skrzynki IMAP/SMTP, które przyjmują hasło.
+- **Porządek po Twojemu:** widoki „Nieprzeczytane”, „Oznaczone” i „Bez odpowiedzi (7 dni)”, a w Gmailu też tagi,
+  ulubione i własne foldery, na które przeciąga się wiadomości. Filtry Gmaila tworzy się i zmienia w programie.
+- Kilka kont naraz: główne z logowaniem przez Google albo hasłem, kolejne z hasłem (dla Gmaila hasło aplikacji).
 
 <table>
 <tr>
 <td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/thread-dark.png"><img src="docs/screenshots/thread.png" alt="Rozmowa: wcześniejsze wiadomości zwinięte w karty nad otwartą"></picture></td>
-<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history.png" alt="Panel Historia obok otwartej wiadomości: cała korespondencja z nadawcą"></picture></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history.png" alt="Panel Historia obok otwartej wiadomości: korespondencja z nadawcą"></picture></td>
 </tr>
 <tr>
 <td align="center"><sub>Rozmowa, wcześniejsze wiadomości zwinięte</sub></td>
-<td align="center"><sub>Historia: cała poczta z tą osobą</sub></td>
+<td align="center"><sub>Historia: Twoja poczta z tą osobą</sub></td>
 </tr>
 </table>
 
@@ -84,7 +84,7 @@ Formatujesz w trakcie pisania, bez sięgania po pasek narzędzi.
 ### Zaproszenia, kalendarz i czat Google
 Twój dzień obok poczty, więc na zaproszenie odpowiadasz, wiedząc, z czym koliduje.
 - **Zaproszenia** mają Przyjmij · Wstępnie · Odrzuć tuż nad wiadomością, z informacją, z czym spotkanie
-  koliduje. 10 minut przed każdym spotkaniem pojawia się przypomnienie.
+  koliduje. 10 minut przed każdym spotkaniem o określonej godzinie pojawia się przypomnienie.
 - **Kalendarz** w widoku miesiąca i tygodnia oraz panel dnia obok poczty, synchronizowane z Kalendarzem
   Google w obie strony.
 - **Czat Google** dla kont Google Workspace, w tym samym oknie.
@@ -142,7 +142,9 @@ zmiana od razu) i klasyczny układ: foldery | lista | wiadomość | dzień w kal
    repozytorium, z atestacją pochodzenia: `gh attestation verify Poczta-….exe -R jarx-dev/MailsRust`.
 3. **Uruchom.** Nie trzeba niczego instalować. Windows SmartScreen może ostrzec przed nieznanym wydawcą:
    „Więcej informacji” → „Uruchom mimo to”.
-4. **Dodaj konto**: Gmail z logowaniem przez Google albo skrzynka IMAP/SMTP. Poczta zostaje
+4. **Dodaj konto**: Gmail z logowaniem przez Google albo skrzynka IMAP/SMTP. Pierwsze logowanie przez
+   Google wymaga jednorazowej konfiguracji własnego projektu w Google Cloud (ok. 5 minut, program
+   prowadzi krok po kroku); hasło aplikacji Gmaila przez IMAP to pomija. Poczta zostaje
    na serwerze jak dotąd; program trzyma własną kopię w `%LOCALAPPDATA%\Poczta`. Przy tym pierwszym
    uruchomieniu pobiera też raz model do wyszukiwania po znaczeniu (ok. 500 MB).
 
@@ -173,17 +175,20 @@ Szczegóły i metoda pomiarów: [PERF.md](PERF.md).
 ## Prywatność w skrócie
 
 **Twoja poczta nie przechodzi przez żaden nasz serwer: Poczta synchronizuje się bezpośrednio z Twoim dostawcą poczty.
-Tekst wiadomości trafia do usługi AI tylko wtedy, gdy sam ją ustawisz i klikniesz funkcję AI.**
+Poczta trafia do usługi AI tylko wtedy, gdy sam ją ustawisz i klikniesz funkcję AI albo włączysz agentów AI (niżej).**
 
-- Twoja kopia poczty to jeden plik na Twoim komputerze. Hasła są szyfrowane kluczem Twojego konta Windows (DPAPI).
-- Bez analityki i śledzenia. Wszystko, z czym Poczta się łączy:
-  - Twój serwer poczty oraz Google przy logowaniu, Gmailu, Kalendarzu i Czacie;
-  - serwery, na których leżą obrazki w otwieranej wiadomości, jak w większości programów pocztowych;
+- Twoja kopia poczty zostaje na Twoim komputerze: baza i folder cache w `%LOCALAPPDATA%\Poczta`. Hasła są szyfrowane kluczem Twojego konta Windows (DPAPI).
+- Poczta nie ma analityki ani śledzenia. Wszystko, z czym się łączy:
+  - Twój serwer poczty oraz Google przy logowaniu, Gmailu, Kalendarzu, Kontaktach i Czacie;
+  - serwery, na których leżą obrazki i style w otwieranej wiadomości (Poczta otwiera najnowszą
+    przy starcie), więc jak w większości programów pocztowych nadawca może poznać, że ją otwarto;
+  - adresy, które sam dodasz: kalendarze iCal i link autorespondera;
   - publiczna usługa ikon stron Google, żeby pokazać logo firm, które do Ciebie piszą (widzi ich domenę);
   - Hugging Face, raz, żeby pobrać model do wyszukiwania po znaczeniu;
   - GitHub, żeby sprawdzić i pobrać nowe wydania;
   - errors.jarx.pl, żeby wysłać krótki raport o awarii, który można wyłączyć ([dokładnie to, co zawiera](#raporty-o-awariach));
-  - usługa AI, którą sam ustawisz, jeśli w ogóle: tylko tekst, który każesz poprawić, przetłumaczyć albo sprawdzić, i tylko po kliknięciu.
+  - usługa AI, którą sam ustawisz, jeśli w ogóle: tylko to, czego potrzebuje kliknięta funkcja, np. tekst
+    do poprawy albo tłumaczenia, a przy sprawdzaniu phishingu nadawca, nagłówki, linki i nazwy załączników.
 
 ## Raporty o awariach
 

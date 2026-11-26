@@ -38,17 +38,17 @@ Outlook works links to Microsoft's own documentation.
 
 | | **Poczta** | **New Outlook for Windows** |
 |---|---|---|
-| **Accounts** | Gmail and IMAP/SMTP mailboxes. Not yet: Outlook.com, Microsoft 365, Exchange | Outlook.com, Microsoft 365, Exchange, Gmail, Yahoo, iCloud and more ([Microsoft](https://support.microsoft.com/en-us/outlook/getstarted/add-an-email-account-to-outlook-for-windows)) |
+| **Accounts** | Gmail and IMAP/SMTP mailboxes. Not yet: Microsoft sign-in for Outlook.com, Microsoft 365 and Exchange | Outlook.com, Microsoft 365, Exchange, Gmail, Yahoo, iCloud and more ([Microsoft](https://support.microsoft.com/en-us/outlook/getstarted/add-an-email-account-to-outlook-for-windows)) |
 | **Where a copy of your Gmail goes** | To your PC | For many features, also to the Microsoft Cloud: mail, calendar and contacts ([Microsoft](https://support.microsoft.com/en-us/outlook/getstarted/sync-your-account-in-outlook-to-the-microsoft-cloud)) |
-| **Ads** | None, and no ad IDs | The free version shows ads in the inbox and passes a cookie or device ID to ad networks; removing them takes a Microsoft 365 subscription ([Microsoft](https://support.microsoft.com/en-us/outlook/about-ads-in-outlook)) |
+| **Ads** | None, and no ad IDs | With a free personal account it shows ads in the inbox and passes a cookie or device ID to ad networks; removing them takes a Microsoft 365 subscription ([Microsoft](https://support.microsoft.com/en-us/outlook/about-ads-in-outlook)) |
 | **Price** | Free, MIT licence | Free with ads, or a Microsoft 365 subscription ([Microsoft](https://support.microsoft.com/en-us/outlook/about-ads-in-outlook)) |
 
 Poczta does not have Microsoft's own sign-in yet, which Outlook.com, Microsoft 365 and Exchange accounts
-need. There is no version for macOS, Linux or phones.
+need; such a mailbox works only through IMAP, where its server allows that. There is no version for macOS, Linux or phones.
 
 ## What you get
 
-**Fast, even with a big mailbox.** The list appears about 60 ms after the window opens, a 78,000-message
+**Fast, even with a big mailbox.** The mailbox is read from disk in about 60 ms, a 78,000-message
 mailbox is on screen in under a second, and at rest Poczta measured 0.0–0.8% of one CPU core, so it stays
 quiet in the background. Syncing and indexing run in background threads, so scrolling and reading do not
 wait for the network ([measurements](#performance)).
@@ -56,21 +56,22 @@ wait for the network ([measurements](#performance)).
 ### Conversations and history
 Never lose the thread of who said what.
 - **Conversations in one place:** the open message expanded, earlier ones folded into cards.
-- **History** next to any message: everything you and that person sent each other, one click away.
+- **History** next to any message: the mail that person sent you and the mail you sent straight to them, one click away.
 - **New mail as soon as the server signals it** (IMAP IDLE), with a sound, a counter on the icon
   and a notification, also when Poczta sits in the tray.
-- **Your way of sorting:** Unread, Flagged and "Unanswered (7 days)" views, Gmail labels, favorites and
-  your own folders; drag messages onto a folder or tag. Gmail filters can be created and edited in the app.
-- Several accounts at once: Gmail with Google sign-in, or IMAP/SMTP mailboxes that accept a password.
+- **Your way of sorting:** Unread, Flagged and "Unanswered (7 days)" views, and in Gmail also labels,
+  favorites and your own folders, with messages dragged onto a folder or tag. Gmail filters can be created and edited in the app.
+- Several accounts at once: the main one with Google sign-in or a password, further ones with a password
+  (for Gmail, an app password).
 
 <table>
 <tr>
 <td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/en/thread-dark.png"><img src="docs/screenshots/en/thread.png" alt="A conversation: earlier messages folded into cards above the open one"></picture></td>
-<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/en/history-dark.png"><img src="docs/screenshots/en/history.png" alt="The History panel next to an open message: all mail exchanged with the sender"></picture></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/en/history-dark.png"><img src="docs/screenshots/en/history.png" alt="The History panel next to an open message: mail exchanged with the sender"></picture></td>
 </tr>
 <tr>
 <td align="center"><sub>A conversation, earlier messages folded</sub></td>
-<td align="center"><sub>History: all mail with this person</sub></td>
+<td align="center"><sub>History: your mail with this person</sub></td>
 </tr>
 </table>
 
@@ -84,7 +85,7 @@ Format as you type, without reaching for a toolbar.
 ### Invitations, calendar and Google Chat
 Your day next to your mail, so you answer invitations knowing what clashes.
 - **Invitations** get Accept · Maybe · Decline right above the message, with a note of what clashes in
-  your calendar. A reminder pops up 10 minutes before each meeting.
+  your calendar. A reminder pops up 10 minutes before each meeting with a set time.
 - **Calendar** in month and week views, plus a day panel next to your mail, synced with Google Calendar
   both ways.
 - **Google Chat** for Google Workspace accounts, in the same window.
@@ -142,7 +143,9 @@ switches at once), and the classic layout: folders | list | message | calendar d
    this repository with a provenance attestation: `gh attestation verify Poczta-….exe -R jarx-dev/MailsRust`.
 3. **Run it.** There is nothing to install. Windows SmartScreen may warn about an unknown publisher:
    "More info" → "Run anyway".
-4. **Add your account**: Gmail with Google sign-in, or an IMAP/SMTP mailbox. Your mail stays on the
+4. **Add your account**: Gmail with Google sign-in, or an IMAP/SMTP mailbox. The first Google sign-in
+   needs a one-time setup of your own Google Cloud project (about 5 minutes, the app walks you through
+   it); a Gmail app password over IMAP skips it. Your mail stays on the
    server as before; Poczta keeps its own copy in `%LOCALAPPDATA%\Poczta`. On this first start it also
    downloads the search-by-meaning model once (about 500 MB).
 
@@ -173,17 +176,20 @@ Details and how it was measured: [PERF.md](PERF.md).
 ## Privacy at a glance
 
 **Your mail never passes through a server of ours: Poczta syncs with your mail provider directly.
-Message text goes to an AI service only when you set one up and click an AI feature.**
+Mail goes to an AI service only when you set one up and click an AI feature, or switch on AI agents (below).**
 
-- Your copy of the mail is one file on your PC. Passwords are encrypted with your Windows account key (DPAPI).
-- No analytics and no tracking. Everything Poczta connects to:
-  - your mail server, and Google for sign-in, Gmail, Calendar and Chat;
-  - the servers that host pictures inside a message you open, as in most mail apps;
+- Your copy of the mail stays on your PC: a database and a cache folder in `%LOCALAPPDATA%\Poczta`. Passwords are encrypted with your Windows account key (DPAPI).
+- No analytics and no tracking by Poczta. Everything Poczta connects to:
+  - your mail server, and Google for sign-in, Gmail, Calendar, Contacts and Chat;
+  - the servers that host pictures and styles inside a message you open (Poczta opens the newest one
+    at start), so, as in most mail apps, a sender can tell it was opened;
+  - addresses you add yourself: iCal calendars and an autoresponder link;
   - Google's public site-icon service, for the logos of companies that write to you (it sees their domain);
   - Hugging Face, once, to download the search-by-meaning model;
   - GitHub, to check for and download new releases;
   - errors.jarx.pl, to send a short crash report you can switch off ([exactly what it contains](#crash-reports));
-  - the AI service you set up yourself, if any: only the text you ask it to fix, translate or check, and only when you click.
+  - the AI service you set up yourself, if any: only what the feature you click needs, such as the text
+    to fix or translate, or for a phishing check the sender, headers, links and attachment names.
 
 ## Crash reports
 
